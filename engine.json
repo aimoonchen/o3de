@@ -14,6 +14,7 @@
     "copyright_year": 2023,
     "build": 0,
     "external_subdirectories": [
+        "Gems/CrossEngineEditor",
         "Gems/Achievements",
         "Gems/AFR",
         "Gems/Archive",
@@ -111,9 +112,7 @@
         "PrefabBuilder",
         "SceneProcessing"
     ],
-    "projects": [
-        "AutomatedTesting"
-    ],
+    "projects": [],
     "templates": [
         "Templates/AssetGem",
         "Templates/AddTestsToProject",

@@ -1,0 +1,19 @@
+{
+    "gem_name": "CrossEngineEditor",
+    "version": "0.1.0",
+    "display_name": "Cross-Engine Editor",
+    "license": "Apache-2.0 Or MIT",
+    "origin": "Cross-Engine Editor Project",
+    "type": "Tool",
+    "summary": "A cross-engine, all-in-one game editor built on AzToolsFramework with no engine runtime dependency. Engines plug in via a backend contract.",
+    "canonical_tags": [
+        "Gem"
+    ],
+    "user_tags": [
+        "Tool",
+        "Editor"
+    ],
+    "requirements": "",
+    "documentation_url": "",
+    "dependencies": []
+}
