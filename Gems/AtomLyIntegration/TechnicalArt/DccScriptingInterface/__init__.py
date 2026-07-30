@@ -741,16 +741,14 @@ if DCCSI_TEST_PYSIDE:
         QT_PLUGIN_PATH = None
 
     if not QT_PLUGIN_PATH:
-        # fallback, not future proof without editing file
-        # path to PySide could change! (this is a prototype)
-        # modify to be a grep?
-        # path constructor
-        QT_PLUGIN_PATH = Path(PATH_O3DE_3RDPARTY,
-                              'packages',
-                              'pyside2-5.15.2.1-py3.10-rev3-windows',
-                                'pyside2',
-                                'lib',
-                                'site-packages')
+        # Qt6 upgrade: PySide2 3rdParty package is gone; PySide6 is pip-installed
+        # into the O3DE Python venv. Resolve the plugin path from the installed
+        # PySide6 package location rather than a hard-coded 3rdParty package path.
+        try:
+            import PySide6
+            QT_PLUGIN_PATH = Path(PySide6.__file__).parent / 'plugins'
+        except Exception:
+            QT_PLUGIN_PATH = None
 
     try:
         QT_PLUGIN_PATH = QT_PLUGIN_PATH.resolve(strict=True)

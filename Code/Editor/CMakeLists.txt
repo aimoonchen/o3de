@@ -192,20 +192,39 @@ if(LY_DEFAULT_PROJECT_PATH)
     set_property(TARGET Editor APPEND PROPERTY VS_DEBUGGER_COMMAND_ARGUMENTS "--project-path=\"${LY_DEFAULT_PROJECT_PATH}\"")
 endif()
 
-# Qt6 runtime deployment: the pre-built Qt5 package used to copy its DLLs
-# automatically; with a system Qt6 we must deploy the runtime explicitly or
-# Editor.exe fails to start. windeployqt is Windows-only.
+# Qt6 runtime deployment: the pre-built Qt package used to copy its DLLs
+# automatically. windeployqt now comes from the vendored Qt6 3rdParty package
+# (QT_WINDEPLOYQT_EXECUTABLE is set by qt-6.11.1-rev1-windows/FindQt.cmake), so
+# deployment no longer depends on a machine-local Qt6_DIR. windeployqt is
+# Windows-only. It copies the Qt DLLs + plugins (platforms/styles/imageformats/
+# iconengines) next to the executable for each config's output dir.
 if(PAL_HOST_PLATFORM_NAME_LOWERCASE STREQUAL "windows")
-    find_program(WINDEPLOYQT_EXE windeployqt HINTS "${Qt6_DIR}/../../../bin")
-    if(WINDEPLOYQT_EXE)
+    if(NOT QT_WINDEPLOYQT_EXECUTABLE)
+        # Fallback: locate it next to the Qt6 config dir resolved by find_package.
+        find_program(QT_WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${Qt6_DIR}/../../../bin")
+    endif()
+    if(QT_WINDEPLOYQT_EXECUTABLE)
+        set(_ly_wdq_config $<$<CONFIG:debug>:--debug> $<$<CONFIG:profile,release>:--release>)
+        set(_ly_wdq_flags --no-translations --no-system-d3d-compiler --no-opengl-sw)
+        # Pass 1: deploy against Editor.exe itself. Editor.exe only links Qt6Core
+        # directly (its GUI usage is transitive through AzQtComponents.dll), so
+        # this alone would NOT pull the QtGui/Widgets plugins.
         add_custom_command(TARGET Editor POST_BUILD
-            COMMAND "${WINDEPLOYQT_EXE}"
-                    $<$<CONFIG:debug>:--debug> $<$<CONFIG:profile,release>:--release>
-                    --no-translations --no-system-d3d-compiler --no-opengl-sw
+            COMMAND "${QT_WINDEPLOYQT_EXECUTABLE}" ${_ly_wdq_config} ${_ly_wdq_flags}
                     "$<TARGET_FILE:Editor>"
             COMMENT "Deploying Qt6 runtime next to Editor.exe")
+        # Pass 2: deploy against AzQtComponents.dll (links Qt6Widgets/Gui/Svg
+        # directly) into Editor's output dir. This is what reliably brings the
+        # QtGui/Widgets plugin dirs (platforms/qwindows.dll, styles, imageformats,
+        # iconengines) that the platform abstraction needs to initialize. Without
+        # it Editor fails with "no Qt platform plugin could be initialized".
+        add_custom_command(TARGET Editor POST_BUILD
+            COMMAND "${QT_WINDEPLOYQT_EXECUTABLE}" ${_ly_wdq_config} ${_ly_wdq_flags}
+                    --dir "$<TARGET_FILE_DIR:Editor>"
+                    "$<TARGET_FILE_DIR:Editor>/$<TARGET_FILE_NAME:AzQtComponents>"
+            COMMENT "Deploying Qt6 GUI plugins (platforms/styles/imageformats) next to Editor.exe")
     else()
-        message(WARNING "windeployqt not found under ${Qt6_DIR}/../../../bin; Editor.exe may fail to launch without a manual Qt6 deploy")
+        message(WARNING "windeployqt not found in the vendored Qt6 package; Editor.exe may fail to launch without a manual Qt6 deploy")
     endif()
 endif()
 

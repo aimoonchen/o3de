@@ -39,7 +39,12 @@ import azpy.shared.ui.qt_settings as qt_settings
 import azpy.shared.ui.help_menu as help_menu
 import azpy.shared.ui.pyside2_ui_utils as ui_utils
 
-import pyside2uic
+# Qt6/PySide6: 'pyside2uic' has no PySide6 equivalent importable module (use the
+# 'pyside6-uic' CLI or QUiLoader). Import is optional so this module can load.
+try:
+    import pyside2uic
+except ImportError:
+    pyside2uic = None
 import PySide6.QtCore as QtCore
 import PySide6.QtWidgets as QtWidgets
 import PySide6.QtGui as QtGui

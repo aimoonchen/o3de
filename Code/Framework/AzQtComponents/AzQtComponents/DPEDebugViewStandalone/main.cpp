@@ -384,8 +384,8 @@ int main(int argc, char** argv)
         settingsRegistry->Get(engineRootPath.Native(), AZ::SettingsRegistryMergeUtils::FilePathKey_EngineRootFolder);
     }
     AzQtComponents::PrepareQtPaths();
-    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+    // Qt6: AA_EnableHighDpiScaling / AA_UseHighDpiPixmaps were removed; high-DPI
+    // scaling and pixmaps are always enabled in Qt6.
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 
     QApplication qtApp(argc, argv);

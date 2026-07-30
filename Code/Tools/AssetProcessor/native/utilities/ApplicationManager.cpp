@@ -128,10 +128,10 @@ namespace AssetProcessor
     };
 }
 
-uint qHash(const AZ::Uuid& key, uint seed)
+size_t qHash(const AZ::Uuid& key, size_t seed)
 {
     (void) seed;
-    return azlossy_caster(AZStd::hash<AZ::Uuid>()(key));
+    return static_cast<size_t>(AZStd::hash<AZ::Uuid>()(key));
 }
 
 namespace AssetProcessorBuildTarget

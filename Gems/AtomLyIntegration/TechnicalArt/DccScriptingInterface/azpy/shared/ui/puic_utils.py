@@ -45,7 +45,12 @@ import DccScriptingInterface.config as dccsi_core_config
 
 # ensure api access to the optional inclusion of pyside2tools
 from DccScriptingInterface.azpy.shared.ui import PATH_DCCSI_PYTHON_LIB
-from pyside2tools import pyside2uic
+# Qt6/PySide6: 'pyside2uic' has no PySide6 equivalent importable module (use the
+# 'pyside6-uic' CLI or QUiLoader). Import is optional so this module can load.
+try:
+    from pyside2tools import pyside2uic
+except ImportError:
+    pyside2uic = None
 
 # this accesses common global state, e.g. DCCSI_GDEBUG (is True or False)
 from DccScriptingInterface.globals import *

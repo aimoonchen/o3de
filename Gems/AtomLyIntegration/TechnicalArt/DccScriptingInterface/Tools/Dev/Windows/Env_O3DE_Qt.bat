@@ -33,18 +33,17 @@ echo.
 :: Those apps provide their own Qt bins and Pyside packages (Wing, Substance, Maya, etc.)
 :: set up Qt/Pyside paths
 
-:: set up PySide2/Shiboken
-:: notice: the way Qy/PySide2/shiboken2 are set up has changed for release 2210
+:: set up PySide6/Shiboken
+:: Qt6 upgrade: Qt6 is a vendored 3rdParty package; PySide6 is pip-installed into
+:: the O3DE Python venv (no longer a copyable pyside2 3rdParty package).
 
-set "QT_BIN_DIR=packages\qt-5.15.2-rev7-windows\qt\bin"
+set "QT_BIN_DIR=packages\qt-6.11.1-rev1-windows\qt\bin"
 
 IF "%QT_PLUGIN_PATH%"=="" (set "QT_PLUGIN_PATH=%PATH_O3DE_3RDPARTY%\%QT_BIN_DIR%")
 echo     QT_PLUGIN_PATH = %QT_PLUGIN_PATH%
 
-set "QTPY_PKG_DIR=packages\pyside2-5.15.2.1-py3.10-rev3-windows\pyside2\lib\site-packages"
-
-IF "%QTFORPYTHON_PATH%"=="" (set "QTFORPYTHON_PATH=%PATH_O3DE_3RDPARTY%\%QTPY_PKG_DIR%")
-echo     QTFORPYTHON_PATH = %QTFORPYTHON_PATH%
+:: PySide6 lives in the O3DE Python venv (pip). Leave QTFORPYTHON_PATH unset here;
+:: it resolves via the engine Python path at runtime.
 
 ::ENDLOCAL
 

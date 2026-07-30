@@ -862,10 +862,10 @@ function(ly_get_vs_folder_directory absolute_target_source_dir output_source_dir
     set(${output_source_dir} ${relative_target_source_dir} PARENT_SCOPE)
 endfunction()
 
-# ly_add_translations: previously provided by the pre-built Qt5 package. With a
-# system Qt6 we redefine it using Qt6 LinguistTools. It compiles the given .ts
-# files to .qm (via qt_add_lrelease) and EMBEDS them into the target as Qt
-# resources under ":/<PREFIX>/<name>.qm", matching the old Qt5 package behaviour.
+# ly_add_translations: previously provided by the pre-built Qt package. With the
+# vendored Qt6 package we redefine it using Qt6 tools. It compiles the given .ts
+# files to .qm (invoking lrelease directly) and EMBEDS them into the target as Qt
+# resources under ":/<PREFIX>/<name>.qm", matching the old Qt package behaviour.
 #
 # IMPORTANT: the editor loads translations from the *resource* path (e.g.
 # QtEditorApplication.cpp: CreateAndInitializeTranslator(..., ":/Translations")
@@ -873,6 +873,12 @@ endfunction()
 # next to the executable would leave ":/Translations/*.qm" absent -> silent
 # translation loss in release and a startup assert in debug. So we must compile
 # the .qm into the binary via qt_add_resources.
+#
+# NOTE: we invoke lrelease directly (QT_LRELEASE_EXECUTABLE, exported by the Qt6
+# package's FindQt.cmake) instead of the versionless qt_add_lrelease wrapper.
+# FindQt runs inside a function scope (ly_parse_third_party_dependencies), so the
+# Qt namespace variables that qt_add_lrelease's generator expressions rely on
+# (e.g. QT_CMAKE_EXPORT_NAMESPACE -> Qt6::lrelease) are not visible here.
 function(ly_add_translations)
     set(options)
     set(oneValueArgs PREFIX)
@@ -885,10 +891,24 @@ function(ly_add_translations)
     if(NOT ly_add_translations_FILES)
         message(FATAL_ERROR "ly_add_translations requires at least one .ts file in FILES")
     endif()
+    if(NOT QT_LRELEASE_EXECUTABLE)
+        message(FATAL_ERROR "ly_add_translations: QT_LRELEASE_EXECUTABLE not set (Qt6 package FindQt.cmake did not run?)")
+    endif()
 
-    # Compile .ts -> .qm once. qt_add_lrelease creates a build target and reports
-    # the produced .qm file paths in the given OUTPUT variable.
-    qt_add_lrelease(TS_FILES ${ly_add_translations_FILES} QM_FILES_OUTPUT_VARIABLE qm_files)
+    # Compile each .ts -> .qm via a direct lrelease custom command.
+    set(qm_files "")
+    foreach(ts_file ${ly_add_translations_FILES})
+        get_filename_component(ts_name "${ts_file}" NAME_WE)
+        get_filename_component(ts_abs "${ts_file}" ABSOLUTE)
+        set(qm_file "${CMAKE_CURRENT_BINARY_DIR}/${ts_name}.qm")
+        add_custom_command(
+            OUTPUT "${qm_file}"
+            COMMAND "${QT_LRELEASE_EXECUTABLE}" -silent "${ts_abs}" -qm "${qm_file}"
+            MAIN_DEPENDENCY "${ts_abs}"
+            COMMENT "lrelease ${ts_name}.ts -> ${ts_name}.qm"
+            VERBATIM)
+        list(APPEND qm_files "${qm_file}")
+    endforeach()
 
     foreach(target_name ${ly_add_translations_TARGETS})
         # Alias each generated .qm under the requested resource prefix so it

@@ -60,7 +60,7 @@ filteredSearchWidget-&gt;addTypeFilter("Category name", "Type name");
 // Attach the FilterText FilteredSearchWidget to a QSortFilterProxyModel derived class:
 MyProxyModel proxyModel;
 connect(filteredSearchWidget, &AzQtComponents::FilteredSearchWidget::TextFilterChanged,
-        proxyModel, static_cast&lt;void (QSortFilterProxyModel::*)(const QString&)&gt;(&MyProxyModel::setFilterRegExp));
+        proxyModel, static_cast&lt;void (QSortFilterProxyModel::*)(const QString&)&gt;(&MyProxyModel::setFilterRegularExpression));
 
 // Attach the TypeFilter to a proxy model that has a slot which can handle
 // FilteredSearchWidget::TypeFilterChanged(const SearchTypeFilterList& activeTypeFilters)

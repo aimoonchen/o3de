@@ -63,7 +63,7 @@ private:
 struct ApplicationDependencyInfo;
 
 //This global function is required, if we want to use uuid as a key in a QSet
-uint qHash(const AZ::Uuid& key, uint seed = 0);
+size_t qHash(const AZ::Uuid& key, size_t seed = 0);
 
 //! This class allows you to register any number of objects to it
 //! and when quit is requested, it will send a signal "QuitRequested()" to the registered object.
