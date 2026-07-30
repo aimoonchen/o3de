@@ -39,6 +39,7 @@
 #include <Source/LUA/LUALocalsTrackerMessages.h>
 
 #include <QMessageBox>
+#include <QPushButton>
 #include <regex>
 
 #include "LUAEditorContextInterface.h"
@@ -477,12 +478,13 @@ namespace LUAEditor
                 QMessageBox msgBox(this->m_pLUAEditorMainWindow);
                 msgBox.setText("A file has been modified by an outside program. Would you like to reload it from disk? If you do, you will lose any unsaved changes.");
                 msgBox.setInformativeText(info.m_assetName.c_str());
-                msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-                msgBox.setButtonText(QMessageBox::Yes, "Reload From Disk");
-                msgBox.setButtonText(QMessageBox::No, "Don't reload");
-                msgBox.setDefaultButton(QMessageBox::No);
+                QPushButton* reloadButton = msgBox.addButton("Reload From Disk", QMessageBox::YesRole);
+                QPushButton* dontReloadButton = msgBox.addButton("Don't reload", QMessageBox::NoRole);
                 msgBox.setIcon(QMessageBox::Question);
-                shouldReload = (msgBox.exec() == QMessageBox::Yes);
+                // Default to the safe choice: pressing Enter must NOT discard unsaved changes.
+                msgBox.setDefaultButton(dontReloadButton);
+                msgBox.exec();
+                shouldReload = (msgBox.clickedButton() == reloadButton);
             }
 
             if (shouldAutoReload || shouldReload)

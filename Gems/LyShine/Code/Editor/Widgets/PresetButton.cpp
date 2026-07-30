@@ -8,6 +8,7 @@
 #include "PresetButton.h"
 
 #include <QString>
+#include <QEnterEvent>
 
 PresetButton::PresetButton(
     const QString& defaultIconPath,
@@ -35,7 +36,7 @@ PresetButton::PresetButton(
     QObject::connect(this, &QAbstractButton::toggled, this, &PresetButton::UpdateIcon);
 }
 
-void PresetButton::enterEvent(QEvent* ev)
+void PresetButton::enterEvent(QEnterEvent* ev)
 {
     m_isHovering = true;
 

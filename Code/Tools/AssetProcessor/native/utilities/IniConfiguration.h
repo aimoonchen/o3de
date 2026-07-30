@@ -11,6 +11,7 @@
 #if !defined(Q_MOC_RUN)
 #include <QDir>
 #include <QString>
+#include <QStringList>
 #include <QCoreApplication>
 #endif
 

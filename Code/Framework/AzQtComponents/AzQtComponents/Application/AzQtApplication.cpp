@@ -26,8 +26,6 @@ namespace AzQtComponents
 
     void AzQtApplication::InitializeDpiScaling()
     {    
-         QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-         QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
          QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
          QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
          AzQtComponents::Utilities::HandleDpiAwareness(AzQtComponents::Utilities::SystemDpiAware);

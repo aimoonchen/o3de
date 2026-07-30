@@ -20,7 +20,6 @@
 #include <AzFramework/StringFunc/StringFunc.h>
 
 #include <QApplication>
-#include <QDesktopWidget>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
@@ -212,7 +211,7 @@ namespace AzQtComponents
         }
 
         QStyleOption options;
-        options.init(this);
+        options.initFrom(this);
         const int hmargin = style->pixelMetric(QStyle::PM_MenuHMargin, &options, this);
         const int vmargin = style->pixelMetric(QStyle::PM_MenuVMargin, &options, this);
 
@@ -646,7 +645,8 @@ namespace AzQtComponents
     void SearchTypeSelectorFilterModel::setNoResultsMessageRow(int row)
     {
         m_noResultsRow = row;
-        invalidateFilter();
+        beginFilterChange();
+        endFilterChange(QSortFilterProxyModel::Direction::Rows);
     }
 
 

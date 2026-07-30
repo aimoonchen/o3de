@@ -40,10 +40,10 @@ import azpy.shared.ui.help_menu as help_menu
 import azpy.shared.ui.pyside2_ui_utils as ui_utils
 
 import pyside2uic
-import PySide2.QtCore as QtCore
-import PySide2.QtWidgets as QtWidgets
-import PySide2.QtGui as QtGui
-import PySide2.QtUiTools as QtUiTools
+import PySide6.QtCore as QtCore
+import PySide6.QtWidgets as QtWidgets
+import PySide6.QtGui as QtGui
+import PySide6.QtUiTools as QtUiTools
 
 # -------------------------------------------------------------------------
 #  global space debug flag
@@ -105,9 +105,9 @@ _DARK_STYLE = Path(_MODULE_PATH.parent, 'resources', 'qdarkstyle', 'style.qss')
 
 # pattern 3, use QUiLoader
 # you need to know the main widget class (QtWidgets.QWidget), load .ui form within class
-#from PySide2.QtUiTools import QUiLoader
-#from PySide2 import QtWidgets
-#from PySide2.QtCore import QFile
+#from PySide6.QtUiTools import QUiLoader
+#from PySide6 import QtWidgets
+#from PySide6.QtCore import QFile
 
 #class MyForm(QtWidgets.QWidget):
     #def __init__(self, parent=None):
@@ -141,7 +141,7 @@ _DARK_STYLE = Path(_MODULE_PATH.parent, 'resources', 'qdarkstyle', 'style.qss')
 # here is basically what that returns ...
 #parsed_xml = xml.parse(ui_file)
 # form_class = parsed_xml.find('class').text              # --> <class 'Ui_Form'>
-# widget_class = parsed_xml.find('widget').get('class')   # --> <class 'PySide2.QtWidgets.QWidget'>
+# widget_class = parsed_xml.find('widget').get('class')   # --> <class 'PySide6.QtWidgets.QWidget'>
 
 #class MyToolWidget(TemplateToolWidget):
     #def __init__(self, parent, *args, **kwargs):
@@ -392,7 +392,7 @@ class TemplateMainWindow(QtWidgets.QMainWindow):
 
         # Exit QAction on hotkey
         exit_tag = "Exit"
-        exit_action = QtWidgets.QAction(exit_tag, self)
+        exit_action = QtGui.QAction(exit_tag, self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
 

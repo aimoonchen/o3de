@@ -8,7 +8,7 @@
 #pragma once
 
 class QString;
-class QStringList;
+#include <QStringList>
 
 #include <QLibrary>
 #include <QVector>

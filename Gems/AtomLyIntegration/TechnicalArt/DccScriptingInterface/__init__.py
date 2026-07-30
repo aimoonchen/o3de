@@ -780,11 +780,11 @@ if DCCSI_TEST_PYSIDE:
         add_site_dir(O3DE_QT_BIN)
 
     try:
-        import PySide2
-        from PySide2.QtWidgets import QPushButton
+        import PySide6
+        from PySide6.QtWidgets import QPushButton
         _LOGGER.info('PySide2 bootstrapped PATH for Windows.')
     except ImportError as e:
-        _LOGGER.warning('Cannot import PySide2.')
+        _LOGGER.warning('Cannot import PySide6.')
         _LOGGER.error(f'{e} , traceback =', exc_info=True)
         if DCCSI_STRICT:
             _LOGGER.exception(f'{e} , traceback =', exc_info=True)

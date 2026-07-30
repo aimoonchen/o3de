@@ -71,7 +71,7 @@ void QtViewport::dragEnterEvent(QDragEnterEvent* event)
         // new bus-based way of doing it (install a listener!)
         using namespace AzQtComponents;
         ViewportDragContext context;
-        BuildDragDropContext(context, GetViewportId(), event->pos());
+        BuildDragDropContext(context, GetViewportId(), event->position().toPoint());
         DragAndDropEventsBus::Event(DragAndDropContexts::EditorViewport, &DragAndDropEvents::DragEnter, event, context);
     }
 }
@@ -94,7 +94,7 @@ void QtViewport::dragMoveEvent(QDragMoveEvent* event)
         // new bus-based way of doing it (install a listener!)
         using namespace AzQtComponents;
         ViewportDragContext context;
-        BuildDragDropContext(context, GetViewportId(), event->pos());
+        BuildDragDropContext(context, GetViewportId(), event->position().toPoint());
         DragAndDropEventsBus::Event(DragAndDropContexts::EditorViewport, &DragAndDropEvents::DragMove, event, context);
     }
 }
@@ -110,19 +110,19 @@ void QtViewport::dropEvent(QDropEvent* event)
     // first use the legacy pathway, which assumes its always okay as long as any callback is installed
     if (m_dropCallback)
     {
-        m_dropCallback(this, event->pos().x(), event->pos().y(), m_dropCallbackCustom);
+        m_dropCallback(this, event->position().toPoint().x(), event->position().toPoint().y(), m_dropCallbackCustom);
         event->setAccepted(true);
     }
     else
     {
         // new bus-based way of doing it (install a listener!)
         ViewportDragContext context;
-        BuildDragDropContext(context, GetViewportId(), event->pos());
+        BuildDragDropContext(context, GetViewportId(), event->position().toPoint());
         DragAndDropEventsBus::Event(DragAndDropContexts::EditorViewport, &DragAndDropEvents::Drop, event, context);
         if (event->isAccepted())
         {
             // send focus to whatever window accepted it.  Its not necessarily this window, as it might be a child embedded in it.
-            QWidget* widget = qApp->widgetAt(event->pos());
+            QWidget* widget = qApp->widgetAt(event->position().toPoint());
             if (widget)
             {
                 widget->setFocus(Qt::MouseFocusReason);
@@ -389,13 +389,13 @@ void QtViewport::mousePressEvent(QMouseEvent* event)
     switch (event->button())
     {
     case Qt::LeftButton:
-        OnLButtonDown(event->modifiers(), event->pos());
+        OnLButtonDown(event->modifiers(), event->position().toPoint());
         break;
     case Qt::MiddleButton:
-        OnMButtonDown(event->modifiers(), event->pos());
+        OnMButtonDown(event->modifiers(), event->position().toPoint());
         break;
     case Qt::RightButton:
-        OnRButtonDown(event->modifiers(), event->pos());
+        OnRButtonDown(event->modifiers(), event->position().toPoint());
         break;
     }
 }
@@ -405,13 +405,13 @@ void QtViewport::mouseReleaseEvent(QMouseEvent* event)
     switch (event->button())
     {
     case Qt::LeftButton:
-        OnLButtonUp(event->modifiers(), event->pos());
+        OnLButtonUp(event->modifiers(), event->position().toPoint());
         break;
     case Qt::MiddleButton:
-        OnMButtonUp(event->modifiers(), event->pos());
+        OnMButtonUp(event->modifiers(), event->position().toPoint());
         break;
     case Qt::RightButton:
-        OnRButtonUp(event->modifiers(), event->pos());
+        OnRButtonUp(event->modifiers(), event->position().toPoint());
         break;
     }
 
@@ -425,20 +425,20 @@ void QtViewport::mouseDoubleClickEvent(QMouseEvent* event)
     switch (event->button())
     {
     case Qt::LeftButton:
-        OnLButtonDblClk(event->modifiers(), event->pos());
+        OnLButtonDblClk(event->modifiers(), event->position().toPoint());
         break;
     case Qt::MiddleButton:
-        OnMButtonDblClk(event->modifiers(), event->pos());
+        OnMButtonDblClk(event->modifiers(), event->position().toPoint());
         break;
     case Qt::RightButton:
-        OnRButtonDblClk(event->modifiers(), event->pos());
+        OnRButtonDblClk(event->modifiers(), event->position().toPoint());
         break;
     }
 }
 
 void QtViewport::mouseMoveEvent(QMouseEvent* event)
 {
-    OnMouseMove(event->modifiers(), event->buttons(), event->pos());
+    OnMouseMove(event->modifiers(), event->buttons(), event->position().toPoint());
     OnSetCursor();
 }
 

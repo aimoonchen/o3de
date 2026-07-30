@@ -88,11 +88,7 @@ namespace GraphCanvas
 
     void BookmarkShorcutComboBoxDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const
     {
-#if (QT_VERSION < QT_VERSION_CHECK(5, 11, 0))
-        QStyleOptionViewItemV4 myOption = option;
-#else
         QStyleOptionViewItem myOption = option;
-#endif
         myOption.text = index.model()->data(index, Qt::DisplayRole).toString();
         QApplication::style()->drawControl(QStyle::CE_ItemViewItem, &myOption, painter);
     }
@@ -532,7 +528,8 @@ namespace GraphCanvas
         m_filter = filter;
         m_filterRegex = QRegularExpression(m_filter, QRegularExpression::PatternOption::CaseInsensitiveOption);
 
-        invalidateFilter();
+        beginFilterChange();
+        endFilterChange();
     }
 
     void BookmarkTableSortProxyModel::ClearFilter()

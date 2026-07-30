@@ -12,10 +12,10 @@
 #pragma once
 
 #include <QDirIterator>
+#include <QStringList>
 
 class QFileInfo;
 class QString;
-class QStringList;
 
 class CFileEnum
 {

@@ -17,6 +17,7 @@
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option") // 4251: class '...' needs to have dll-interface to be used by clients of class '...'
                                                                // 4800: 'uint': forcing value to bool 'true' or 'false' (performance warning)
 #include <QWidget>
+#include <QEnterEvent>
 AZ_POP_DISABLE_WARNING
 #endif
 
@@ -59,7 +60,7 @@ namespace AzToolsFramework
 
         bool event(QEvent* e) override;
         void paintEvent(QPaintEvent* e) override;
-        void enterEvent(QEvent* e) override;
+        void enterEvent(QEnterEvent* e) override;
         void leaveEvent(QEvent* e) override;
 
         Thumbnailer::SharedThumbnailKey m_key;

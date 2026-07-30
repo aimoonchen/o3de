@@ -369,7 +369,7 @@ namespace AssetProcessor
 
         if (!listener.WasQuitRequested())
         {
-            QtConcurrent::run(&RCJob::ExecuteBuilderCommand, builderParams);
+            (void)QtConcurrent::run(&RCJob::ExecuteBuilderCommand, builderParams);
         }
         else
         {

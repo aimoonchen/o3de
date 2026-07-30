@@ -48,8 +48,8 @@ namespace AzQtComponents
 
     void TagWidget::mouseMoveEvent(QMouseEvent* event)
     {
-        m_lastMouseX = event->x();
-        m_lastMouseY = event->y();
+        m_lastMouseX = event->position().toPoint().x();
+        m_lastMouseY = event->position().toPoint().y();
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

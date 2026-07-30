@@ -621,9 +621,9 @@ namespace EMotionFX
         const QMimeData* mimeData = QGuiApplication::clipboard()->mimeData();
         const QByteArray clipboardContents = mimeData->data(ColliderHelpers::GetMimeTypeForColliderShape());
 
-        int ypos = event->globalY();
+        int ypos = event->globalPos().y();
         int index = 0;
-        int curpos = mapToGlobal({0,0}).y();
+        int curpos = mapToGlobal(QPoint{0,0}).y();
         for (const ColliderWidget* card : m_colliderWidgets)
         {
             if (!card->GetActor())
@@ -631,7 +631,7 @@ namespace EMotionFX
                 break;
             }
 
-            curpos = card->mapToGlobal({0,0}).y();
+            curpos = card->mapToGlobal(QPoint{0,0}).y();
             if (curpos > ypos)
             {
                 break;

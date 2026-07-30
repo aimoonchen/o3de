@@ -6,10 +6,11 @@ SPDX-License-Identifier: Apache-2.0 OR MIT
 """
 
 import azlmbr
-from shiboken2 import wrapInstance, getCppPointer
-from PySide2 import QtCore, QtWidgets, QtGui
-from PySide2.QtCore import QEvent, Qt
-from PySide2.QtWidgets import QAction, QDialog, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter, QTreeWidget, QTreeWidgetItem, QWidget, QAbstractButton
+from shiboken6 import wrapInstance, getCppPointer
+from PySide6 import QtCore, QtWidgets, QtGui
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtWidgets import QDialog, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter, QTreeWidget, QTreeWidgetItem, QWidget, QAbstractButton
+from PySide6.QtGui import QAction  # Qt6: QAction moved from QtWidgets to QtGui
 
 class OverlayWidget(QWidget):
     def __init__(self, parent=None):
@@ -195,7 +196,7 @@ class ObjectTreeDialog(QDialog):
         # Look for mouse movement events so we can see what widget the mouse is hovered over
         event_type = event.type()
         if event_type == QEvent.MouseMove:
-            global_pos = event.globalPos()
+            global_pos = event.globalPosition().toPoint()  # Qt6: QMouseEvent.globalPos() removed
 
             # Make our popup follow the mouse, but we need to offset it by 1, 1 otherwise
             # the QApplication.widgetAt will always return our popup instead of the Editor

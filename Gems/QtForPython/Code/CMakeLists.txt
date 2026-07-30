@@ -37,7 +37,8 @@ ly_add_target(
             3rdParty::Qt::Widgets
             Gem::EditorPythonBindings.Static
     RUNTIME_DEPENDENCIES
-        3rdParty::pyside2
+        # Qt6 upgrade: PySide6 is pip-installed into the O3DE Python venv (Round 7).
+        3rdParty::pyside6
         3rdParty::Qt::Test
 )
 
@@ -53,7 +54,8 @@ ly_add_target(
         PRIVATE
             Gem::${gem_name}.Editor.Static
     RUNTIME_DEPENDENCIES
-        3rdParty::pyside2::Tools
+        # Qt6 upgrade: pyside6 tools (uic/rcc) from pip PySide6 (Round 7).
+        3rdParty::pyside6::Tools
         Gem::EditorPythonBindings.Editor
 )
 

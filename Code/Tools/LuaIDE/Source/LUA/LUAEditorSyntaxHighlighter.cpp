@@ -7,6 +7,7 @@
  */
 
 #include "LUAEditorSyntaxHighlighter.hxx"
+#include <QStringView>
 #include <Source/LUA/moc_LUAEditorSyntaxHighlighter.cpp>
 #include "LUAEditorStyleMessages.h"
 #include "LUAEditorBlockState.h"
@@ -128,7 +129,7 @@ namespace LUAEditor
         void Reset();
 
         int CurrentLength() const { return m_currentChar - m_start + 1; }
-        QStringRef CurrentString() const { return QStringRef(m_currentString, m_start, CurrentLength()); }
+        QStringView CurrentString() const { return QStringView(*m_currentString).mid(m_start, CurrentLength()); }
         const QString* GetFullLine() const { return m_currentString; }
 
         QTBlockState GetSaveState() const;
@@ -374,7 +375,7 @@ namespace LUAEditor
             return;
         }
 
-        QStringRef token = machine.CurrentString();
+        QStringView token = machine.CurrentString();
         if (token.endsWith(m_bracketEnd))
         {
             if (machine.GetFullLine()->size() >= token.size())
@@ -403,7 +404,7 @@ namespace LUAEditor
     void NumberParserState::Parse(LUASyntaxHighlighter::StateMachine& machine, const QChar& nextChar)
     {
         auto currentString = machine.CurrentString();
-        if (currentString.endsWith("--"))
+        if (currentString.endsWith(QLatin1String("--")))
         {
             machine.SetState(ParserStates::ShortComment, 1);
             return;
@@ -488,11 +489,11 @@ namespace LUAEditor
             }
         }
 
-        if (m_bracketLevel == 0 && nextChar == '\'' && !machine.CurrentString().endsWith("\\'"))
+        if (m_bracketLevel == 0 && nextChar == '\'' && !machine.CurrentString().endsWith(QLatin1String("\\'")))
         {
             m_endNextChar = true;
         }
-        if (m_bracketLevel == 1 && nextChar == '"' && !machine.CurrentString().endsWith("\\\""))
+        if (m_bracketLevel == 1 && nextChar == '"' && !machine.CurrentString().endsWith(QLatin1String("\\\"")))
         {
             m_endNextChar = true;
         }

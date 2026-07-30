@@ -9,7 +9,7 @@
 #include <AzCore/PlatformIncl.h>
 
 #include <QTimer>
-#include <QtWinExtras/QtWin>
+// TODO: Qt6 removed QtWinExtras, needs dedicated porting
 #include <QWidget>
 
 namespace AzQtComponents

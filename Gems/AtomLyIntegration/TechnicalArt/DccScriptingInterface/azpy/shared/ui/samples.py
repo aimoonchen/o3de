@@ -17,7 +17,7 @@
 from pathlib import Path
 import logging as _logging
 #PySide2 imports
-from PySide2 import QtWidgets
+from PySide6 import QtWidgets
 # -------------------------------------------------------------------------
 # global scope
 _MODULENAME = 'azpy.shared.ui.samples'

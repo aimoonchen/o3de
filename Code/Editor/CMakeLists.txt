@@ -192,6 +192,23 @@ if(LY_DEFAULT_PROJECT_PATH)
     set_property(TARGET Editor APPEND PROPERTY VS_DEBUGGER_COMMAND_ARGUMENTS "--project-path=\"${LY_DEFAULT_PROJECT_PATH}\"")
 endif()
 
+# Qt6 runtime deployment: the pre-built Qt5 package used to copy its DLLs
+# automatically; with a system Qt6 we must deploy the runtime explicitly or
+# Editor.exe fails to start. windeployqt is Windows-only.
+if(PAL_HOST_PLATFORM_NAME_LOWERCASE STREQUAL "windows")
+    find_program(WINDEPLOYQT_EXE windeployqt HINTS "${Qt6_DIR}/../../../bin")
+    if(WINDEPLOYQT_EXE)
+        add_custom_command(TARGET Editor POST_BUILD
+            COMMAND "${WINDEPLOYQT_EXE}"
+                    $<$<CONFIG:debug>:--debug> $<$<CONFIG:profile,release>:--release>
+                    --no-translations --no-system-d3d-compiler --no-opengl-sw
+                    "$<TARGET_FILE:Editor>"
+            COMMENT "Deploying Qt6 runtime next to Editor.exe")
+    else()
+        message(WARNING "windeployqt not found under ${Qt6_DIR}/../../../bin; Editor.exe may fail to launch without a manual Qt6 deploy")
+    endif()
+endif()
+
 ################################################################################
 # Tests
 ################################################################################

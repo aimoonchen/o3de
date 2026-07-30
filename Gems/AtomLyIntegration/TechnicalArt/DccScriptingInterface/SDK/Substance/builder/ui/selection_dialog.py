@@ -10,11 +10,11 @@
 # -------------------------------------------------------------------------
 import sys, os
 
-from PySide2 import QtCore, QtWidgets
-from PySide2.QtCore import QTimer
-from PySide2.QtCore import QProcess, Signal, Slot, QTextCodec
-from PySide2.QtGui import QTextCursor
-from PySide2.QtWidgets import QApplication, QPlainTextEdit
+from PySide6 import QtCore, QtWidgets
+from PySide6.QtCore import QTimer
+from PySide6.QtCore import QProcess, Signal, Slot
+from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QApplication, QPlainTextEdit
 sys.path.insert(0, os.path.abspath('../..'))
 import builder
 # sys.path.insert(0, os.path.abspath('../ui/'))
@@ -301,8 +301,8 @@ class ProcessOutputReader(QProcess):
         # merge stderr channel into stdout channel
         self.setProcessChannelMode(QProcess.MergedChannels)
         # prepare decoding process' output to Unicode
-        self._codec = QTextCodec.codecForLocale()
-        self._decoder_stdout = self._codec.makeDecoder()
+        import locale as _pylocale  # Qt6: QTextCodec removed
+        self._stdout_encoding = _pylocale.getpreferredencoding(False) or "utf-8"
         # only necessary when stderr channel isn't merged into stdout:
         # self._decoder_stderr = codec.makeDecoder()
 
@@ -313,7 +313,7 @@ class ProcessOutputReader(QProcess):
     @Slot()
     def _ready_read_standard_output(self):
         raw_bytes = self.readAllStandardOutput()
-        text = self._decoder_stdout.toUnicode(raw_bytes)
+        text = bytes(raw_bytes.data()).decode(self._stdout_encoding, errors="replace")
         self.produce_output.emit(text)
 
     # only necessary when stderr channel isn't merged into stdout:

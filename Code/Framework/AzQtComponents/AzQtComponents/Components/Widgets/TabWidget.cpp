@@ -17,6 +17,7 @@
 
 #include <QAction>
 #include <QActionEvent>
+#include <QEnterEvent>
 #include <QApplication>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -441,10 +442,9 @@ namespace AzQtComponents
         m_overflowing = OverflowUnchecked;
     }
 
-    void TabBar::enterEvent(QEvent* event)
+    void TabBar::enterEvent(QEnterEvent* event)
     {
-        auto enterEvent = static_cast<QEnterEvent*>(event);
-        m_hoveredTab = tabAt(enterEvent->pos());
+        m_hoveredTab = tabAt(event->position().toPoint());
 
         QTabBar::enterEvent(event);
     }

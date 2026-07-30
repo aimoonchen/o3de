@@ -12,8 +12,6 @@ find_library(CORE_GRAPHICS_LIBRARY CoreGraphics)
 find_library(CORE_SERVICES_LIBRARY CoreServices)
 
 set(LY_BUILD_DEPENDENCIES
-    PUBLIC
-        3rdParty::Qt::MacExtras
     PRIVATE
         ${FOUNDATION_LIBRARY}
         ${OPENGL_LIBRARY}

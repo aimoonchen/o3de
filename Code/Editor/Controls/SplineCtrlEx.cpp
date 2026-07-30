@@ -8,6 +8,7 @@
 
 
 #include "EditorDefs.h"
+#include <AzCore/Casting/numeric_cast.h>
 
 #include "SplineCtrlEx.h"
 
@@ -1066,13 +1067,13 @@ void SplineWidget::mousePressEvent(QMouseEvent* event)
     switch (event->button())
     {
     case Qt::LeftButton:
-        OnLButtonDown(event->pos(), event->modifiers());
+        OnLButtonDown(event->position().toPoint(), event->modifiers());
         break;
     case Qt::MiddleButton:
-        OnMButtonDown(event->pos(), event->modifiers());
+        OnMButtonDown(event->position().toPoint(), event->modifiers());
         break;
     case Qt::RightButton:
-        OnRButtonDown(event->pos(), event->modifiers());
+        OnRButtonDown(event->position().toPoint(), event->modifiers());
         break;
     }
 }
@@ -1082,10 +1083,10 @@ void SplineWidget::mouseReleaseEvent(QMouseEvent* event)
     switch (event->button())
     {
     case Qt::LeftButton:
-        OnLButtonUp(event->pos(), event->modifiers());
+        OnLButtonUp(event->position().toPoint(), event->modifiers());
         break;
     case Qt::MiddleButton:
-        OnMButtonUp(event->pos(), event->modifiers());
+        OnMButtonUp(event->position().toPoint(), event->modifiers());
         break;
     }
 }
@@ -1242,7 +1243,7 @@ void SplineWidget::mouseDoubleClickEvent(QMouseEvent* event)
         return;
     }
 
-    const QPoint point = event->pos();
+    const QPoint point = event->position().toPoint();
     m_pCurrentUndo = nullptr;
 
     if (m_bEditLock)
@@ -1288,7 +1289,7 @@ void SplineWidget::mouseDoubleClickEvent(QMouseEvent* event)
 //////////////////////////////////////////////////////////////////////////
 void SplineWidget::mouseMoveEvent(QMouseEvent* event)
 {
-    const QPoint point = event->pos();
+    const QPoint point = event->position().toPoint();
 
     switch (HitTest(point))
     {
@@ -1315,7 +1316,7 @@ void SplineWidget::mouseMoveEvent(QMouseEvent* event)
         if (m_lastToolTipPos != point)
         {
             m_lastToolTipPos = point;
-            QToolTip::showText(event->globalPos(), tipText);
+            QToolTip::showText(event->globalPosition().toPoint(), tipText);
         }
     }
     else if (m_editMode != TrackingMode)
@@ -1331,7 +1332,7 @@ void SplineWidget::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
-    m_cMousePos = event->pos();
+    m_cMousePos = event->position().toPoint();
 
     if (m_editMode == SelectMode)
     {
@@ -1352,13 +1353,13 @@ void SplineWidget::mouseMoveEvent(QMouseEvent* event)
     if (m_editMode == TimeMarkerMode)
     {
         setCursor(Qt::BlankCursor);
-        SetTimeMarker(XOfsToTime(event->x()));
+        SetTimeMarker(XOfsToTime(aznumeric_cast<int>(event->position().x())));
         SendNotifyEvent(SPLN_TIME_CHANGE);
     }
 
     if (m_boLeftMouseButtonDown)
     {
-        if (m_editMode == TrackingMode && event->pos() != m_cMouseDownPos)
+        if (m_editMode == TrackingMode && event->position().toPoint() != m_cMouseDownPos)
         {
             m_startedDragging = true;
             GetIEditor()->RestoreUndo();
@@ -1369,7 +1370,7 @@ void SplineWidget::mouseMoveEvent(QMouseEvent* event)
             bool bAltClick = event->modifiers() & Qt::AltModifier;
 
             Vec2 v0 = ClientToWorld(m_cMouseDownPos);
-            Vec2 v1 = ClientToWorld(event->pos());
+            Vec2 v1 = ClientToWorld(event->position().toPoint());
             if (bAltClick)
             {
                 TimeScaleKeys(m_fTimeMarker, v0.x, v1.x);
@@ -1390,17 +1391,17 @@ void SplineWidget::mouseMoveEvent(QMouseEvent* event)
     case ScrollMode:
     {
         // Set the new scrolled coordinates
-        float ofsx = m_grid.origin.GetX() - (event->x() - m_cMouseDownPos.x()) / m_grid.zoom.GetX();
-        float ofsy = m_grid.origin.GetY() + (event->y() - m_cMouseDownPos.y()) / m_grid.zoom.GetY();
+        float ofsx = m_grid.origin.GetX() - (aznumeric_cast<int>(event->position().x()) - m_cMouseDownPos.x()) / m_grid.zoom.GetX();
+        float ofsy = m_grid.origin.GetY() + (aznumeric_cast<int>(event->position().y()) - m_cMouseDownPos.y()) / m_grid.zoom.GetY();
         SetScrollOffset(Vec2(ofsx, ofsy));
-        m_cMouseDownPos = event->pos();
+        m_cMouseDownPos = event->position().toPoint();
     }
     break;
 
     case ZoomMode:
     {
-        float ofsx = (event->x() - m_cMouseDownPos.x()) * 0.01f;
-        float ofsy = (event->y() - m_cMouseDownPos.y()) * 0.01f;
+        float ofsx = (aznumeric_cast<int>(event->position().x()) - m_cMouseDownPos.x()) * 0.01f;
+        float ofsy = (aznumeric_cast<int>(event->position().y()) - m_cMouseDownPos.y()) * 0.01f;
 
         AZ::Vector2 z = m_grid.zoom;
         if (ofsx != 0)
@@ -1412,7 +1413,7 @@ void SplineWidget::mouseMoveEvent(QMouseEvent* event)
             z.SetY(max(z.GetY() * (1.0f + ofsy), 0.001f));
         }
         SetZoom(Vec2(z.GetX(), z.GetY()), m_cMouseDownPos);
-        m_cMouseDownPos = event->pos();
+        m_cMouseDownPos = event->position().toPoint();
     }
     break;
     }

@@ -562,7 +562,7 @@ static QPixmap initializeDownArrowPixmap(const QColor& arrowColor, const QStyleO
     const int size = qMin(arrowMax, rectMax);
 
     QPixmap cachePixmap;
-    cachePixmap = styleCachePixmap(rect.size());
+    cachePixmap = QPixmap(rect.size());
     cachePixmap.fill(Qt::transparent);
     QPainter cachePainter(&cachePixmap);
 

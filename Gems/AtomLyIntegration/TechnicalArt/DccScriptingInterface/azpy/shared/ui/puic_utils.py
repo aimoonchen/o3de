@@ -10,12 +10,13 @@
 """! Pyside2uic utilities
 
 :file: < DCCsi >/azpy/shared/ui/puic_utils.py
-:Status: Prototype
-:Version: 0.0.1
+:Status: DEPRECATED (Qt6/PySide6)
 
-Notice: This module requires the pyside2uic from PySide2-tools,
-These are not installed by O3DE or the DCCsi directly.
-See the READ.me in this pkgs folder for help.
+DEPRECATED under the Qt6/PySide6 upgrade: this module depends on the
+``pyside2uic`` / ``pyside2tools`` package, which has no PySide6 equivalent as an
+importable module (PySide6 ships the ``pyside6-uic`` CLI tool instead). The
+import/compile paths below will fail with PySide6. Do not use; port to
+``pyside6-uic`` (subprocess) or ``QUiLoader`` if this functionality is needed.
 
 URL: https://github.com/pyside/pyside2-tools
 """

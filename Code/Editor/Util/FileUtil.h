@@ -13,9 +13,9 @@
 #include "../Include/SandboxAPI.h"
 #include <QString>
 #include <QFileInfo>
+#include <QStringList>
 #include "../Include/IFileUtil.h"
 
-class QStringList;
 class QMenu;
 
 class SANDBOX_API CFileUtil

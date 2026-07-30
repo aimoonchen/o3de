@@ -143,7 +143,7 @@ QCursor CMFCUtils::LoadCursor(unsigned int nIDResource, int hotX, int hotY)
     if (!pm.isNull() && (hotX < 0 || hotY < 0))
     {
         QFile f(path);
-        f.open(QFile::ReadOnly);
+        [[maybe_unused]] const bool opened = f.open(QFile::ReadOnly);
         QDataStream stream(&f);
         stream.setByteOrder(QDataStream::LittleEndian);
         f.read(10);

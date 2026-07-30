@@ -10,6 +10,7 @@
 #include "DialogStack.h"
 #include "AzCore/std/iterator.h"
 #include "AzCore/std/limits.h"
+#include <AzCore/Casting/numeric_cast.h>
 #include "AzQtComponents/Components/Widgets/CardHeader.h"
 #include "MysticQtManager.h"
 #include <QVBoxLayout>
@@ -512,8 +513,8 @@ namespace MysticQt
         if (event->buttons() & Qt::LeftButton)
         {
             // keep the mouse pos
-            m_prevMouseX = event->globalX();
-            m_prevMouseY = event->globalY();
+            m_prevMouseX = aznumeric_cast<int>(event->globalPosition().x());
+            m_prevMouseY = aznumeric_cast<int>(event->globalPosition().y());
 
             // set the cursor if the scrollbar is visible
             if ((horizontalScrollBar()->maximum() > 0) || (verticalScrollBar()->maximum() > 0))
@@ -559,8 +560,8 @@ namespace MysticQt
         }
 
         // calculate the delta mouse movement
-        const int32 deltaX = event->globalX() - m_prevMouseX;
-        const int32 deltaY = event->globalY() - m_prevMouseY;
+        const int32 deltaX = aznumeric_cast<int>(event->globalPosition().x()) - m_prevMouseX;
+        const int32 deltaY = aznumeric_cast<int>(event->globalPosition().y()) - m_prevMouseY;
 
         // now apply this delta movement to the scroller
         int32 newX = horizontalScrollBar()->value() - deltaX;
@@ -569,8 +570,8 @@ namespace MysticQt
         verticalScrollBar()->setSliderPosition(newY);
 
         // store the current value as previous value
-        m_prevMouseX = event->globalX();
-        m_prevMouseY = event->globalY();
+        m_prevMouseX = aznumeric_cast<int>(event->globalPosition().x());
+        m_prevMouseY = aznumeric_cast<int>(event->globalPosition().y());
     }
 
 

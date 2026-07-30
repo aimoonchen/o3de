@@ -69,7 +69,6 @@ AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 4251: class '...' n
 #include <QTextEdit>
 #include <QToolButton>
 #include <QtGui/private/qscreen_p.h>
-#include <QtWidgets/private/qstylesheetstyle_p.h>
 AZ_POP_DISABLE_WARNING
 
 #include <QtWidgets/private/qstylehelper_p.h>
@@ -641,16 +640,15 @@ namespace AzQtComponents
 
                 if (qobject_cast<const QTreeView*>(widget) && !hasClass(widget, g_treeViewDisableDefaultArrorPainting))
                 {
-                    QStyleSheetStyle* styleSheetStyle = qobject_cast<QStyleSheetStyle*>(baseStyle());
-                    if (styleSheetStyle)
+                    // Qt6: previously reached through the private QStyleSheetStyle to get to
+                    // the Fusion base. On stock Qt6 our proxy's baseStyle() IS the Fusion
+                    // style directly (Style -> Fusion), so use it to draw the branch arrow.
+                    QStyle* fusionStyle = baseStyle();
+                    if (fusionStyle && (fusionStyle != this))
                     {
-                        QStyle* fusionStyle = styleSheetStyle->baseStyle();
-                        if (fusionStyle && (fusionStyle != this) && (fusionStyle != styleSheetStyle))
-                        {
-                            QProxyStyle::drawPrimitive(element, option, painter, widget);
+                        QProxyStyle::drawPrimitive(element, option, painter, widget);
 
-                            return fusionStyle->drawPrimitive(element, option, painter, widget);
-                        }
+                        return fusionStyle->drawPrimitive(element, option, painter, widget);
                     }
                 }
 #endif // !defined(AZ_PLATFORM_LINUX)
@@ -1103,25 +1101,10 @@ namespace AzQtComponents
                 break;
             }
 
-            case QStyle::PM_MenuHPlacementOffset:
-            {
-                const int hOffset = Menu::horizontalShadowMargin(this, option, widget, m_data->menuConfig);
-                if (hOffset != std::numeric_limits<int>::lowest())
-                {
-                    return hOffset;
-                }
-                break;
-            }
-
-            case QStyle::PM_MenuVPlacementOffset:
-            {
-                const int vOffset = Menu::verticalShadowMargin(this, option, widget, m_data->menuConfig);
-                if (vOffset != std::numeric_limits<int>::lowest())
-                {
-                    return vOffset;
-                }
-                break;
-            }
+            // Qt6: PM_MenuHPlacementOffset / PM_MenuVPlacementOffset were custom
+            // PixelMetric values added by the O3DE Qt5 fork and read by its patched
+            // menu-positioning code. Stock Qt6's menu code never queries them, so the
+            // cases are removed (menu shadow placement offset is no longer applied).
 
             case QStyle::PM_MenuButtonIndicator:
             {

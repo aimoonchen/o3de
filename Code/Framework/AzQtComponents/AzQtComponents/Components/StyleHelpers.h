@@ -9,10 +9,6 @@
 
 #include <AzQtComponents/Components/StyleManager.h>
 
-AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option") // disable warnings spawned by QT
-#include <QtWidgets/private/qstylesheetstyle_p.h>
-AZ_POP_DISABLE_WARNING
-
 namespace AzQtComponents
 {
     namespace StyleHelpers
@@ -50,14 +46,11 @@ namespace AzQtComponents
                     return;
                 }
 
-                if (auto styleSheet = StyleManager::styleSheetStyle(widget))
-                {
-                    // For the widget and each of its children, QStyleSheetStyle::repolish clears
-                    // the existing render rules, polishes the widget and sends it a StyleChange
-                    // event. This ensure that both render rules which depend on properties, and
-                    // properties that are set in style sheets via qproperty- are correctly updated.
-                    styleSheet->repolish(widget);
-                }
+                // Qt6: replaces the private QStyleSheetStyle::repolish(widget). For the
+                // widget and each of its children, unpolish/polish clears cached render
+                // rules, re-polishes and re-applies stylesheet-driven properties (incl.
+                // qproperty-*), so property-dependent style rules update correctly.
+                StyleManager::repolishStyleSheet(widget);
             });
         }
 

@@ -54,11 +54,7 @@ namespace GraphCanvas
         {
             painter->save();
 
-#if (QT_VERSION < QT_VERSION_CHECK(5, 11, 0))
-            QStyleOptionViewItemV4 options = option;
-#else
             QStyleOptionViewItem options = option;
-#endif
             initStyleOption(&options, index);
 
             QModelIndex sourceIndex = static_cast<const NodePaletteSortFilterProxyModel*>(index.model())->mapToSource(index);

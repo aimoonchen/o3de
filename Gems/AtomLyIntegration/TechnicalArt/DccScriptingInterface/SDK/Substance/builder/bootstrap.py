@@ -67,7 +67,7 @@ _spec_dccsi_config.loader.exec_module(_dccsi_config)
 from dynaconf import settings
 
 try:
-    from PySide2.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 except:
     _dccsi_config.init_o3de_pyside(settings.O3DE_DEV)  # init for standalone
     # running in the editor if the QtForPython Gem is enabled

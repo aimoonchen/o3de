@@ -101,7 +101,7 @@ namespace AzToolsFramework
     }
 
 
-    void SearchCriteriaButton::enterEvent(QEvent* event)
+    void SearchCriteriaButton::enterEvent(QEnterEvent* event)
     {
         (void)event;
         m_mouseHover = true;

@@ -14,6 +14,8 @@
 #include <SourceControl/PerforceComponent.h>
 #include <SourceControl/PerforceConnection.h>
 #include <QTemporaryDir>
+#include <QTextStream>
+#include <QStringConverter>
 
 namespace UnitTest
 {
@@ -376,7 +378,7 @@ namespace UnitTest
 
         {
             QTextStream ts(&writer);
-            ts.setCodec("UTF-8");
+            ts.setEncoding(QStringConverter::Utf8);
             ts << contents;
         }
         return true;

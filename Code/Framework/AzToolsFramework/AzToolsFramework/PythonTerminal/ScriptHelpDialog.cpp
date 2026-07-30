@@ -128,7 +128,8 @@ namespace AzToolsFramework
         if (m_commandFilter != lowerText)
         {
             m_commandFilter = lowerText;
-            invalidateFilter();
+            beginFilterChange();
+            endFilterChange();
         }
     }
 
@@ -138,7 +139,8 @@ namespace AzToolsFramework
         if (m_moduleFilter != lowerText)
         {
             m_moduleFilter = lowerText;
-            invalidateFilter();
+            beginFilterChange();
+            endFilterChange();
         }
     }
 
@@ -148,7 +150,8 @@ namespace AzToolsFramework
         if (m_descriptionFilter != lowerText)
         {
             m_descriptionFilter = lowerText;
-            invalidateFilter();
+            beginFilterChange();
+            endFilterChange();
         }
     }
 
@@ -158,7 +161,8 @@ namespace AzToolsFramework
         if (m_exampleFilter != lowerText)
         {
             m_exampleFilter = lowerText;
-            invalidateFilter();
+            beginFilterChange();
+            endFilterChange();
         }
     }
 

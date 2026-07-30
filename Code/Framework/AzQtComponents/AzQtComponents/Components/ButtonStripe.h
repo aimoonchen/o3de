@@ -18,7 +18,7 @@
 class QGridLayout;
 class QPushButton;
 class QButtonGroup;
-class QStringList;
+#include <QStringList>
 
 namespace AzQtComponents
 {

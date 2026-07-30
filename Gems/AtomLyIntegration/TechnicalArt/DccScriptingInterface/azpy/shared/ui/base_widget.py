@@ -27,9 +27,9 @@ import azpy.config_utils
 _config = azpy.config_utils.get_dccsi_config()
 settings = _config.get_config_settings(setup_ly_pyside=True)
 
-import PySide2.QtWidgets as QtWidgets
-import PySide2.QtCore as QtCore
-from shiboken2 import wrapInstance
+import PySide6.QtWidgets as QtWidgets
+import PySide6.QtCore as QtCore
+from shiboken6 import wrapInstance
 
 
 # -------------------------------------------------------------------------

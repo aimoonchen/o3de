@@ -43,8 +43,8 @@ namespace AzQtComponents
 
     QString toString(double value, int numDecimals, const QLocale& locale, bool showGroupSeparator, bool round)
     {
-        const QChar decimalPoint = locale.decimalPoint();
-        const QChar zeroDigit = locale.zeroDigit();
+        const QChar decimalPoint = locale.decimalPoint().at(0);
+        const QChar zeroDigit = locale.zeroDigit().at(0);
         const int numToStringDecimals = AZStd::max(numDecimals, 20);
         QString retValue;
 

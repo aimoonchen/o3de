@@ -33,7 +33,10 @@ namespace AzQtComponents
         explicit CustomSlider(Qt::Orientation orientation, QWidget* parent);
 
         //! Initialize option with the values from this Slider.
-        void initStyleOption(QStyleOptionSlider& option);
+        //! Qt6: QSlider::initStyleOption is a protected non-virtual helper. To avoid
+        //! hiding the base version (C4264 under /WX), this O3DE helper is given a
+        //! distinct name and internally delegates to QSlider::initStyleOption.
+        void initSliderStyleOption(QStyleOptionSlider* option);
 
     protected:
         void mousePressEvent(QMouseEvent* ev) override;

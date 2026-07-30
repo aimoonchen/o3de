@@ -46,8 +46,6 @@ ly_add_target(
             3rdParty::Qt::Widgets
             AZ::CrashUploaderSupport
             AZ::AzQtComponents
-    TARGET_PROPERTIES
-        Qt5_NO_LINK_QTMAIN TRUE
 )
 
 ly_add_dependencies(Editor ToolsCrashUploader)

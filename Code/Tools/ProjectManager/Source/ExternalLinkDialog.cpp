@@ -67,7 +67,7 @@ namespace O3DE::ProjectManager
 
         QCheckBox* skipDialogCheckbox = new QCheckBox(tr("Do not show this again"));
         layout->addWidget(skipDialogCheckbox);
-        connect(skipDialogCheckbox, &QCheckBox::stateChanged, this, &ExternalLinkDialog::SetSkipDialogSetting);
+        connect(skipDialogCheckbox, &QCheckBox::checkStateChanged, this, [this](Qt::CheckState state) { SetSkipDialogSetting(state == Qt::Checked); });
 
         // Buttons
         QDialogButtonBox* dialogButtons = new QDialogButtonBox();

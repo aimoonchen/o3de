@@ -350,7 +350,7 @@ namespace EMStudio
         }
 
         // get the mouse position, calculate the global mouse position and update the relevant data
-        QPoint mousePos = event->pos();
+        QPoint mousePos = event->position().toPoint();
 
         QPoint snapDelta(0, 0);
         if (m_moveNode && m_leftMousePressed && m_panning == false && m_rectSelecting == false)
@@ -502,30 +502,30 @@ namespace EMStudio
         {
             // handle mouse wrapping, to enable smoother panning
             bool mouseWrapped = false;
-            if (event->x() > (int32)width())
+            if (event->position().x() > (int32)width())
             {
                 mouseWrapped = true;
-                QCursor::setPos(QPoint(event->globalX() - width(), event->globalY()));
-                m_mouseLastPos = QPoint(event->x() - width(), event->y());
+                QCursor::setPos(QPoint(aznumeric_cast<int>(event->globalPosition().x()) - width(), aznumeric_cast<int>(event->globalPosition().y())));
+                m_mouseLastPos = QPoint(aznumeric_cast<int>(event->position().x()) - width(), aznumeric_cast<int>(event->position().y()));
             }
-            else if (event->x() < 0)
+            else if (event->position().x() < 0)
             {
                 mouseWrapped = true;
-                QCursor::setPos(QPoint(event->globalX() + width(), event->globalY()));
-                m_mouseLastPos = QPoint(event->x() + width(), event->y());
+                QCursor::setPos(QPoint(aznumeric_cast<int>(event->globalPosition().x()) + width(), aznumeric_cast<int>(event->globalPosition().y())));
+                m_mouseLastPos = QPoint(aznumeric_cast<int>(event->position().x()) + width(), aznumeric_cast<int>(event->position().y()));
             }
 
-            if (event->y() > (int32)height())
+            if (event->position().y() > (int32)height())
             {
                 mouseWrapped = true;
-                QCursor::setPos(QPoint(event->globalX(), event->globalY() - height()));
-                m_mouseLastPos = QPoint(event->x(), event->y() - height());
+                QCursor::setPos(QPoint(aznumeric_cast<int>(event->globalPosition().x()), aznumeric_cast<int>(event->globalPosition().y()) - height()));
+                m_mouseLastPos = QPoint(aznumeric_cast<int>(event->position().x()), aznumeric_cast<int>(event->position().y()) - height());
             }
-            else if (event->y() < 0)
+            else if (event->position().y() < 0)
             {
                 mouseWrapped = true;
-                QCursor::setPos(QPoint(event->globalX(), event->globalY() + height()));
-                m_mouseLastPos = QPoint(event->x(), event->y() + height());
+                QCursor::setPos(QPoint(aznumeric_cast<int>(event->globalPosition().x()), aznumeric_cast<int>(event->globalPosition().y()) + height()));
+                m_mouseLastPos = QPoint(aznumeric_cast<int>(event->position().x()), aznumeric_cast<int>(event->position().y()) + height());
             }
 
             // don't apply the delta, if mouse has been wrapped
@@ -623,7 +623,7 @@ namespace EMStudio
         m_allowContextMenu = true;
 
         // get the mouse position, calculate the global mouse position and update the relevant data
-        QPoint mousePos     = event->pos();
+        QPoint mousePos     = event->position().toPoint();
         m_mouseLastPos       = mousePos;
         m_mouseLastPressPos  = mousePos;
         QPoint globalPos    = LocalToGlobal(mousePos);
@@ -636,7 +636,7 @@ namespace EMStudio
         const AnimGraphActionFilter& actionFilter = m_plugin->GetActionFilter();
 
         // check if we can start panning
-        if ((event->buttons() & Qt::RightButton && event->buttons() & Qt::LeftButton) || event->button() == Qt::RightButton || event->button() == Qt::MidButton)
+        if ((event->buttons() & Qt::RightButton && event->buttons() & Qt::LeftButton) || event->button() == Qt::RightButton || event->button() == Qt::MiddleButton)
         {
             // update button booleans
             if (event->buttons() & Qt::RightButton && event->buttons() & Qt::LeftButton)
@@ -669,7 +669,7 @@ namespace EMStudio
                 }
             }
 
-            if (event->button() == Qt::MidButton)
+            if (event->button() == Qt::MiddleButton)
             {
                 m_middleMousePressed = true;
             }
@@ -952,7 +952,7 @@ namespace EMStudio
                     // in case we didn't click on a node, check if we click on a connection
                     else if (!nodeClicked)
                     {
-                        m_activeGraph->SelectConnectionCloseTo(LocalToGlobal(event->pos()), m_controlPressed == false, true);
+                        m_activeGraph->SelectConnectionCloseTo(LocalToGlobal(event->position().toPoint()), m_controlPressed == false, true);
                     }
                 }
                 else
@@ -973,7 +973,7 @@ namespace EMStudio
     void NodeGraphWidget::mouseReleaseEvent(QMouseEvent* event)
     {
         // get the mouse position, calculate the global mouse position and update the relevant data
-        const QPoint mousePos   = event->pos();
+        const QPoint mousePos   = event->position().toPoint();
         const QPoint globalPos  = LocalToGlobal(mousePos);
         SetMousePos(globalPos);
 
@@ -1009,7 +1009,7 @@ namespace EMStudio
         }
 
         // middle mouse button
-        if (event->button() == Qt::MidButton)
+        if (event->button() == Qt::MiddleButton)
         {
             m_middleMousePressed = false;
             m_panning            = false;
@@ -1018,7 +1018,7 @@ namespace EMStudio
         // if we release the left mouse button
         if (event->button() == Qt::LeftButton)
         {
-            const bool mouseMoved = (event->pos() != m_mouseLastPressPos);
+            const bool mouseMoved = (event->position().toPoint() != m_mouseLastPressPos);
 
             // if we pressed the visualize icon
             GraphNode* node = UpdateMouseCursor(mousePos, globalPos);
@@ -1185,7 +1185,7 @@ namespace EMStudio
                 GraphNode* oldSourceNode;
                 GraphNode* oldTargetNode;
                 m_activeGraph->GetReplaceTransitionInfo(&connection, &oldStartOffset, &oldEndOffset, &oldSourceNode, &oldTargetNode);
-                GraphNode* newDropNode = m_activeGraph->FindNode(event->pos());
+                GraphNode* newDropNode = m_activeGraph->FindNode(event->position().toPoint());
 
                 if (newDropNode && newDropNode != oldSourceNode)
                 {
@@ -1289,7 +1289,7 @@ namespace EMStudio
         GetMainWindow()->DisableUndoRedo();
 
         // get the mouse position, calculate the global mouse position and update the relevant data
-        QPoint mousePos     = event->pos();
+        QPoint mousePos     = event->position().toPoint();
         QPoint globalPos    = LocalToGlobal(mousePos);
         SetMousePos(globalPos);
 

@@ -26,7 +26,8 @@ ly_associate_package(PACKAGE_NAME Lua-5.4.4-rev1-linux-aarch64                  
 ly_associate_package(PACKAGE_NAME mcpp-2.7.2_az.1-rev1-linux-aarch64                         TARGETS mcpp                        PACKAGE_HASH 817d31b94d1217b6e47bd5357b3a07a79ab6aa93452c65ff56831d0590c5169d)
 ly_associate_package(PACKAGE_NAME mikkelsen-1.0.0.4-linux-aarch64                            TARGETS mikkelsen                   PACKAGE_HASH 62f3f316c971239a2b86d7c47a68fee9be744de3a4f9b00533b32f33a4764f8b)
 ly_associate_package(PACKAGE_NAME googlebenchmark-1.7.0-rev1-linux-aarch64                   TARGETS GoogleBenchmark             PACKAGE_HASH 06fbfeaba2aeae20197da631019e52105dc1f69e702151a76c6aba2c27c03acb)
-ly_associate_package(PACKAGE_NAME qt-5.15.2-rev9-linux-aarch64                               TARGETS Qt                          PACKAGE_HASH da80840ecd3f7a074edecbb3dedb1ff36c568cfe4943e18d9559e9fca9f151bc)
+# Qt6 upgrade: use system Qt6 (find_package, see cmake/3rdPartyPackages.cmake); PySide2 -> pip PySide6
+# ly_associate_package(PACKAGE_NAME qt-5.15.2-rev9-linux-aarch64                               TARGETS Qt                          PACKAGE_HASH da80840ecd3f7a074edecbb3dedb1ff36c568cfe4943e18d9559e9fca9f151bc)
 ly_associate_package(PACKAGE_NAME png-1.6.37-rev2-linux-aarch64                              TARGETS PNG                         PACKAGE_HASH fcf646c1b1b4163000efdb56d7c8f086b6ce0a520da5c8d3ffce4e1329ae798a)
 ly_associate_package(PACKAGE_NAME libsamplerate-0.2.1-rev2-linux-aarch64                     TARGETS libsamplerate               PACKAGE_HASH 751484da1527432cd19263909f69164d67b25644f87ec1d4ec974a343defacea)
 ly_associate_package(PACKAGE_NAME openimageio-opencolorio-2.3.17-rev2-linux-aarch64          TARGETS OpenImageIO OpenColorIO OpenColorIO::Runtime OpenImageIO::Tools::Binaries OpenImageIO::Tools::PythonPlugins PACKAGE_HASH 2bc6a43f60c8206b2606a65738e0fcf3b3b17e0db16089404d8389d337c85ad6)
@@ -40,7 +41,8 @@ ly_associate_package(PACKAGE_NAME squish-ccr-deb557d-rev1-linux-aarch64         
 ly_associate_package(PACKAGE_NAME astc-encoder-3.2-rev3-linux-aarch64                        TARGETS astc-encoder                PACKAGE_HASH 60ef2a8adc15767dc263860e1e3befc2f3acea26987442a7e80783f1b2158c73)
 ly_associate_package(PACKAGE_NAME ISPCTexComp-36b80aa-rev2-linux-aarch64                     TARGETS ISPCTexComp                 PACKAGE_HASH c29aafa32f13839a394424cf674b5cdb323fab22bcca43c38b43adfe13fc415c)
 ly_associate_package(PACKAGE_NAME lz4-1.9.4-rev2-linux-aarch64                               TARGETS lz4                         PACKAGE_HASH 725ca4a02bcf961dc68fb525d0509c311536b5a0f0f9885244fab282cdc55d1f)
-ly_associate_package(PACKAGE_NAME pyside2-5.15.2.1-py3.10-rev7-linux-aarch64                 TARGETS pyside2                     PACKAGE_HASH 3210d697299d9c943ac4dfddb95513a7781d8505da0f241f445bd15101529e69)
+# Qt6 upgrade: use system Qt6 (find_package, see cmake/3rdPartyPackages.cmake); PySide2 -> pip PySide6
+# ly_associate_package(PACKAGE_NAME pyside2-5.15.2.1-py3.10-rev7-linux-aarch64                 TARGETS pyside2                     PACKAGE_HASH 3210d697299d9c943ac4dfddb95513a7781d8505da0f241f445bd15101529e69)
 ly_associate_package(PACKAGE_NAME SQLite-3.37.2-rev1-linux-aarch64                           TARGETS SQLite                      PACKAGE_HASH 5cc1fd9294af72514eba60509414e58f1a268996940be31d0ab6919383f05118)
 ly_associate_package(PACKAGE_NAME AwsIotDeviceSdkCpp-1.15.2-rev1-linux-aarch64               TARGETS AwsIotDeviceSdkCpp          PACKAGE_HASH 0bac80fc09094c4fd89a845af57ebe4ef86ff8d46e92a448c6986f9880f9ee62)
 ly_associate_package(PACKAGE_NAME vulkan-validationlayers-1.2.198-rev1-linux-aarch64         TARGETS vulkan-validationlayers     PACKAGE_HASH e67a15a95e14397ccdffd70d17f61079e5720fea22b0d21e135497312419a23f)

@@ -9,10 +9,10 @@
 
 #if !defined(Q_MOC_RUN)
 #include <QMainWindow>
+#include <QStringList>
 #include <AssetImporter/UI/SelectDestinationDialog.h>
 #endif
 
-class QStringList;
 class QFile;
 class QFileDialog;
 

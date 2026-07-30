@@ -377,22 +377,22 @@ def validate_o3de_pyside2():
         # To Do: figure out how to test and/or modify to work
 
     try:
-        import PySide2
-        _LOGGER.info('~   SUCCESS: import PySide2')
-        _LOGGER.debug(PySide2)
+        import PySide6
+        _LOGGER.info('~   SUCCESS: import PySide6')
+        _LOGGER.debug(PySide6)
         status = True
     except ImportError as e:
-        _LOGGER.error('~   FAILURE: import PySide2')
+        _LOGGER.error('~   FAILURE: import PySide6')
         status = False
         raise(e)
 
     try:
-        import shiboken2
-        _LOGGER.info('~   SUCCESS: import shiboken2')
-        _LOGGER.debug(shiboken2)
+        import shiboken6
+        _LOGGER.info('~   SUCCESS: import shiboken6')
+        _LOGGER.debug(shiboken6)
         status = True
     except ImportError as e:
-        _LOGGER.error('~   FAILURE: import shiboken2')
+        _LOGGER.error('~   FAILURE: import shiboken6')
         status = False
         raise(e)
 # -------------------------------------------------------------------------
@@ -404,7 +404,7 @@ def test_pyside2(exit=True):
     # now test
     _LOGGER.info('~   Testing Qt / PySide2')
     try:
-        from PySide2.QtWidgets import QApplication, QPushButton
+        from PySide6.QtWidgets import QApplication, QPushButton
         app = QApplication(sys.argv)
         hello = QPushButton("~   O3DE DCCsi PySide2 Test!")
         hello.resize(200, 60)

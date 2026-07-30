@@ -106,9 +106,9 @@ namespace LUAEditor
         QMenu* theMenu = new QMenu(this);
         (void)theMenu->addAction(
             "Close Lua Editor App",
+            QKeySequence("Alt+F4"),
             this,
-            SLOT(OnMenuCloseCurrentWindow()),
-            QKeySequence("Alt+F4")
+            SLOT(OnMenuCloseCurrentWindow())
             );
 
         AzToolsFramework::FrameworkMessages::Bus::Broadcast(

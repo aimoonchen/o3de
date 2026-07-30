@@ -32,7 +32,7 @@
 #include <QStaticText>
 #include <QToolTip>
 #if defined(Q_OS_WIN)
-#include <QtWinExtras/QtWin>
+// TODO: Qt6 removed QtWinExtras, needs dedicated porting
 #endif
 
 #include <AzQtComponents/Components/Widgets/ColorPicker.h>

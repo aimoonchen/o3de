@@ -11,33 +11,25 @@
 #include <QStyle>
 
 /**
- * RAII-style class that will block unneeded polish requests when doing reparenting.
+ * RAII-style class that used to block unneeded polish requests when doing reparenting.
  * When QWidget::setParent() is called that triggers all children to be repolished, which is expensive
  * as all stylesheet rules have to be recalculated.
  *
- * Repolishing is usually only needed if the stylesheet changed. You can use this class to save CPU cycles
- * when you know you're going to trigger setParent() calls that you're sure wouldn't affect any styling.
+ * The O3DE Qt5 fork exposed QStyle::enableMinimizePolishOptimizations() to skip that work.
+ * Stock Qt6 has no such API, so on Qt6 this class is a no-op shell: correctness is unaffected,
+ * only the reparenting polish optimization is no longer applied. Kept as a type so existing
+ * call sites remain unchanged.
  */
 namespace AzQtComponents
 {
     class RepolishMinimizer
     {
     public:
-        RepolishMinimizer()
-        {
-#if !defined(AZ_PLATFORM_LINUX)
-            // Enable optimizations
-            QStyle::enableMinimizePolishOptimizations(true);
-#endif // !defined(AZ_PLATFORM_LINUX)
-        }
-
-        ~RepolishMinimizer()
-        {
-#if !defined(AZ_PLATFORM_LINUX)
-            // Disable optimizations. Back to normal.
-            QStyle::enableMinimizePolishOptimizations(false);
-#endif // !defined(AZ_PLATFORM_LINUX)
-        }
+        // User-provided (non-defaulted) special members so that stack instances are
+        // treated as having side effects: avoids C4101 "unreferenced local variable"
+        // at the many call sites that declare `RepolishMinimizer minimizer;` (with /WX).
+        RepolishMinimizer() {}
+        ~RepolishMinimizer() {}
 
     private:
         Q_DISABLE_COPY(RepolishMinimizer)

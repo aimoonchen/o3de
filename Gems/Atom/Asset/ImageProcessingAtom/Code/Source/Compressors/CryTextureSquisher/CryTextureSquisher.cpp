@@ -31,6 +31,26 @@
 
 #include <squish-ccr/squish.h>
 
+// squish-ccr/config.h defines macros like `assume`, `doinline`, `passreg` that leak
+// into other translation units in unity builds. In particular `#define assume __assume`
+// breaks Qt6's qassert.h (`__has_cpp_attribute(assume)`). Undo them here.
+#ifdef assume
+#undef assume
+#endif
+#ifdef doinline
+#undef doinline
+#endif
+#ifdef passreg
+#undef passreg
+#endif
+
+#if AZ_TRAIT_IMAGEPROCESSING_SQUISH_DO_NOT_USE_FASTCALL
+// Undo the temporary shims so they don't leak into other TUs in unity builds (breaks Qt6 qassert.h __assume).
+#undef __fastcall
+#undef _fastcall
+#undef __assume
+#endif
+
 #if defined(__clang__)
 #   pragma clang diagnostic pop
 #endif

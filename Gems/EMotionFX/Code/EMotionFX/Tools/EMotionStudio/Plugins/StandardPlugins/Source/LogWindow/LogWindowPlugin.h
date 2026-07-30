@@ -13,10 +13,10 @@
 #include "../StandardPluginsConfig.h"
 #include "../../../../EMStudioSDK/Source/DockWidgetPlugin.h"
 #endif
+#include <AzQtComponents/Components/FilteredSearchWidget.h>
 
 namespace AzQtComponents
 {
-    struct SearchTypeFilter;
     class FilteredSearchWidget;
 }
 

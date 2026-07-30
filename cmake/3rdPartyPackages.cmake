@@ -740,6 +740,66 @@ endif()
 get_property(O3DE_SCRIPT_ONLY GLOBAL PROPERTY "O3DE_SCRIPT_ONLY")
 if(PAL_TRAIT_BUILD_HOST_TOOLS AND NOT O3DE_SCRIPT_ONLY)
     include(${LY_ROOT_FOLDER}/cmake/LYWrappers.cmake)
-    # Importing this globally to handle AUTOMOC, AUTOUIC, AUTORCC
-    ly_parse_third_party_dependencies(3rdParty::Qt)
+    # Suppress Qt's "using private module headers" warning: AzQtComponents
+    # intentionally uses Qt private headers; this is a known, accepted design.
+    set(QT_NO_PRIVATE_MODULE_WARNING ON)
+    # Use system Qt6 instead of downloading the pre-built Qt5 package.
+    # Pass -DQt6_DIR=<path-to-Qt6-cmake-config-dir> on the cmake command line
+    # (e.g. <QtInstall>/msvc2022_64/lib/cmake/Qt6).
+    if(NOT Qt6_DIR)
+        message(FATAL_ERROR "Qt6_DIR must be set to the Qt6 CMake config directory")
+    endif()
+    # Private components required: AzQtComponents legitimately uses Qt private
+    # headers (style/docking/hidpi). Qt6 still ships them and all symbols O3DE
+    # calls are exported (verified). Link the *Private modules so include paths
+    # resolve; component library logic unchanged.
+    find_package(Qt6 REQUIRED COMPONENTS
+        Core Gui Widgets Svg SvgWidgets Xml Network Concurrent Test
+        OpenGLWidgets OpenGL LinguistTools
+        GuiPrivate WidgetsPrivate CorePrivate)
+    # Create 3rdParty::Qt::* alias targets expected by the rest of the engine.
+    # NOTE: ly_create_alias(NAME Qt::Core ...) creates an internal *non-namespaced*
+    # backing target literally named "Qt::Core", which collides with Qt6's own
+    # version-less "Qt::Core" alias created by find_package(Qt6). So we create the
+    # 3rdParty::Qt::* targets directly with uniquely-named backing libraries.
+    # Core/Gui/Widgets back onto the *Private targets (which INTERFACE-link the
+    # public ones + add private include dirs) so existing private #includes
+    # compile untouched. Svg folds in SvgWidgets: QSvgWidget moved to
+    # QtSvgWidgets in Qt6 and .ui files (AUTOUIC) need its include dir.
+    function(o3de_qt_alias alias_suffix)
+        set(backing "o3de_3rdParty_Qt_${alias_suffix}")
+        add_library(${backing} INTERFACE IMPORTED GLOBAL)
+        set_target_properties(${backing} PROPERTIES GEM_MODULE TRUE)
+        target_link_libraries(${backing} INTERFACE ${ARGN})
+        add_library(3rdParty::Qt::${alias_suffix} ALIAS ${backing})
+    endfunction()
+    o3de_qt_alias(Core        Qt6::CorePrivate)
+    o3de_qt_alias(Gui         Qt6::GuiPrivate)
+    o3de_qt_alias(Widgets     Qt6::WidgetsPrivate)
+    o3de_qt_alias(Svg         Qt6::Svg Qt6::SvgWidgets)
+    o3de_qt_alias(Xml         Qt6::Xml)
+    o3de_qt_alias(Network     Qt6::Network)
+    o3de_qt_alias(Concurrent  Qt6::Concurrent)
+    o3de_qt_alias(Test        Qt6::Test)
+    o3de_qt_alias(OpenGL      Qt6::OpenGLWidgets)
+    # Zero Qt5 leftovers: turn pre-6.0 deprecated APIs into compile errors.
+    add_compile_definitions(QT_DISABLE_DEPRECATED_UP_TO=0x060000)
+
+    # PySide6 (Qt for Python) is pip-installed into the O3DE Python venv
+    # (pip install "pyside6==6.11.*", which pulls shiboken6). It lives on the
+    # engine Python path and is loaded at runtime by the QtForPython gem, so it
+    # is NOT a copyable 3rdParty package like the old pyside2-5.15 archive.
+    # We expose marker INTERFACE targets so the RUNTIME_DEPENDENCIES entries in
+    # Gems/QtForPython/Code/CMakeLists.txt (3rdParty::pyside6 /
+    # 3rdParty::pyside6::Tools) resolve without emitting any copy commands.
+    if(NOT TARGET 3rdParty::pyside6)
+        add_library(o3de_3rdParty_pyside6 INTERFACE IMPORTED GLOBAL)
+        set_target_properties(o3de_3rdParty_pyside6 PROPERTIES GEM_MODULE TRUE)
+        add_library(3rdParty::pyside6 ALIAS o3de_3rdParty_pyside6)
+    endif()
+    if(NOT TARGET 3rdParty::pyside6::Tools)
+        add_library(o3de_3rdParty_pyside6_Tools INTERFACE IMPORTED GLOBAL)
+        set_target_properties(o3de_3rdParty_pyside6_Tools PROPERTIES GEM_MODULE TRUE)
+        add_library(3rdParty::pyside6::Tools ALIAS o3de_3rdParty_pyside6_Tools)
+    endif()
 endif()

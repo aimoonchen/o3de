@@ -17,23 +17,6 @@
 #include <QDebug>
 #include <unordered_set>
 
-static QDataStream& operator<<(QDataStream& out, const AZ::Color& color)
-{
-    out << static_cast<float>(color.GetR());
-    out << static_cast<float>(color.GetG());
-    out << static_cast<float>(color.GetB());
-    out << static_cast<float>(color.GetA());
-    return out;
-}
-
-static QDataStream& operator>>(QDataStream& in, AZ::Color& color)
-{
-    float r, g, b, a;
-    in >> r >> g >> b >> a;
-    color.Set(r, g, b, a);
-    return in;
-}
-
 namespace AzQtComponents
 {
 
@@ -254,13 +237,26 @@ void Palette::insertColorsIgnoringDuplicates(int index, QVector<AZ::Color>::cons
 
 QDataStream& operator<<(QDataStream& out, const Palette& palette)
 {
-    out << palette.m_colors;
+    out << static_cast<qint32>(palette.m_colors.size());
+    for (const auto& color : palette.m_colors)
+    {
+        out << color.GetR() << color.GetG() << color.GetB() << color.GetA();
+    }
     return out;
 }
 
 QDataStream& operator>>(QDataStream& in, Palette& palette)
 {
-    in >> palette.m_colors;
+    palette.m_colors.clear();
+    qint32 count = 0;
+    in >> count;
+    palette.m_colors.reserve(count);
+    for (qint32 i = 0; i < count; ++i)
+    {
+        float r, g, b, a;
+        in >> r >> g >> b >> a;
+        palette.m_colors.append(AZ::Color(r, g, b, a));
+    }
     return in;
 }
 

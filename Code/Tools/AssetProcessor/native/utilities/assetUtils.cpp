@@ -847,8 +847,7 @@ namespace AssetUtilities
         // from various APIs differently.  we will settle on upper case as the standard.
         if ((returnString.length() > 1) && (returnString.at(1) == ':'))
         {
-            QCharRef firstChar = returnString[0]; // QCharRef allows you to modify the string in place.
-            firstChar = firstChar.toUpper();
+            returnString[0] = returnString[0].toUpper();
         }
 #endif
         return returnString;

@@ -17,12 +17,13 @@ from pathlib import Path
 import logging as _logging
 
 # 3rd Party
-from PySide2 import QtWidgets
-from PySide2.QtWidgets import QMenuBar, QMenu, QAction
-from PySide2 import QtGui
-from PySide2 import QtCore
-from PySide2.QtCore import Slot, QObject, QUrl
-from shiboken2 import wrapInstance, getCppPointer
+from PySide6 import QtWidgets
+from PySide6.QtWidgets import QMenuBar, QMenu
+from PySide6.QtGui import QAction  # Qt6: QAction moved from QtWidgets to QtGui
+from PySide6 import QtGui
+from PySide6 import QtCore
+from PySide6.QtCore import Slot, QObject, QUrl
+from shiboken6 import wrapInstance, getCppPointer
 
 # -------------------------------------------------------------------------
 #  global scope
@@ -109,7 +110,7 @@ class HelpMenu():
     # --method-set---------------------------------------------------------
     def set_specific_tool_help(self, label, obj_name='tool_action_help'):
         """"""
-        self.tool_action_help = QtWidgets.QAction(self.parent_widget)
+        self.tool_action_help = QtGui.QAction(self.parent_widget)
         self.tool_action_help.setObjectName(obj_name)
         self.help_menu.addAction(self.tool_action_help)
         self.menubar.addAction(self.help_menu.menuAction())
@@ -118,7 +119,7 @@ class HelpMenu():
 
     def set_generic_tool_help(self, label, obj_name='azpy_tool_action_help'):
         """"""
-        self.azpy_tool_action_help = QtWidgets.QAction(self.parent_widget)
+        self.azpy_tool_action_help = QtGui.QAction(self.parent_widget)
         self.azpy_tool_action_help.setObjectName(obj_name)
         self.help_menu.addAction(self.azpy_tool_action_help)
         self.menubar.addAction(self.help_menu.menuAction())
@@ -127,7 +128,7 @@ class HelpMenu():
 
     def set_tool_bug_report(self, label, obj_name='tool_action_bug_report'):
         """"""
-        self.tool_action_bug_report = QtWidgets.QAction(self.parent_widget)
+        self.tool_action_bug_report = QtGui.QAction(self.parent_widget)
         self.tool_action_bug_report.setObjectName(obj_name)
         self.help_menu.addAction(self.tool_action_bug_report)
         self.menubar.addAction(self.help_menu.menuAction())

@@ -24,6 +24,7 @@
 #include <AzQtComponents/Components/ConfigHelpers.h>
 #include <AzQtComponents/Components/Style.h>
 #include <AzQtComponents/Components/Widgets/SpinBox.h>
+#include <QActionGroup>
 #include <AzQtComponents/Components/Widgets/CheckBox.h>
 #include <AzQtComponents/Utilities/Conversions.h>
 #include <AzQtComponents/Utilities/ColorUtilities.h>
@@ -341,7 +342,7 @@ ColorPicker::ColorPicker(ColorPicker::Configuration configuration, const QString
     , m_defaultVForHsMode(0.85)
     , m_defaultLForHsMode(0.85)
 {
-    qRegisterMetaTypeStreamOperators<Palette>("AzQtComponents::Palette");
+    // qRegisterMetaTypeStreamOperators removed in Qt6; metatype handles streaming automatically
 
     setFocusPolicy(Qt::NoFocus);
 

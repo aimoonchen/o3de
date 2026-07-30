@@ -66,7 +66,7 @@ namespace AzToolsFramework
         Qt::Orientations expandingDirections() const override;
 
     protected slots:
-        void onCheckstateChanged(int expanderState);
+        void onCheckstateChanged(Qt::CheckState expanderState);
 
     protected:
         DPERowWidget* GetRow() const;

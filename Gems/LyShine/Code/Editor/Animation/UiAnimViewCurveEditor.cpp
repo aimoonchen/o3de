@@ -20,7 +20,7 @@
 
 #include <QtUtil.h>
 #if defined(Q_OS_WIN)
-#include <QtWinExtras/QtWin>
+// TODO: Qt6 removed QtWinExtras, needs dedicated porting
 #endif
 
 

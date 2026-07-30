@@ -19,8 +19,6 @@
 #include <AzQtComponents/Components/StyleManager.h>
 #include <AzQtComponents/Components/ConfigHelpers.h>
 
-#include <QtWidgets/private/qstylesheetstyle_p.h>
-
 namespace AzQtComponents
 {
     constexpr const char* g_branchLinesEnabledProperty = "BranchLinesEnabled";
@@ -43,11 +41,7 @@ namespace AzQtComponents
                     case QEvent::DynamicPropertyChange:
                     {
                         auto widget = qobject_cast<QWidget*>(obj);
-                        auto styleSheet = StyleManager::styleSheetStyle(widget);
-                        if (styleSheet)
-                        {
-                            styleSheet->repolish(widget);
-                        }
+                        StyleManager::repolishStyleSheet(widget);
                         widget->update();
                         break;
                     }

@@ -38,7 +38,7 @@ namespace AzToolsFramework
     }
 }
 
-class QStringList;
+#include <QStringList>
 class QDir;
 
 namespace AssetProcessor

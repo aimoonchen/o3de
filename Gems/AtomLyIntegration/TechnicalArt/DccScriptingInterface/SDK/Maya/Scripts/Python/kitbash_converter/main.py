@@ -40,9 +40,9 @@ settings = _config.get_config_settings(setup_ly_pyside=True)
 from box import Box
 
 # lumberyard Qt/PySide2
-from PySide2 import QtWidgets, QtCore, QtGui
-from PySide2.QtWidgets import QApplication, QMessageBox
-from PySide2.QtCore import Signal, Slot, QThread, QProcess, QProcessEnvironment
+from PySide6 import QtWidgets, QtCore, QtGui
+from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import Signal, Slot, QThread, QProcess, QProcessEnvironment
 
 for handler in _logging.root.handlers[:]:
     _logging.root.removeHandler(handler)

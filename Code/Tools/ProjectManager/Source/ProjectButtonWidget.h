@@ -25,6 +25,7 @@ QT_FORWARD_DECLARE_CLASS(QProgressBar)
 QT_FORWARD_DECLARE_CLASS(QLayout)
 QT_FORWARD_DECLARE_CLASS(QVBoxLayout)
 QT_FORWARD_DECLARE_CLASS(QEvent)
+QT_FORWARD_DECLARE_CLASS(QEnterEvent)
 QT_FORWARD_DECLARE_CLASS(QMenu)
 
 namespace AzQtComponents
@@ -149,7 +150,7 @@ namespace O3DE::ProjectManager
         void OpenAndroidProjectGenerator(const QString& projectPath);
 
     private:
-        void enterEvent(QEvent* event) override;
+        void enterEvent(QEnterEvent* event) override;
         void leaveEvent(QEvent* event) override;
 
         void ShowReadyState();

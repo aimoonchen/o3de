@@ -19,7 +19,7 @@
 #include <QApplication>
 
 #ifdef Q_OS_WIN
-# include <QtWinExtras/QtWin>
+// QtWinExtras/QtWin removed in Qt6; getNativeHandle uses QPlatformNativeInterface below.
 # include <QtGui/qpa/qplatformnativeinterface.h>
 # include <objidl.h>
 #endif // Q_OS_WIN

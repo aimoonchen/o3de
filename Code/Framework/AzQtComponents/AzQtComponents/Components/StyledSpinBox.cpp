@@ -144,7 +144,7 @@ namespace AzQtComponents
         {
             // Remove trailing zeros, since the locale conversion won't do
             // it for us
-            QChar zeroDigit = locale().zeroDigit();
+            QChar zeroDigit = locale().zeroDigit().at(0);
             QString trailingZeros = QString("%1+$").arg(zeroDigit);
             stringValue.remove(QRegularExpression(trailingZeros));
 
@@ -152,7 +152,7 @@ namespace AzQtComponents
             // if we stripped the trailing zeros, so if that's the case, then
             // add a zero digit on the end so that it is obvious that this is
             // a float value
-            QChar decimalPoint = locale().decimalPoint();
+            QChar decimalPoint = locale().decimalPoint().at(0);
             if (stringValue.endsWith(decimalPoint))
             {
                 stringValue.append(zeroDigit);

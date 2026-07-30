@@ -20,6 +20,7 @@
 #include <native/utilities/BuilderManager.h>
 #include <native/utilities/UuidManager.h>
 #include <QtGui/qwindowdefs.h>
+#include <QStringList>
 #endif
 
 namespace AzToolsFramework

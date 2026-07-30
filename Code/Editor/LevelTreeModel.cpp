@@ -69,7 +69,8 @@ void LevelTreeModelFilter::setFilterText(const QString& text)
     if (m_filterText != lowerText)
     {
         m_filterText = lowerText;
-        invalidateFilter();
+        beginFilterChange();
+        endFilterChange();
     }
 }
 

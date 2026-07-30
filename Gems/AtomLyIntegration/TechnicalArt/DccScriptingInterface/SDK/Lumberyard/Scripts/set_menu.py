@@ -58,15 +58,15 @@ try:
     azlmbr.qt.QtForPythonRequestBus(azlmbr.bus.Broadcast, 'IsActive')
     params = azlmbr.qt.QtForPythonRequestBus(azlmbr.bus.Broadcast, 'GetQtBootstrapParameters')
     params is not None and params.mainWindowId != 0
-    from PySide2 import QtWidgets
+    from PySide6 import QtWidgets
 except Exception as e:
     _LOGGER.error(f'Pyside not available, exception: {e}')
     raise e
 
 # keep going, import the other PySide2 bits we will use
-from PySide2 import QtGui
-from PySide2.QtCore import Slot
-from shiboken2 import wrapInstance, getCppPointer
+from PySide6 import QtGui
+from PySide6.QtCore import Slot
+from shiboken6 import wrapInstance, getCppPointer
 # -------------------------------------------------------------------------
 
 

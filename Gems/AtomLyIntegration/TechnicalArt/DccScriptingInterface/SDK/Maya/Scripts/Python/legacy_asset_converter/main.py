@@ -64,9 +64,9 @@ import OpenImageIO as oiio
 from OpenImageIO import ImageInput, ImageOutput
 from OpenImageIO import ImageBuf, ImageSpec, ImageBufAlgo
 # lumberyard Qt/PySide2
-from PySide2 import QtWidgets, QtCore, QtGui
-from PySide2.QtWidgets import QApplication
-from PySide2.QtCore import Signal, Slot, QThread, QProcess, QProcessEnvironment
+from PySide6 import QtWidgets, QtCore, QtGui
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Signal, Slot, QThread, QProcess, QProcessEnvironment
 # local tool imports
 import lumberyard_data
 import image_conversion

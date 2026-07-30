@@ -16,6 +16,7 @@
 
 #include <QTimer>
 #include <QString>
+#include <QStringList>
 #include <QPointer>
 #endif
 

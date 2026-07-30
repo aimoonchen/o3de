@@ -37,10 +37,10 @@ _UI_FILE = Path(_MODULE_PATH.parent, 'resources', 'example.ui')
 from DccScriptingInterface.azpy.shared.ui import settings_core
 
 # now we can import lumberyards PySide2
-import PySide2
-from PySide2 import QtGui, QtWidgets, QtGui, QtUiTools
-from PySide2.QtWidgets import QApplication, QSizePolicy
-from PySide2.QtUiTools import QUiLoader
+import PySide6
+from PySide6 import QtGui, QtWidgets, QtGui, QtUiTools
+from PySide6.QtWidgets import QApplication, QSizePolicy
+from PySide6.QtUiTools import QUiLoader
 
 # azpy
 #import azpy.shared.ui.settings as qt_settings

@@ -170,7 +170,7 @@ namespace EMStudio
         }
 
         // calculate the drop position
-        QPoint localPos = LocalToGlobal(event->pos());
+        QPoint localPos = LocalToGlobal(event->position().toPoint());
 
         // Dragged from node palette
         if (event->mimeData()->hasFormat(BlendGraphMimeEvent::BlendGraphMimeEventType))
@@ -661,7 +661,7 @@ namespace EMStudio
         m_doubleClickHappened = true;
         NodeGraphWidget::mouseDoubleClickEvent(event);
 
-        GraphNode* node = m_activeGraph->FindNode(event->pos());
+        GraphNode* node = m_activeGraph->FindNode(event->position().toPoint());
         if (node)
         {
             const QModelIndex nodeModelIndex = node->GetModelIndex();
@@ -698,7 +698,7 @@ namespace EMStudio
         {
             if (event->button() == Qt::RightButton)
             {
-                OnContextMenuEvent(event->pos(), event->globalPos(), m_plugin->GetActionFilter());
+                OnContextMenuEvent(event->position().toPoint(), event->globalPosition().toPoint(), m_plugin->GetActionFilter());
                 //setCursor( Qt::ArrowCursor );
             }
         }

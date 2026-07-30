@@ -308,11 +308,8 @@ namespace GraphCanvas
                 return;
             }
 
-            qRegisterMetaTypeStreamOperators<Qt::PenStyle>();
-            qRegisterMetaTypeStreamOperators<Qt::PenCapStyle>();
-            qRegisterMetaTypeStreamOperators<Qt::AlignmentFlag>();
-            qRegisterMetaTypeStreamOperators<Styling::ConnectionCurveType>();
-            qRegisterMetaTypeStreamOperators<Styling::PaletteStyle>();
+            // Qt6: qRegisterMetaTypeStreamOperators was removed; QMetaType handles stream
+            // operators automatically when operator<</>> are visible. No explicit registration needed.
 
             // Allow QVectors to be serialized
             serializeContext->Class<QVariant>()

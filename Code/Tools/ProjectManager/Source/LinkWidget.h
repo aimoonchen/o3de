@@ -15,6 +15,7 @@
 #endif
 
 QT_FORWARD_DECLARE_CLASS(QEvent)
+QT_FORWARD_DECLARE_CLASS(QEnterEvent)
 QT_FORWARD_DECLARE_CLASS(QMouseEvent)
 QT_FORWARD_DECLARE_CLASS(QWidget)
 
@@ -36,7 +37,7 @@ namespace O3DE::ProjectManager
 
     private:
         void mousePressEvent(QMouseEvent* event) override;
-        void enterEvent(QEvent* event) override;
+        void enterEvent(QEnterEvent* event) override;
         void leaveEvent(QEvent* event) override;
         void SetDefaultStyle();
 

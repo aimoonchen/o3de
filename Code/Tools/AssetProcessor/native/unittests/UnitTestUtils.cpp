@@ -10,6 +10,7 @@
 
 #include <QElapsedTimer>
 #include <QTextStream>
+#include <QStringConverter>
 #include <QCoreApplication>
 #include <AzCore/IO/Path/Path.h>
 
@@ -69,7 +70,7 @@ namespace UnitTestUtils
         if (!contents.isEmpty())
         {
             QTextStream ts(&writer);
-            ts.setCodec("UTF-8");
+            ts.setEncoding(QStringConverter::Utf8);
             ts << contents;
         }
         return true;

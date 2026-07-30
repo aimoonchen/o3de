@@ -17,6 +17,7 @@
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDragLeaveEvent>
+#include <QEnterEvent>
 #include <QUrl>
 #endif
 
@@ -98,7 +99,7 @@ namespace EMStudio
         void UpdateInterface();
 
         void paintEvent(QPaintEvent* event) override;
-        void enterEvent(QEvent* event) override             { MCORE_UNUSED(event); m_mouseWithinWidget = true; repaint(); }
+        void enterEvent(QEnterEvent* event) override             { MCORE_UNUSED(event); m_mouseWithinWidget = true; repaint(); }
         void leaveEvent(QEvent* event) override             { MCORE_UNUSED(event); m_mouseWithinWidget = false; repaint(); }
 
     private:

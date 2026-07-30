@@ -76,7 +76,8 @@ namespace AssetProcessor
             }
         }
 
-        invalidateFilter();
+        beginFilterChange();
+        endFilterChange();
     }
 
     bool JobSortFilterProxyModel::lessThan(const QModelIndex& left, const QModelIndex& right) const

@@ -23,9 +23,9 @@
 
 #include <QRegularExpression>
 #include <QDir>
+#include <QStringList>
 
 class QString;
-class QStringList;
 
 namespace Path
 {

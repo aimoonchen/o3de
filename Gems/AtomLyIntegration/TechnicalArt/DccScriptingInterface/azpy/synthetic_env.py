@@ -536,30 +536,30 @@ def init_ly_pyside(env_dict=_SYNTH_ENV_DICT):
         newPath = ''
         newPath += str(PATH_O3DE_BIN) + os.pathsep
         newPath += str(Path.joinpath(QTFORPYTHON_PATH,
-                                     'shiboken2').resolve()) + os.pathsep
+                                     'shiboken6').resolve()) + os.pathsep
         newPath += str(Path.joinpath(QTFORPYTHON_PATH,
-                                     'PySide2').resolve()) + os.pathsep
+                                     'PySide6').resolve()) + os.pathsep
         newPath += path
         os.environ['PATH']=newPath
-        _LOGGER.debug('PySide2 bootstrapped PATH for Windows.')
+        _LOGGER.debug('PySide6 bootstrapped PATH for Windows.')
 
     try:
-        import PySide2
-        _LOGGER.debug('DCCsi, config.py: SUCCESS: import PySide2')
-        _LOGGER.debug(PySide2)
+        import PySide6
+        _LOGGER.debug('DCCsi, config.py: SUCCESS: import PySide6')
+        _LOGGER.debug(PySide6)
         status = True
     except ImportError as e:
-        _LOGGER.debug('DCCsi, config.py: FAILURE: import PySide2')
+        _LOGGER.debug('DCCsi, config.py: FAILURE: import PySide6')
         status = False
         raise(e)
 
     try:
-        import shiboken2
-        _LOGGER.debug('DCCsi, config.py: SUCCESS: import shiboken2')
-        _LOGGER.debug(shiboken2)
+        import shiboken6
+        _LOGGER.debug('DCCsi, config.py: SUCCESS: import shiboken6')
+        _LOGGER.debug(shiboken6)
         status = True
     except ImportError as e:
-        _LOGGER.debug('DCCsi, config.py: FAILURE: import shiboken2')
+        _LOGGER.debug('DCCsi, config.py: FAILURE: import shiboken6')
         status = False
         raise(e)
 
@@ -588,11 +588,11 @@ def set_env(dict_object):
 # -------------------------------------------------------------------------
 def test_Qt():
     try:
-        import PySide2
-        _LOGGER.info('PySide2: {0}'.format(Path(PySide2.__file__).as_posix()))
+        import PySide6
+        _LOGGER.info('PySide2: {0}'.format(Path(PySide6.__file__).as_posix()))
         # builtins.ImportError: DLL load failed: The specified procedure could not be found.
-        from PySide2 import QtCore
-        from PySide2 import QtWidgets
+        from PySide6 import QtCore
+        from PySide6 import QtWidgets
     except IOError as e:
         _LOGGER.error('ERROR: {0}'.format(e))
         raise e

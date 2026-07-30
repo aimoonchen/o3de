@@ -37,8 +37,8 @@ if DCCSI_TEST_PYSIDE:
                                                            set_env=True)
 
     try:
-        import PySide2  # this triggers the PySide2 init
-        from PySide2 import QtWidgets  # this requires DLLs to be built
+        import PySide6  # this triggers the PySide2 init
+        from PySide6 import QtWidgets  # this requires DLLs to be built
     except ImportError as e:
         _LOGGER.error(f'Qt exception: {e}')
         _LOGGER.warning(f'Something is wrong with Qt/PySide imports')

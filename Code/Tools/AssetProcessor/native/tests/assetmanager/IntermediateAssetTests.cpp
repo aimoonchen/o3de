@@ -8,6 +8,8 @@
 
 #include <native/tests/assetmanager/IntermediateAssetTests.h>
 #include <QCoreApplication>
+#include <QTextStream>
+#include <QStringConverter>
 #include <native/unittests/UnitTestUtils.h>
 #include <native/utilities/ProductOutputUtil.h>
 #include <AzFramework/IO/LocalFileIO.h>
@@ -583,7 +585,7 @@ namespace UnitTests
 
         {
             QTextStream ts(&writer);
-            ts.setCodec("UTF-8");
+            ts.setEncoding(QStringConverter::Utf8);
             ts << "modified test file";
         }
 
@@ -627,7 +629,7 @@ namespace UnitTests
 
         {
             QTextStream ts(&writer);
-            ts.setCodec("UTF-8");
+            ts.setEncoding(QStringConverter::Utf8);
             ts << "modified test file";
         }
 

@@ -10,6 +10,7 @@
 
 #if !defined(Q_MOC_RUN)
 #include "Util/AbstractSortModel.h"
+#include "ErrorReport.h" // full CErrorRecord definition required by Q_DECLARE_METATYPE below (Qt6)
 
 #include <QMetaType>
 #include <QPixmap>
@@ -17,7 +18,6 @@
 
 
 class CErrorReport;
-class CErrorRecord;
 
 bool GetPositionFromString(QString er, float* x, float* y, float* z);
 

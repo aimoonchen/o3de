@@ -42,7 +42,9 @@ namespace AzToolsFramework
         setFocusProxy(m_checkBox);
         setFocusPolicy(m_checkBox->focusPolicy());
 
-        connect(m_checkBox, SIGNAL(stateChanged(int)), this, SLOT(onStateChanged(int)));
+        // Qt6: QCheckBox::stateChanged(int) deprecated in favor of checkStateChanged(Qt::CheckState).
+        connect(m_checkBox, &QCheckBox::checkStateChanged, this,
+            [this](Qt::CheckState state) { onStateChanged(static_cast<int>(state)); });
     };
 
     void PropertyCheckBoxCtrl::setValue(bool value)

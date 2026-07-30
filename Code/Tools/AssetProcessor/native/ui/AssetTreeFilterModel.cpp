@@ -26,7 +26,8 @@ namespace AssetProcessor
         m_pathToForceVisibleAsset.clear();
         setFilterRegularExpression(newFilter);
         setFilterCaseSensitivity(Qt::CaseInsensitive);
-        invalidateFilter();
+        beginFilterChange();
+        endFilterChange();
     }
 
     bool AssetTreeFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const
@@ -154,7 +155,8 @@ namespace AssetProcessor
             m_pathToForceVisibleAsset.push_front(item->GetData());
         }
 
-        invalidateFilter();
+        beginFilterChange();
+        endFilterChange();
     }
 
 }

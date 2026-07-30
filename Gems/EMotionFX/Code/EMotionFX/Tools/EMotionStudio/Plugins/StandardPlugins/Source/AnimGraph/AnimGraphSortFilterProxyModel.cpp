@@ -61,7 +61,10 @@ namespace EMStudio
         if (m_nonFilterableSourceIndex != sourceIndex)
         {
             m_nonFilterableSourceIndex = sourceIndex;
-            invalidateFilter();
+            // Qt6: invalidateFilter() -> begin/endFilterChange(); keep filter-only
+            // semantics (do not also re-sort as invalidate() would).
+            beginFilterChange();
+            endFilterChange();
         }
     }
 

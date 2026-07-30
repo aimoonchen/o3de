@@ -52,7 +52,8 @@ namespace GraphCanvas
     {
         m_filter = filter;
         m_testRegex = QRegularExpression(m_filter, QRegularExpression::PatternOption::CaseInsensitiveOption);
-        invalidateFilter();
+        beginFilterChange();
+        endFilterChange();
 
         if (m_filter.isEmpty())
         {

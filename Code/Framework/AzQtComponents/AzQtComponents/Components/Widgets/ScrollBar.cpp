@@ -20,8 +20,6 @@
 #include <QScrollBar>
 #include <QEvent>
 
-#include <QtWidgets/private/qstylesheetstyle_p.h>
-
 namespace AzQtComponents
 {
     static constexpr const char* g_showBackgroundProperty = "ShowBackground";
@@ -167,10 +165,7 @@ namespace AzQtComponents
                 {
                     case QEvent::DynamicPropertyChange:
                     {
-                        if (auto styleSheet = StyleManager::styleSheetStyle(cornerWidget))
-                        {
-                            styleSheet->repolish(cornerWidget);
-                        }
+                        StyleManager::repolishStyleSheet(cornerWidget);
                     }
                     break;
                 }
@@ -306,10 +301,12 @@ namespace AzQtComponents
     {
         Q_UNUSED(config);
 
-        auto styleSheetStyle = qobject_cast<QStyleSheetStyle*>(style->baseStyle());
-        if (styleSheetStyle)
+        // Qt6: previously reached through the private QStyleSheetStyle to invoke the
+        // native (Windows) scrollbar drawing. On stock Qt6 our Style proxy's baseStyle()
+        // IS the native Fusion style; draw the default scrollbar through it.
+        if (QStyle* base = style->baseStyle())
         {
-            styleSheetStyle->QWindowsStyle::drawComplexControl(QStyle::CC_ScrollBar, option, painter, widget);
+            base->drawComplexControl(QStyle::CC_ScrollBar, option, painter, widget);
             return true;
         }
 

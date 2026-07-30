@@ -240,7 +240,7 @@ namespace GraphCanvas
         // If name contains filter or filter regex, assuming shorter name has stronger relevance
         if (sourceString.contains(m_filter) || sourceString.contains(m_filterRegex))
         {
-            result = AZStd::min(result, sourceString.size());
+            result = AZStd::min(result, aznumeric_cast<int>(sourceString.size()));
         }
         return result;
     }
@@ -285,7 +285,8 @@ namespace GraphCanvas
             m_hasSourceSlotFilter = false;
             m_sourceSlotFilter.clear();
 
-            invalidateFilter();
+            beginFilterChange();
+            endFilterChange();
         }
     }
 
@@ -326,7 +327,8 @@ namespace GraphCanvas
         }
 
         m_sourceSlotAutoCompleteModel->endResetModel();
-        invalidateFilter();
+        beginFilterChange();
+        endFilterChange();
     }
 
     bool NodePaletteSortFilterProxyModel::HasFilter() const

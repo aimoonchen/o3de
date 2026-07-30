@@ -16,6 +16,8 @@
 #include "Widgets/HierarchyWidget/HierarchyWidget.h"
 #include "Windows/EditorCommon.h"
 
+#include <QEnterEvent>
+
 #define UICANVASEDITOR_HIERARCHY_HEADER_ICON_EYE ":/Icons/Eye.svg"
 #define UICANVASEDITOR_HIERARCHY_HEADER_ICON_PADLOCK ":/Icons/Padlock.svg"
 
@@ -91,7 +93,7 @@ void HierarchyHeader::paintSection(QPainter* painter, const QRect& rect, int log
     // Otherwise it will draw over our icons.
 }
 
-void HierarchyHeader::enterEvent(QEvent* ev)
+void HierarchyHeader::enterEvent(QEnterEvent* ev)
 {
     m_hierarchy->ClearItemBeingHovered();
 

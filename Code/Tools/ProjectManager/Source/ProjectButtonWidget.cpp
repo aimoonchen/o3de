@@ -20,6 +20,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QEvent>
+#include <QEnterEvent>
 #include <QResizeEvent>
 #include <QLabel>
 #include <QPushButton>
@@ -346,7 +347,7 @@ namespace O3DE::ProjectManager
         connect(m_projectImageLabel, &LabelButton::triggered, [this](QMouseEvent* event) {
             if (!m_isProjectBuilding && event->button() == Qt::RightButton)
             {
-                m_projectMenuButton->menu()->move(event->globalPos());
+                m_projectMenuButton->menu()->move(event->globalPosition().toPoint());
                 m_projectMenuButton->menu()->show();
             }
         });
@@ -778,7 +779,7 @@ namespace O3DE::ProjectManager
         m_projectImageLabel->GetShowLogsButton()->hide();
     }
 
-    void ProjectButton::enterEvent(QEvent* /*event*/)
+    void ProjectButton::enterEvent(QEnterEvent* /*event*/)
     {
         if (m_canLaunch)
         {

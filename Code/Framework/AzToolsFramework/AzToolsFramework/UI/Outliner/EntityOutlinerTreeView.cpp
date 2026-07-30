@@ -124,7 +124,7 @@ namespace AzToolsFramework
         // Postponing normal mouse press logic until mouse is released or dragged.
         // This allows drag/drop of non-selected items.
         ClearQueuedMouseEvent();
-        m_queuedMouseEvent = new QMouseEvent(*event);
+        m_queuedMouseEvent = new QMouseEvent(event->type(), event->position(), event->globalPosition(), event->button(), event->buttons(), event->modifiers());
     }
 
     void EntityOutlinerTreeView::mouseMoveEvent(QMouseEvent* event)
@@ -132,14 +132,14 @@ namespace AzToolsFramework
         // Prevent multiple updates throughout the function for changing UIs.
         bool forceUpdate = false;
 
-        m_mousePosition = event->pos();
+        m_mousePosition = event->position().toPoint();
         
         if (m_queuedMouseEvent)
         {
             if (!m_isDragSelectActive)
             {
                 // Determine whether the mouse move should trigger a rect selection or an entity drag.
-                QModelIndex clickedIndex = indexAt(m_queuedMouseEvent->pos());
+                QModelIndex clickedIndex = indexAt(m_queuedMouseEvent->position().toPoint());
                 // Even though the drag started on an index, we want to trigger a drag select from the last column.
                 // This is to allow drag selection to be triggered from anywhere in the hierarchy.
                 if (clickedIndex.isValid() && clickedIndex.column() != EntityOutlinerListModel::ColumnSpacing)
@@ -225,7 +225,7 @@ namespace AzToolsFramework
     void EntityOutlinerTreeView::HandleDrag()
     {
         // Retrieve the index at the click position.
-        QModelIndex indexAtClick = indexAt(m_queuedMouseEvent->pos()).siblingAtColumn(EntityOutlinerListModel::ColumnName);
+        QModelIndex indexAtClick = indexAt(m_queuedMouseEvent->position().toPoint()).siblingAtColumn(EntityOutlinerListModel::ColumnName);
 
         AZ::EntityId entityId(indexAtClick.data(EntityOutlinerListModel::EntityIdRole).value<AZ::u64>());
         AZ::EntityId parentEntityId;
@@ -256,7 +256,7 @@ namespace AzToolsFramework
         }
 
         // Retrieve the two opposing corners of the rect.
-        const QPoint point1 = (m_queuedMouseEvent->pos());  // The position the drag operation started at.
+        const QPoint point1 = (m_queuedMouseEvent->position().toPoint());  // The position the drag operation started at.
         const QPoint point2 = (m_mousePosition);            // The current mouse position.
 
         // Determine which point's y is the top and which is the bottom.
@@ -334,7 +334,7 @@ namespace AzToolsFramework
             QPainter painter(viewport());
 
             // Retrieve the two corners of the rect.
-            const QPoint point1 = (m_queuedMouseEvent->pos());  // The position the drag operation started at.
+            const QPoint point1 = (m_queuedMouseEvent->position().toPoint());  // The position the drag operation started at.
             const QPoint point2 = (m_mousePosition);            // The current mouse position.
 
             // We need the top left and bottom right corners, which may not be the two corners we got above.
@@ -439,19 +439,17 @@ namespace AzToolsFramework
 
     void EntityOutlinerTreeView::ProcessQueuedMousePressedEvent(QMouseEvent* event)
     {
-        QModelIndex clickedIndex = indexAt(m_queuedMouseEvent->pos());
+        QModelIndex clickedIndex = indexAt(m_queuedMouseEvent->position().toPoint());
         if (!clickedIndex.isValid() || clickedIndex.column() != EntityOutlinerListModel::ColumnSpacing)
         {
             //interpret the mouse event as a button press
             QMouseEvent mousePressedEvent(
                 QEvent::MouseButtonPress,
-                event->localPos(),
-                event->windowPos(),
-                event->screenPos(),
+                event->position(),
+                event->globalPosition(),
                 event->button(),
                 event->buttons(),
-                event->modifiers(),
-                event->source());
+                event->modifiers());
             QTreeView::mousePressEvent(&mousePressedEvent);
         }
     }

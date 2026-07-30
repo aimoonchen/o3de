@@ -327,9 +327,10 @@ function(ly_add_target)
     # https://gitlab.kitware.com/cmake/cmake/issues/18749
     # AUTOMOC is supposed to always rebuild because it checks files that are not listed in the sources (like extra
     # "_p.h" headers) and which may change outside the visibility of the generator.
-    # We are not using AUTOUIC because of:
-    # https://gitlab.kitware.com/cmake/cmake/-/issues/18741
-    # To overcome this problem, we manually wrap all the ui files listed in the target with qt5_wrap_ui
+    # We are not using a custom uic wrapper anymore. The original workaround for
+    # https://gitlab.kitware.com/cmake/cmake/-/issues/18741 is no longer needed:
+    # that bug was fixed in CMake 3.16 and Qt6 requires CMake >= 3.16, so the
+    # built-in AUTOUIC works correctly.
     foreach(prop IN ITEMS AUTOMOC AUTORCC)
         if(${ly_add_target_${prop}})
             set_property(TARGET ${ly_add_target_NAME} PROPERTY ${prop} ON)
@@ -348,11 +349,24 @@ function(ly_add_target)
         if(NOT all_ui_sources)
             message(FATAL_ERROR "Target ${ly_add_target_NAME} contains AUTOUIC but doesnt have any .ui file")
         endif()
-        ly_qt_uic_target(${ly_add_target_NAME})
-        # remove the UIC sources from the target since a custom build command will be applied for them:
-        get_target_property(all_ui_sources ${ly_add_target_NAME} SOURCES)
-        list(FILTER all_ui_sources EXCLUDE REGEX "^.*\\.ui$")
-        set_target_properties(${ly_add_target_NAME} PROPERTIES SOURCES "${all_ui_sources}")
+        # Qt6 + CMake >= 3.16: built-in AUTOUIC works correctly (issue #18741 fixed).
+        set_property(TARGET ${ly_add_target_NAME} PROPERTY AUTOUIC ON)
+        # O3DE sources include the generated ui_*.h via module-root-relative, path-qualified
+        # includes (e.g. <AzToolsFramework/AssetBrowser/AssetPicker/ui_AssetPickerDialog.h>),
+        # while AUTOUIC only matches the .ui by basename and searches relative to the including
+        # source file. The old ly_qt_uic_target handled this explicitly. To make path-qualified
+        # includes resolve, add every directory that actually contains a .ui file to
+        # AUTOUIC_SEARCH_PATHS so AUTOUIC can locate the source .ui by basename.
+        set(ly_autouic_search_paths "")
+        foreach(ui_file IN LISTS all_ui_sources)
+            get_filename_component(ui_dir "${ui_file}" DIRECTORY)
+            if(NOT IS_ABSOLUTE "${ui_dir}")
+                set(ui_dir "${CMAKE_CURRENT_SOURCE_DIR}/${ui_dir}")
+            endif()
+            list(APPEND ly_autouic_search_paths "${ui_dir}")
+        endforeach()
+        list(REMOVE_DUPLICATES ly_autouic_search_paths)
+        set_property(TARGET ${ly_add_target_NAME} PROPERTY AUTOUIC_SEARCH_PATHS ${ly_autouic_search_paths})
     endif()
 
     # Add dependencies that were added before this target was available
@@ -847,3 +861,48 @@ function(ly_get_vs_folder_directory absolute_target_source_dir output_source_dir
 
     set(${output_source_dir} ${relative_target_source_dir} PARENT_SCOPE)
 endfunction()
+
+# ly_add_translations: previously provided by the pre-built Qt5 package. With a
+# system Qt6 we redefine it using Qt6 LinguistTools. It compiles the given .ts
+# files to .qm (via qt_add_lrelease) and EMBEDS them into the target as Qt
+# resources under ":/<PREFIX>/<name>.qm", matching the old Qt5 package behaviour.
+#
+# IMPORTANT: the editor loads translations from the *resource* path (e.g.
+# QtEditorApplication.cpp: CreateAndInitializeTranslator(..., ":/Translations")
+# guarded by Q_ASSERT(QFile::exists(...))). Merely copying .qm to a disk folder
+# next to the executable would leave ":/Translations/*.qm" absent -> silent
+# translation loss in release and a startup assert in debug. So we must compile
+# the .qm into the binary via qt_add_resources.
+function(ly_add_translations)
+    set(options)
+    set(oneValueArgs PREFIX)
+    set(multiValueArgs TARGETS FILES)
+    cmake_parse_arguments(ly_add_translations "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    if(NOT ly_add_translations_TARGETS)
+        message(FATAL_ERROR "ly_add_translations requires at least one target in TARGETS")
+    endif()
+    if(NOT ly_add_translations_FILES)
+        message(FATAL_ERROR "ly_add_translations requires at least one .ts file in FILES")
+    endif()
+
+    # Compile .ts -> .qm once. qt_add_lrelease creates a build target and reports
+    # the produced .qm file paths in the given OUTPUT variable.
+    qt_add_lrelease(TS_FILES ${ly_add_translations_FILES} QM_FILES_OUTPUT_VARIABLE qm_files)
+
+    foreach(target_name ${ly_add_translations_TARGETS})
+        # Alias each generated .qm under the requested resource prefix so it
+        # resolves as ":/<PREFIX>/<basename>.qm" at runtime.
+        foreach(qm_file ${qm_files})
+            get_filename_component(qm_name "${qm_file}" NAME)
+            set_source_files_properties("${qm_file}" PROPERTIES
+                QT_RESOURCE_ALIAS "${qm_name}"
+                GENERATED TRUE)
+        endforeach()
+        qt_add_resources(${target_name} "${target_name}_translations"
+            PREFIX "/${ly_add_translations_PREFIX}"
+            FILES ${qm_files})
+    endforeach()
+endfunction()
+
+

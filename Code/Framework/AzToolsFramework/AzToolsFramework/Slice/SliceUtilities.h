@@ -27,6 +27,7 @@ AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QWidget>
 #include <QLabel>
 #include <QDialog>
+#include <QEnterEvent>
 #include <QWidgetAction>
 AZ_POP_DISABLE_WARNING
 
@@ -424,7 +425,7 @@ namespace AzToolsFramework
         {
         public:
             DetachMenuActionWidget(QWidget* parent, const int& indentation, const AZStd::string& sliceAssetName, const bool& isLastAncestor);
-            void enterEvent(QEvent* event) override;
+            void enterEvent(QEnterEvent* event) override;
             void leaveEvent(QEvent* event) override;
 
         private:

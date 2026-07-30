@@ -285,11 +285,11 @@ inline void SplitString(const QString& rSrcStr, QStringList& rDestStrings, char 
 
     while (true)
     {
-        crtPos = rSrcStr.indexOf(aSeparator, lastPos);
+        crtPos = static_cast<int>(rSrcStr.indexOf(aSeparator, lastPos));
 
         if (-1 == crtPos)
         {
-            crtPos = rSrcStr.length();
+            crtPos = static_cast<int>(rSrcStr.length());
 
             if (crtPos != lastPos)
             {
@@ -328,8 +328,7 @@ QColor ColorToQColor(uint32 color);
 class QCursor;
 class QPixmap;
 
-template<typename T>
-class QVector;
+#include <QVector>
 
 /*! Collection of Utility MFC functions.
 */
@@ -390,7 +389,7 @@ public:
         while (totalBytesLeftToWrite > 0)
         {
             uint bytesToWrite = AZ::GetMin(blockSize, totalBytesLeftToWrite);
-            uint bytesWritten = QDataStream::writeRawData(reinterpret_cast<char*>(buffer) + totalBytesWritten, bytesToWrite);
+            uint bytesWritten = static_cast<uint>(QDataStream::writeRawData(reinterpret_cast<char*>(buffer) + totalBytesWritten, bytesToWrite));
 
             totalBytesLeftToWrite -= bytesWritten;
             totalBytesWritten += bytesWritten;
@@ -484,12 +483,12 @@ inline CArchive& operator>>(CArchive& ar, QString& str)
         {
             ushort* shortAlignedData = new ushort[length];
             memcpy(shortAlignedData, raw, length * 2);
-            str = QString::fromUtf16(shortAlignedData, aznumeric_cast<int>(length));
+            str = QString::fromUtf16(reinterpret_cast<const char16_t*>(shortAlignedData), aznumeric_cast<int>(length));
             delete[] shortAlignedData;
         }
         else
         {
-            str = QString::fromUtf16(reinterpret_cast<ushort*>(raw), aznumeric_cast<int>(length));
+            str = QString::fromUtf16(reinterpret_cast<const char16_t*>(raw), aznumeric_cast<int>(length));
         }
     }
 
@@ -510,7 +509,7 @@ inline CArchive& operator<<(CArchive& ar, const QString& str)
     // box and is much less ambiguous on other platforms.
 
     QByteArray data = str.toUtf8();
-    int length = data.length();
+    int length = static_cast<int>(data.length());
 
     if (length < 255)
     {

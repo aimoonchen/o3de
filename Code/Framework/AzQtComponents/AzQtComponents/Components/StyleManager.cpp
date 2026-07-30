@@ -25,8 +25,6 @@ AZ_POP_DISABLE_WARNING
 #include <QWidget>
 #include <QDebug>
 
-#include <QtWidgets/private/qstylesheetstyle_p.h>
-
 #include <AzQtComponents/Components/StylesheetPreprocessor.h>
 #include <AzQtComponents/Utilities/QtPluginPaths.h>
 #include <AzQtComponents/Components/StyleSheetCache.h>
@@ -96,36 +94,35 @@ namespace AzQtComponents
         return true;
     }
 
-    QStyleSheetStyle* StyleManager::styleSheetStyle(const QWidget* widget)
+    QStyle* StyleManager::baseStyle([[maybe_unused]] const QWidget* widget)
     {
-        Q_UNUSED(widget);
-        // widget is currently unused, but would be required if Qt::AA_ManualStyleSheetStyle was
-        // not set.
-
-        if (!s_instance)
+        // Qt6: the O3DE Qt5 fork chained Style -> QStyleSheetStyle -> native and this
+        // returned the native base underneath the (private) QStyleSheetStyle. On stock
+        // Qt6 we no longer construct a QStyleSheetStyle ourselves (its symbols are not
+        // exported by official Qt); the chain is Style -> native (Fusion), and Qt wraps
+        // the app style in its own internal QStyleSheetStyle when a stylesheet is set.
+        // So the "base" style is simply the base of our Style proxy.
+        if (!s_instance || !s_instance->m_style)
         {
-            AZ_Warning("StyleManager", false, "StyleManager::styleSheetStyle called before instance was created");
             return nullptr;
         }
-
-        if (!QApplication::testAttribute(Qt::AA_ManualStyleSheetStyle))
-        {
-            qFatal("StyleManager::styleSheetStyle has not been implemented for automatically created QStyleSheetStyles");
-            return nullptr;
-        }
-
-        return s_instance->m_styleSheetStyle;
-    }
-
-    QStyle *StyleManager::baseStyle(const QWidget *widget)
-    {
-        const auto sss = styleSheetStyle(widget);
-        return sss ? sss->baseStyle() : nullptr;
+        return static_cast<QProxyStyle*>(s_instance->m_style.data())->baseStyle();
     }
 
     void StyleManager::repolishStyleSheet(QWidget* widget)
     {
-        StyleManager::styleSheetStyle(widget)->repolish(widget);
+        // Qt6: replaces QStyleSheetStyle::repolish(widget). Unpolish/polish clears cached
+        // render rules and re-applies stylesheet-driven properties (incl. qproperty-*),
+        // which is the public-API equivalent of the private repolish.
+        if (!widget)
+        {
+            return;
+        }
+        if (QStyle* style = widget->style())
+        {
+            style->unpolish(widget);
+            style->polish(widget);
+        }
     }
 
     StyleManager::StyleManager(QObject* parent)
@@ -148,7 +145,6 @@ namespace AzQtComponents
         {
             delete m_style.data();
             m_style.clear();
-            m_styleSheetStyle = nullptr;
         }
     }
 
@@ -161,8 +157,12 @@ namespace AzQtComponents
         }
         s_instance = this;
 
-        QApplication::setAttribute(Qt::AA_ManualStyleSheetStyle, true);
-        QApplication::setAttribute(Qt::AA_PropagateStyleToChildren, true);
+        // Qt6: the O3DE Qt5 fork exposed Qt::AA_ManualStyleSheetStyle /
+        // Qt::AA_PropagateStyleToChildren. Neither exists in stock Qt6:
+        //  - manual QStyleSheetStyle installation is done explicitly below, so no
+        //    "manual" opt-in flag is needed;
+        //  - Qt6 already propagates the application style to child widgets by default.
+        // Both setAttribute calls are therefore dropped.
 
         connect(application, &QCoreApplication::aboutToQuit, this, &StyleManager::cleanupStyles);
 
@@ -181,9 +181,12 @@ namespace AzQtComponents
         m_autoCustomWindowDecorations = new AutoCustomWindowDecorations(this);
         m_autoCustomWindowDecorations->setMode(AutoCustomWindowDecorations::Mode_AnyWindow);
 
-        // Style is chained as: Style -> QStyleSheetStyle -> native, meaning any CSS limitation can be tackled in Style.cpp
-        m_styleSheetStyle = new QStyleSheetStyle(createBaseStyle());
-        m_style = new Style(m_styleSheetStyle);
+        // Qt6: the O3DE Qt5 fork chained Style -> QStyleSheetStyle -> native. On stock
+        // Qt6 the QStyleSheetStyle private class is not exported, and it is unnecessary:
+        // when qApp->setStyleSheet() is called (see refresh()), Qt6 automatically wraps
+        // the application style (our Style) in its own internal QStyleSheetStyle to apply
+        // CSS. So we install Style -> native (Fusion) directly.
+        m_style = new Style(createBaseStyle());
 
         QApplication::setStyle(m_style);
         m_style->setParent(this);
@@ -259,7 +262,10 @@ namespace AzQtComponents
     void StyleManager::refresh()
     {
         const auto globalStyleSheet = m_stylesheetCache->loadStyleSheet(g_globalStyleSheetName.toString());
-        m_styleSheetStyle->setGlobalSheet(globalStyleSheet);
+        // Qt6: the O3DE Qt5 fork's QStyleSheetStyle::setGlobalSheet applied one
+        // stylesheet globally to every widget. Stock Qt6 has no such private API;
+        // the application-wide stylesheet is the equivalent mechanism.
+        qApp->setStyleSheet(globalStyleSheet);
 
         // Iterate widgets and update the stylesheet (the base style has already been set)
         auto i = m_widgetToStyleSheetMap.constBegin();

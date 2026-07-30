@@ -16,6 +16,7 @@
 #include <QObject>
 #include <QString>
 #include <QHostAddress>
+#include <QStringList>
 #include <QStringListModel>
 #include "native/utilities/AssetUtilEBusHelper.h"
 #include <QAbstractItemModel>

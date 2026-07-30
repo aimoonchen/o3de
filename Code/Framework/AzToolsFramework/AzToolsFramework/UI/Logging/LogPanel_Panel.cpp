@@ -502,7 +502,8 @@ namespace AzToolsFramework
         void FilteredLogDataModel::SetTabSettings(const TabSettings& source)
         {
             m_tabSettings = source;
-            invalidateFilter();
+            beginFilterChange();
+            endFilterChange();
         }
 
         bool FilteredLogDataModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const
@@ -717,12 +718,7 @@ namespace AzToolsFramework
                     bool rich = index.data(ExtraRoles::RichTextRole).toBool();
                     if (rich)
                     {
-#if (QT_VERSION < QT_VERSION_CHECK(5, 11, 0))
-                        QStyleOptionViewItemV4 viewItem = option;
-                        initStyleOption(&viewItem, index);
-#else
                         const QStyleOptionViewItem& viewItem = option;
-#endif
 
                         QTextDocument doc;
                         doc.setHtml(viewItem.text);
@@ -744,11 +740,7 @@ namespace AzToolsFramework
                 // if we contain links then make it rich...
                 if (rich)
                 {
-#if (QT_VERSION < QT_VERSION_CHECK(5, 11, 0))
-                    QStyleOptionViewItemV4 tempOption = option;
-#else
                     QStyleOptionViewItem tempOption = option;
-#endif
                     initStyleOption(&tempOption, index);
 
                     QStyle* style = tempOption.widget ? tempOption.widget->style() : QApplication::style();
@@ -822,11 +814,7 @@ namespace AzToolsFramework
                 QString data = index.data(Qt::DisplayRole).toString();
                 bool isRich = index.data(ExtraRoles::RichTextRole).toBool();
 
-#if (QT_VERSION < QT_VERSION_CHECK(5, 11, 0))
-                QStyleOptionViewItemV4 options = option;
-#else
                 QStyleOptionViewItem options = option;
-#endif
                 initStyleOption(&options, index);
 
                 QLabel* richLabel = new QLabel(parent);

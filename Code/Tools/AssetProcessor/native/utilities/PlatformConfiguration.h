@@ -10,6 +10,7 @@
 
 #if !defined(Q_MOC_RUN)
 #include <QList>
+#include <QStringList>
 #include <QString>
 #include <QObject>
 #include <QHash>

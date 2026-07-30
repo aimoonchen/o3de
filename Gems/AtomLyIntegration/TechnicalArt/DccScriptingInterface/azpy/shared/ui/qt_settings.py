@@ -29,8 +29,8 @@ _config = azpy.config_utils.get_dccsi_config()
 _config.init_o3de_pyside(settings.O3DE_DEV)
 
 # now we can import lumberyards PySide2
-import PySide2.QtCore as QtCore
-import PySide2.QtWidgets as QtWidgets
+import PySide6.QtCore as QtCore
+import PySide6.QtWidgets as QtWidgets
 
 # -------------------------------------------------------------------------
 #  global space debug flag

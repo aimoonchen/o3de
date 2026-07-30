@@ -27,7 +27,6 @@
 #include <QApplication>
 #include <QCursor>
 #include <QDebug>
-#include <QDesktopWidget>
 #include <QDockWidget>
 #include <QEvent>
 #include <QTimer>
@@ -128,7 +127,7 @@ namespace AzQtComponents
 
         // Register our TabContainerType stream operators so that they will be used
         // when reading/writing from/to data streams
-        qRegisterMetaTypeStreamOperators<FancyDocking::TabContainerType>("FancyDocking::TabContainerType");
+        // qRegisterMetaTypeStreamOperators removed in Qt6; metatype handles streaming automatically
         mainWindow->installEventFilter(this);
         mainWindow->SetFancyDockingOwner(this);
         setAutoFillBackground(false);
@@ -1476,8 +1475,8 @@ namespace AzQtComponents
                     // Construct a new QMouseEvent with a local mouse position that is correct for
                     // the tab widget. We can't just pass the event being filtered because the mouse
                     // positions are relative to the widget being watched.
-                    const auto tabPos = m_state.tabWidget->mapFromGlobal(event->globalPos());
-                    QMouseEvent tabEvent(event->type(), tabPos, event->button(), event->buttons(), event->modifiers());
+                    const auto tabPos = m_state.tabWidget->mapFromGlobal(event->globalPosition().toPoint());
+                    QMouseEvent tabEvent(event->type(), QPointF(tabPos), event->globalPosition(), event->button(), event->buttons(), event->modifiers());
                     m_state.tabWidget->mouseMoveEvent(&tabEvent);
                     return true;
                 }

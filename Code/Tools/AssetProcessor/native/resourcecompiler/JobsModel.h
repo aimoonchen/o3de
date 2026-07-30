@@ -20,9 +20,10 @@
 #include <native/assetprocessor.h>
 #endif
 
-// Do this here, rather than EditorAssetSystemAPI.h so that we don't have to link against Qt5Core to
+// Do this here, rather than EditorAssetSystemAPI.h so that we don't have to link against QtCore to
 // use EditorAssetSystemAPI.h
-Q_DECLARE_METATYPE(AzToolsFramework::AssetSystem::JobStatus);
+// Q_DECLARE_METATYPE(AzToolsFramework::AssetSystem::JobStatus) is declared centrally in native/assetprocessor.h
+// (which is included above) to guarantee it precedes any implicit QMetaTypeId instantiation in unity builds.
 
 namespace AzToolsFramework
 {

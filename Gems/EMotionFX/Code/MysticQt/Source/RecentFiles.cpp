@@ -200,9 +200,9 @@ namespace MysticQt
     {
         m_maxNumRecentFiles = numRecentFiles;
 
-        if (m_recentFiles.size() > m_maxNumRecentFiles)
+        if (m_recentFiles.size() > static_cast<int>(m_maxNumRecentFiles))
         {
-            while (m_recentFiles.size() > m_maxNumRecentFiles)
+            while (m_recentFiles.size() > static_cast<int>(m_maxNumRecentFiles))
             {
                 m_recentFiles.removeLast();
             }

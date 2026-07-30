@@ -9,6 +9,7 @@
 #pragma once
 
 #include <QWidget>
+#include <QEnterEvent>
 #include <QElapsedTimer>
 #include <Atom/RPI.Public/Base.h>
 #include <AzToolsFramework/Viewport/ViewportMessages.h>
@@ -133,7 +134,7 @@ namespace AtomToolsFramework
 
         // QWidget overrides ...
         bool event(QEvent* event) override;
-        void enterEvent(QEvent* event) override;
+        void enterEvent(QEnterEvent* event) override;
         void leaveEvent(QEvent* event) override;
         void mouseMoveEvent(QMouseEvent* mouseEvent) override;
 

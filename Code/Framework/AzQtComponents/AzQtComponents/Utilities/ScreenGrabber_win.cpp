@@ -12,7 +12,7 @@
 #include <QApplication>
 #include <QScreen>
 #include <QWindow>
-#include <QtWinExtras/QtWin>
+// TODO: Qt6 removed QtWinExtras, needs dedicated porting
 #include <QGlobalStatic>
 #include <QHash>
 #include <QMutex>

@@ -10,6 +10,9 @@
 #include "native/AssetManager/PathDependencyManager.h"
 #include "native/AssetManager/assetScannerWorker.h"
 
+#include <QTextStream>
+#include <QStringConverter>
+
 #include <AzCore/Settings/SettingsRegistryMergeUtils.h>
 #include <AzToolsFramework/Asset/AssetProcessorMessages.h>
 #include <AzToolsFramework/AssetDatabase/AssetDatabaseConnection.h>
@@ -5329,7 +5332,7 @@ TEST_F(AssetProcessorManagerTest, SourceFileProcessFailure_ClearsFingerprint)
         ASSERT_TRUE(writer.open(QFile::WriteOnly));
 
         QTextStream ts(&writer);
-        ts.setCodec("UTF-8");
+        ts.setEncoding(QStringConverter::Utf8);
         ts << "Hello World";
     }
 
