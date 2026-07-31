@@ -21,6 +21,14 @@ namespace AzQtComponents
     class FancyDocking;
 }
 
+#if defined(CEE_HAVE_ADS)
+namespace ads
+{
+    class CDockManager;
+    class CDockWidget;
+} // namespace ads
+#endif
+
 namespace CrossEngineEditor
 {
     //! Single editor viewport id shared by the viewport widget and the interaction system.
@@ -67,12 +75,20 @@ namespace CrossEngineEditor
         void SaveWorkspaceLayout(const QString& name);
         bool RestoreWorkspaceLayout(const QString& name);
 
-        //! Register a dock widget with the fancy docking system in the given area.
+        //! Register a dock panel in the given area. With ADS it wraps the content in an
+        //! ads::CDockWidget and adds it to the dock manager; otherwise it uses a QDockWidget
+        //! with the FancyDocking scaffold. Returns nullptr on the ADS path (caller ignores it).
         QDockWidget* AddPanel(const QString& objectName, const QString& title, QWidget* content, Qt::DockWidgetArea area);
 
         //! Collect every QAction reachable from the menus (data source for the command palette).
         QList<QAction*> CollectCommands() const;
 
+#if defined(CEE_HAVE_ADS)
+        //! Qt-Advanced-Docking-System manager. Owns all dock widgets and the layout state.
+        //! Parented to this QMainWindow, so Qt destroys it - do not wrap in unique_ptr.
+        ads::CDockManager* m_dockManager = nullptr;
+#else
         AZStd::unique_ptr<AzQtComponents::FancyDocking> m_fancyDocking;
+#endif
     };
 } // namespace CrossEngineEditor

@@ -16,12 +16,14 @@ set(FILES
     Source/Window/AssetBrowserPanel.cpp
     Source/Window/CommandPalette.h
     Source/Window/CommandPalette.cpp
-    Source/Viewport/NullViewportWidget.h
-    Source/Viewport/NullViewportWidget.cpp
+    Source/Viewport/EditorViewportWidget.h
+    Source/Viewport/EditorViewportWidget.cpp
+    Source/Viewport/EngineViewport.h
+    Source/Viewport/EngineViewport.cpp
+    Source/Viewport/EngineViewportWindow.h
+    Source/Viewport/EngineViewportWindow.cpp
     Source/Viewport/GenericDebugDisplay.h
     Source/Viewport/GenericDebugDisplay.cpp
-    Source/Viewport/GLDebugRenderer.h
-    Source/Viewport/GLDebugRenderer.cpp
     Source/Viewport/EditorViewportCameraController.h
     Source/Viewport/EditorViewportCameraController.cpp
     Source/Viewport/EditorGrid.h

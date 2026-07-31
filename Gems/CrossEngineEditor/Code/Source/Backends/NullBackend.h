@@ -18,8 +18,6 @@
 #include <BackendAPI/IEntityMirror.h>
 #include <BackendAPI/ISceneRenderer.h>
 
-#include <Viewport/GLDebugRenderer.h>
-
 namespace CrossEngineEditor
 {
     class NullBackend final : public IEngineBackend
@@ -39,23 +37,21 @@ namespace CrossEngineEditor
         class NullSceneRenderer final : public ISceneRenderer
         {
         public:
-            void AttachToWindow(void* nativeWindowHandle, uint32_t width, uint32_t height) override;
-            void Resize(uint32_t width, uint32_t height) override;
-            void RenderFrame(const AZ::Matrix4x4& worldToView, const AZ::Matrix4x4& viewToClip) override;
+            // Native surface lifecycle. The Null backend has no RHI/swapchain, so it never
+            // becomes "surface ready" and draws nothing - it is the fall-back used only when
+            // the Diligent backend is not built. The editor logic (camera/picking) still runs.
+            void OnSurfaceCreated(void* nativeWindowHandle, uint32_t width, uint32_t height) override;
+            void OnSurfaceResized(uint32_t width, uint32_t height) override;
+            void OnSurfaceAboutToBeDestroyed() override;
+            bool IsSurfaceReady() const override { return false; }
+
+            void BeginOverlayFrame(const AZ::Matrix4x4& worldToView, const AZ::Matrix4x4& viewToClip) override;
             void SubmitLines(AZStd::span<const DebugVertex> vertices) override;
             void SubmitTriangles(AZStd::span<const DebugVertex> vertices) override;
             void SetDepthTest(bool enabled) override;
-
-            //! Release GL resources (viewport's GL context must be current).
-            void ReleaseGraphics() override;
-            //! Drop stale GL handles after the viewport rebuilt its context.
-            void InvalidateGraphics() override;
+            void EndOverlayFrame() override;
 
         private:
-            //! Lazily create GL resources on the viewport's current context.
-            bool EnsureInitialized();
-
-            GLDebugRenderer m_debugRenderer;
             uint32_t m_width = 1;
             uint32_t m_height = 1;
         };

@@ -33,61 +33,46 @@ namespace CrossEngineEditor
 
     // --- NullSceneRenderer ---
     //
-    // The Null backend has no engine scene, so "rendering" is just clearing the viewport
-    // surface. The overlay batches (gizmos/grid) coming from GenericDebugDisplay are drawn
-    // through the shared GL context via the small GLDebugRenderer. All GL calls run while
-    // the viewport's QOpenGLWidget context is current (during its paintGL).
+    // The Null backend has no engine scene and no RHI/swapchain. It is the fall-back used
+    // only when the Diligent backend is not compiled in. It never reports a ready surface,
+    // so the viewport controller skips all present/overlay work - the editor still runs its
+    // camera/picking/manipulator logic against the camera state.
 
-    bool NullBackend::NullSceneRenderer::EnsureInitialized()
-    {
-        return m_debugRenderer.Initialize();
-    }
-
-    void NullBackend::NullSceneRenderer::AttachToWindow(void* /*nativeWindowHandle*/, uint32_t width, uint32_t height)
-    {
-        m_width = AZStd::max(1u, width);
-        m_height = AZStd::max(1u, height);
-        EnsureInitialized();
-    }
-
-    void NullBackend::NullSceneRenderer::Resize(uint32_t width, uint32_t height)
+    void NullBackend::NullSceneRenderer::OnSurfaceCreated(void* /*nativeWindowHandle*/, uint32_t width, uint32_t height)
     {
         m_width = AZStd::max(1u, width);
         m_height = AZStd::max(1u, height);
     }
 
-    void NullBackend::NullSceneRenderer::RenderFrame(const AZ::Matrix4x4& worldToView, const AZ::Matrix4x4& viewToClip)
+    void NullBackend::NullSceneRenderer::OnSurfaceResized(uint32_t width, uint32_t height)
     {
-        if (!EnsureInitialized())
-        {
-            return;
-        }
-        m_debugRenderer.SetViewProjection(viewToClip * worldToView);
+        m_width = AZStd::max(1u, width);
+        m_height = AZStd::max(1u, height);
     }
 
-    void NullBackend::NullSceneRenderer::SubmitLines(AZStd::span<const DebugVertex> vertices)
+    void NullBackend::NullSceneRenderer::OnSurfaceAboutToBeDestroyed()
     {
-        m_debugRenderer.SubmitLines(vertices);
     }
 
-    void NullBackend::NullSceneRenderer::SubmitTriangles(AZStd::span<const DebugVertex> vertices)
+    void NullBackend::NullSceneRenderer::BeginOverlayFrame(
+        const AZ::Matrix4x4& /*worldToView*/, const AZ::Matrix4x4& /*viewToClip*/)
     {
-        m_debugRenderer.SubmitTriangles(vertices);
     }
 
-    void NullBackend::NullSceneRenderer::SetDepthTest(bool enabled)
+    void NullBackend::NullSceneRenderer::SubmitLines(AZStd::span<const DebugVertex> /*vertices*/)
     {
-        m_debugRenderer.SetDepthTest(enabled);
     }
 
-    void NullBackend::NullSceneRenderer::ReleaseGraphics()
+    void NullBackend::NullSceneRenderer::SubmitTriangles(AZStd::span<const DebugVertex> /*vertices*/)
     {
-        m_debugRenderer.Shutdown();
     }
 
-    void NullBackend::NullSceneRenderer::InvalidateGraphics()
+    void NullBackend::NullSceneRenderer::SetDepthTest(bool /*enabled*/)
     {
-        m_debugRenderer.InvalidateContext();
+    }
+
+    void NullBackend::NullSceneRenderer::EndOverlayFrame()
+    {
     }
 
     // --- NullEntityMirror ---

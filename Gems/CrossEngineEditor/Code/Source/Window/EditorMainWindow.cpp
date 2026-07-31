@@ -8,7 +8,7 @@
 #include <Window/AssetBrowserPanel.h>
 #include <Window/CommandPalette.h>
 #include <Viewport/GizmoManager.h>
-#include <Viewport/NullViewportWidget.h>
+#include <Viewport/EditorViewportWidget.h>
 #include <BackendAPI/IEngineBackend.h>
 
 #include <AzCore/Interface/Interface.h>
@@ -24,6 +24,14 @@
 #include <AzToolsFramework/UI/PropertyEditor/EntityPropertyEditor.hxx>
 
 #include <AzQtComponents/Components/FancyDocking.h>
+
+#if defined(CEE_HAVE_ADS)
+AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
+#include <DockManager.h>
+#include <DockWidget.h>
+#include <DockAreaWidget.h>
+AZ_POP_DISABLE_WARNING
+#endif
 
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QAction>
@@ -46,9 +54,20 @@ namespace CrossEngineEditor
         setObjectName(QStringLiteral("CrossEngineEditorMainWindow"));
         resize(1600, 900);
 
+#if defined(CEE_HAVE_ADS)
+        // Qt-Advanced-Docking-System. The manager registers itself as the central widget of
+        // this QMainWindow, so it must be created before any dock panels are added. It owns
+        // all CDockWidgets and provides saveState/restoreState for workspaces.
+        ads::CDockManager::setConfigFlag(ads::CDockManager::OpaqueSplitterResize, true);
+        ads::CDockManager::setConfigFlag(ads::CDockManager::XmlCompressionEnabled, false);
+        ads::CDockManager::setConfigFlag(ads::CDockManager::FocusHighlighting, true);
+        ads::CDockManager::setAutoHideConfigFlags(ads::CDockManager::DefaultAutoHideConfig);
+        m_dockManager = new ads::CDockManager(this);
+#else
         // Visual Studio style docking. saveState/restoreState must go through this
         // instance (see Workspaces, plan §5.1).
         m_fancyDocking = AZStd::make_unique<AzQtComponents::FancyDocking>(this);
+#endif
 
         BuildMenuBar();
         BuildToolBar();
@@ -210,36 +229,75 @@ namespace CrossEngineEditor
     {
         // Engine-agnostic viewport surface. The manipulator/selection logic runs against
         // its camera state; the active backend renders overlay geometry into it (plan §6 阶段2).
-        auto* viewport = new NullViewportWidget(k_viewportId, this);
+        auto* viewport = new EditorViewportWidget(k_viewportId, this);
         IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
         if (backend)
         {
             viewport->SetSceneRenderer(&backend->GetSceneRenderer());
         }
-        setCentralWidget(viewport);
+
         // Reused AzToolsFramework widgets - they self-wire to the editor entity/selection
         // buses, so selection stays in sync across Outliner and Inspector for free.
-        AddPanel(QStringLiteral("OutlinerDock"), QStringLiteral("Entity Outliner"),
-            new AzToolsFramework::EntityOutlinerWidget(this), Qt::LeftDockWidgetArea);
-        AddPanel(QStringLiteral("InspectorDock"), QStringLiteral("Inspector"),
-            new AzToolsFramework::EntityPropertyEditor(this), Qt::RightDockWidgetArea);
+        auto* outliner = new AzToolsFramework::EntityOutlinerWidget(this);
+        auto* inspector = new AzToolsFramework::EntityPropertyEditor(this);
 
         // Real asset browser backed by the engine backend's asset source (plan §6 阶段4 / C8).
         QWidget* assetPanel = backend
             ? static_cast<QWidget*>(new AssetBrowserPanel(&backend->GetAssetSource(), this))
             : static_cast<QWidget*>(new QLabel(QStringLiteral("Asset Browser"), this));
-        AddPanel(QStringLiteral("AssetBrowserDock"), QStringLiteral("Asset Browser"),
-            assetPanel, Qt::BottomDockWidgetArea);
+
+#if defined(CEE_HAVE_ADS)
+        // ADS models the viewport as the central dock widget (non-closable, non-floatable),
+        // with the tool panels docked around it. This gives Blender/VS-style "dock anywhere"
+        // while keeping the viewport as the stable anchor.
+        auto* viewportDock = new ads::CDockWidget(m_dockManager, QStringLiteral("Viewport"), this);
+        viewportDock->setObjectName(QStringLiteral("ViewportDock"));
+        viewportDock->setWidget(viewport);
+        viewportDock->setFeature(ads::CDockWidget::DockWidgetClosable, false);
+        viewportDock->setFeature(ads::CDockWidget::DockWidgetMovable, false);
+        viewportDock->setFeature(ads::CDockWidget::DockWidgetFloatable, false);
+        ads::CDockAreaWidget* centralArea = m_dockManager->setCentralWidget(viewportDock);
+        (void)centralArea;
+
+        AddPanel(QStringLiteral("OutlinerDock"), QStringLiteral("Entity Outliner"), outliner, Qt::LeftDockWidgetArea);
+        AddPanel(QStringLiteral("InspectorDock"), QStringLiteral("Inspector"), inspector, Qt::RightDockWidgetArea);
+        AddPanel(QStringLiteral("AssetBrowserDock"), QStringLiteral("Asset Browser"), assetPanel, Qt::BottomDockWidgetArea);
+#else
+        setCentralWidget(viewport);
+        AddPanel(QStringLiteral("OutlinerDock"), QStringLiteral("Entity Outliner"), outliner, Qt::LeftDockWidgetArea);
+        AddPanel(QStringLiteral("InspectorDock"), QStringLiteral("Inspector"), inspector, Qt::RightDockWidgetArea);
+        AddPanel(QStringLiteral("AssetBrowserDock"), QStringLiteral("Asset Browser"), assetPanel, Qt::BottomDockWidgetArea);
+#endif
     }
 
     QDockWidget* EditorMainWindow::AddPanel(
         const QString& objectName, const QString& title, QWidget* content, Qt::DockWidgetArea area)
     {
+#if defined(CEE_HAVE_ADS)
+        // Wrap the content in an ADS dock widget and add it to the manager. ADS uses its own
+        // DockWidgetArea enum; map the classic Qt areas to it.
+        auto* dock = new ads::CDockWidget(m_dockManager, title, this);
+        dock->setObjectName(objectName);
+        dock->setWidget(content);
+
+        ads::DockWidgetArea adsArea = ads::CenterDockWidgetArea;
+        switch (area)
+        {
+        case Qt::LeftDockWidgetArea:   adsArea = ads::LeftDockWidgetArea;   break;
+        case Qt::RightDockWidgetArea:  adsArea = ads::RightDockWidgetArea;  break;
+        case Qt::TopDockWidgetArea:    adsArea = ads::TopDockWidgetArea;    break;
+        case Qt::BottomDockWidgetArea: adsArea = ads::BottomDockWidgetArea; break;
+        default:                       adsArea = ads::CenterDockWidgetArea; break;
+        }
+        m_dockManager->addDockWidget(adsArea, dock);
+        return nullptr; // ADS owns the widget; callers do not use the return value.
+#else
         auto* dock = new QDockWidget(title, this);
         dock->setObjectName(objectName);
         dock->setWidget(content);
         addDockWidget(area, dock);
         return dock;
+#endif
     }
 
     void EditorMainWindow::OnCreateEntity()
@@ -382,12 +440,16 @@ namespace CrossEngineEditor
 
     void EditorMainWindow::SaveWorkspaceLayout(const QString& name)
     {
-        // saveState must be routed through the FancyDocking instance so floating/docked
-        // windows are captured correctly (plan §5.1).
+        // saveState must be routed through the docking system so floating/docked windows
+        // are captured correctly (plan §5.1).
         QSettings settings;
         settings.beginGroup(QStringLiteral("Workspaces"));
         settings.setValue(name + QStringLiteral("/geometry"), saveGeometry());
+#if defined(CEE_HAVE_ADS)
+        settings.setValue(name + QStringLiteral("/state"), m_dockManager->saveState());
+#else
         settings.setValue(name + QStringLiteral("/state"), m_fancyDocking->saveState());
+#endif
         settings.endGroup();
     }
 
@@ -404,7 +466,11 @@ namespace CrossEngineEditor
             return false;
         }
         restoreGeometry(geometry.toByteArray());
+#if defined(CEE_HAVE_ADS)
+        return m_dockManager->restoreState(state.toByteArray());
+#else
         return m_fancyDocking->restoreState(state.toByteArray());
+#endif
     }
 
     void EditorMainWindow::OnSaveWorkspace()

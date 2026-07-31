@@ -7,6 +7,9 @@
 #include <Application/CrossEngineEditorApplication.h>
 #include <Application/EntityMirrorBridge.h>
 #include <Backends/NullBackend.h>
+#if defined(CEE_HAVE_DILIGENT)
+#include <Backends/DiligentBackend.h>
+#endif
 #include <BackendAPI/IEngineBackend.h>
 #include <Viewport/CrossEngineViewportSelection.h>
 #include <Window/EditorMainWindow.h>
@@ -111,10 +114,16 @@ namespace CrossEngineEditor
         // main-window parenting) before any entity/level is created.
         AzToolsFramework::EditorRequests::Bus::Handler::BusConnect();
 
-        // Register the do-nothing engine backend first so the main window can wire the
-        // viewport to its scene renderer while building panels (plan §6 阶段1/阶段2).
-        // Real backends replace this via the same interface.
+        // Register the engine backend first so the main window can wire the viewport to its
+        // scene renderer while building panels (plan §6 阶段1/阶段2/阶段3). When the Diligent
+        // submodule is built, use the D3D12 backend that presents its swapchain straight into the
+        // viewport's native surface; otherwise fall back to the do-nothing NullBackend. Real
+        // engine backends replace this via the same AZ::Interface.
+#if defined(CEE_HAVE_DILIGENT)
+        m_backend = AZStd::make_unique<DiligentBackend>();
+#else
         m_backend = AZStd::make_unique<NullBackend>();
+#endif
         AZ::Interface<IEngineBackend>::Register(m_backend.get());
 
         // Bridge editor edits back to the engine object model and pull engine objects in
