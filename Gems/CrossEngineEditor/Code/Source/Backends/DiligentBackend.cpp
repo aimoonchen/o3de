@@ -23,6 +23,10 @@ namespace CrossEngineEditor
 
         constexpr TEXTURE_FORMAT k_colorFormat = TEX_FORMAT_RGBA8_UNORM_SRGB;
         constexpr TEXTURE_FORMAT k_depthFormat = TEX_FORMAT_D32_FLOAT;
+
+        //! 4x MSAA for the whole viewport (grid + gizmos). 4 is the universally-supported sweet spot
+        //! for editor overlays (D3D/Vulkan guarantee 4x); higher yields diminishing returns for lines.
+        constexpr uint8_t k_msaaSampleCount = 4;
     } // namespace
 
     // =====================================================================================
@@ -106,16 +110,67 @@ namespace CrossEngineEditor
             return false;
         }
 
-        // Build the overlay renderer's PSOs against the swapchain formats.
+        // Build the overlay renderer's PSOs against the MSAA target formats (SampleCount 4).
         if (!m_debugRenderer.IsInitialized())
         {
-            if (!m_debugRenderer.Initialize(m_device, m_context, k_colorFormat, k_depthFormat))
+            if (!m_debugRenderer.Initialize(m_device, m_context, k_colorFormat, k_depthFormat, k_msaaSampleCount))
             {
                 ReleaseSwapChain();
                 return false;
             }
         }
+
+        // Offscreen 4x MSAA colour + depth the whole viewport renders into (resolved before Present).
+        CreateMsaaTargets(scDesc.Width, scDesc.Height);
         return true;
+    }
+
+    void DiligentBackend::DiligentSceneRenderer::CreateMsaaTargets(uint32_t width, uint32_t height)
+    {
+        m_msaaColorRTV.Release();
+        m_msaaDepthDSV.Release();
+        m_msaaColor.Release();
+        m_msaaDepth.Release();
+        if (!m_device)
+        {
+            return;
+        }
+
+        TextureDesc colorDesc;
+        colorDesc.Name = "CEE MSAA colour";
+        colorDesc.Type = RESOURCE_DIM_TEX_2D;
+        colorDesc.Width = AZStd::max(1u, width);
+        colorDesc.Height = AZStd::max(1u, height);
+        colorDesc.Format = k_colorFormat;
+        colorDesc.SampleCount = k_msaaSampleCount;
+        colorDesc.BindFlags = BIND_RENDER_TARGET;
+        colorDesc.Usage = USAGE_DEFAULT;
+        // Optimised clear value must match the per-frame clear so the driver can fast-clear.
+        colorDesc.ClearValue.Format = k_colorFormat;
+        colorDesc.ClearValue.Color[0] = k_clearColor[0];
+        colorDesc.ClearValue.Color[1] = k_clearColor[1];
+        colorDesc.ClearValue.Color[2] = k_clearColor[2];
+        colorDesc.ClearValue.Color[3] = k_clearColor[3];
+        m_device->CreateTexture(colorDesc, nullptr, &m_msaaColor);
+
+        TextureDesc depthDesc;
+        depthDesc.Name = "CEE MSAA depth";
+        depthDesc.Type = RESOURCE_DIM_TEX_2D;
+        depthDesc.Width = colorDesc.Width;
+        depthDesc.Height = colorDesc.Height;
+        depthDesc.Format = k_depthFormat;
+        depthDesc.SampleCount = k_msaaSampleCount;
+        depthDesc.BindFlags = BIND_DEPTH_STENCIL;
+        depthDesc.Usage = USAGE_DEFAULT;
+        depthDesc.ClearValue.Format = k_depthFormat;
+        depthDesc.ClearValue.DepthStencil.Depth = 1.0f;
+        m_device->CreateTexture(depthDesc, nullptr, &m_msaaDepth);
+
+        if (m_msaaColor && m_msaaDepth)
+        {
+            m_msaaColorRTV = m_msaaColor->GetDefaultView(TEXTURE_VIEW_RENDER_TARGET);
+            m_msaaDepthDSV = m_msaaDepth->GetDefaultView(TEXTURE_VIEW_DEPTH_STENCIL);
+        }
     }
 
     void DiligentBackend::DiligentSceneRenderer::OnSurfaceCreated(
@@ -147,6 +202,8 @@ namespace CrossEngineEditor
         const uint32_t w = AZStd::max(1u, UnpackViewportWidth(packed));
         const uint32_t h = AZStd::max(1u, UnpackViewportHeight(packed));
         m_swapChain->Resize(w, h);
+        // MSAA target must track the window size or the resolve blit mismatches.
+        CreateMsaaTargets(w, h);
     }
 
     void DiligentBackend::DiligentSceneRenderer::ReleaseSwapChain()
@@ -156,6 +213,10 @@ namespace CrossEngineEditor
             m_context->Flush();
             m_context->WaitForIdle();
         }
+        m_msaaColorRTV.Release();
+        m_msaaDepthDSV.Release();
+        m_msaaColor.Release();
+        m_msaaDepth.Release();
         m_swapChain.Release();
     }
 
@@ -181,8 +242,10 @@ namespace CrossEngineEditor
         }
         ApplyPendingResize();
 
-        ITextureView* rtv = m_swapChain->GetCurrentBackBufferRTV();
-        ITextureView* dsv = m_swapChain->GetDepthBufferDSV();
+        // Render the whole viewport into the 4x MSAA offscreen targets (resolved to the back buffer
+        // in EndOverlayFrame). Fall back to the raw back buffer if the MSAA target is unavailable.
+        ITextureView* rtv = m_msaaColorRTV ? m_msaaColorRTV.RawPtr() : m_swapChain->GetCurrentBackBufferRTV();
+        ITextureView* dsv = m_msaaDepthDSV ? m_msaaDepthDSV.RawPtr() : m_swapChain->GetDepthBufferDSV();
         ITextureView* rtvs[] = { rtv };
         m_context->SetRenderTargets(1, rtvs, dsv, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
         m_context->ClearRenderTarget(rtv, k_clearColor, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
@@ -222,6 +285,17 @@ namespace CrossEngineEditor
             m_frameOpen = false;
             return;
         }
+        // Resolve the 4x MSAA colour into the swapchain back buffer, then present. (No-op path if
+        // the MSAA target is unavailable - geometry was drawn straight to the back buffer.)
+        if (m_msaaColor)
+        {
+            ITexture* backBuffer = m_swapChain->GetCurrentBackBufferRTV()->GetTexture();
+            ResolveTextureSubresourceAttribs resolve;
+            resolve.SrcTextureTransitionMode = RESOURCE_STATE_TRANSITION_MODE_TRANSITION;
+            resolve.DstTextureTransitionMode = RESOURCE_STATE_TRANSITION_MODE_TRANSITION;
+            m_context->ResolveTextureSubresource(m_msaaColor, backBuffer, resolve);
+        }
+
         // Present with vsync. On a dedicated render thread this Present + the Submit* draws move
         // off the Qt thread; here they run inline on the idle tick (confirmed model).
         m_swapChain->Present(1);

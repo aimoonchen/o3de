@@ -151,9 +151,11 @@ namespace CrossEngineEditor
         QAction* move = addModeAction(QStringLiteral("Move"), QStringLiteral("1"), &EditorMainWindow::OnTransformModeMove);
         QAction* rotate = addModeAction(QStringLiteral("Rotate"), QStringLiteral("2"), &EditorMainWindow::OnTransformModeRotate);
         QAction* scale = addModeAction(QStringLiteral("Scale"), QStringLiteral("3"), &EditorMainWindow::OnTransformModeScale);
+        QAction* combined = addModeAction(QStringLiteral("Combined"), QStringLiteral("4"), &EditorMainWindow::OnTransformModeCombined);
         group->addAction(move);
         group->addAction(rotate);
         group->addAction(scale);
+        group->addAction(combined);
         move->setChecked(true); // default mode is Move.
 
         // Gizmo theme switcher (Blender / Unreal, plan §9). Rebuilds the gizmo views on change.
@@ -223,6 +225,11 @@ namespace CrossEngineEditor
     void EditorMainWindow::OnTransformModeScale()
     {
         GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Scale);
+    }
+
+    void EditorMainWindow::OnTransformModeCombined()
+    {
+        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Combined);
     }
 
     void EditorMainWindow::BuildDockPanels()

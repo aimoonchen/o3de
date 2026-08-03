@@ -53,18 +53,21 @@ namespace CrossEngineEditor
             setAttribute(Qt::WA_AlwaysStackOnTop, true);
         }
 
-        void SetLabels(AZStd::vector<DebugTextLabel> labels, const AzFramework::CameraState& camera, qreal pixelRatio)
+        void SetLabels(
+            AZStd::vector<DebugTextLabel> labels, const AzFramework::CameraState& camera, qreal pixelRatio,
+            const AZStd::string& headerText)
         {
             m_labels = AZStd::move(labels);
             m_camera = camera;
             m_pixelRatio = pixelRatio;
+            m_headerText = QString::fromUtf8(headerText.c_str());
             update();
         }
 
     protected:
         void paintEvent(QPaintEvent*) override
         {
-            if (m_labels.empty())
+            if (m_labels.empty() && m_headerText.isEmpty())
             {
                 return;
             }
@@ -78,6 +81,18 @@ namespace CrossEngineEditor
             QFont font = painter.font();
             font.setPointSizeF(9.0);
             painter.setFont(font);
+
+            // Blender area-header status text: a single line at the top-left of the viewport, white
+            // on a dark strip, shown during a drag (ED_area_status_text).
+            if (!m_headerText.isEmpty())
+            {
+                const QRectF hb = painter.fontMetrics().boundingRect(m_headerText);
+                const qreal pad = 6.0;
+                const QRectF strip(0.0, 0.0, width(), hb.height() + 2.0 * pad);
+                painter.fillRect(strip, QColor(30, 30, 30, 200));
+                painter.setPen(QColor(230, 230, 230));
+                painter.drawText(QPointF(pad, hb.height() + pad * 0.5), m_headerText);
+            }
 
             for (const DebugTextLabel& label : m_labels)
             {
@@ -96,17 +111,32 @@ namespace CrossEngineEditor
                 const QString text = QString::fromUtf8(label.m_text.c_str());
 
                 QPointF drawPos = pos;
+                const QRectF bounds = painter.fontMetrics().boundingRect(text);
                 if (label.m_center)
                 {
-                    const QRectF bounds = painter.fontMetrics().boundingRect(text);
                     drawPos.rx() -= bounds.width() * 0.5;
                     drawPos.ry() += bounds.height() * 0.5;
                 }
 
-                painter.setPen(QColor(0, 0, 0, 180));
-                painter.drawText(drawPos + QPointF(1.0, 1.0), text);
-                painter.setPen(color);
-                painter.drawText(drawPos, text);
+                if (label.m_backgroundBlock)
+                {
+                    // Unreal rotation HUD: white text on a semi-transparent black block, 5px margin
+                    // (UnrealWidgetRender.cpp DrawHUD). The text baseline is at drawPos.y().
+                    const qreal margin = 5.0;
+                    const QRectF block(
+                        drawPos.x() - margin, drawPos.y() - bounds.height() - margin + painter.fontMetrics().descent(),
+                        bounds.width() + 2.0 * margin, bounds.height() + 2.0 * margin);
+                    painter.fillRect(block, QColor(0, 0, 0, 64)); // FLinearColor(0,0,0,0.25).
+                    painter.setPen(color);
+                    painter.drawText(drawPos, text);
+                }
+                else
+                {
+                    painter.setPen(QColor(0, 0, 0, 180));
+                    painter.drawText(drawPos + QPointF(1.0, 1.0), text);
+                    painter.setPen(color);
+                    painter.drawText(drawPos, text);
+                }
             }
         }
 
@@ -114,6 +144,7 @@ namespace CrossEngineEditor
         AZStd::vector<DebugTextLabel> m_labels;
         AzFramework::CameraState m_camera;
         qreal m_pixelRatio = 1.0;
+        QString m_headerText;
     };
 
     namespace
@@ -280,7 +311,7 @@ namespace CrossEngineEditor
             AzToolsFramework::GetEntityContextId(), &AzFramework::ViewportDebugDisplayEvents::DisplayViewport, viewportInfo,
             m_debugDisplay);
 
-        m_debugDisplay.Flush(*m_sceneRenderer);
+        m_debugDisplay.Flush(*m_sceneRenderer, m_cameraState);
 
         // Present the scene + overlay for this camera.
         m_sceneRenderer->EndOverlayFrame();
@@ -292,7 +323,7 @@ namespace CrossEngineEditor
     {
         if (m_labelOverlay)
         {
-            m_labelOverlay->SetLabels(m_debugDisplay.TextLabels(), m_cameraState, m_pixelRatio);
+            m_labelOverlay->SetLabels(m_debugDisplay.TextLabels(), m_cameraState, m_pixelRatio, m_debugDisplay.HeaderText());
         }
     }
 

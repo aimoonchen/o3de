@@ -6,6 +6,7 @@
 
 #include <Viewport/GizmoManager.h>
 #include <Viewport/GizmoViews.h>
+#include <Viewport/GenericDebugDisplay.h>
 
 #include <AzCore/Component/ComponentBus.h>
 #include <AzCore/Math/MathUtils.h>
@@ -80,6 +81,7 @@ namespace CrossEngineEditor
     GizmoManager::GizmoManager(AzToolsFramework::ManipulatorManagerId managerId, GizmoStyle style)
         : m_managerId(managerId)
         , m_style(style)
+        , m_rotateDragState(AZStd::make_shared<GizmoDragState>())
     {
         ToolsApplicationNotificationBus::Handler::BusConnect();
         AzToolsFramework::EditorTransformChangeNotificationBus::Handler::BusConnect();
@@ -120,6 +122,19 @@ namespace CrossEngineEditor
             return;
         }
         m_style = style;
+        // Per-style default snap increments (only the increments, not the enabled flags): Blender
+        // rotate 5 deg / grid follows the scene; Unreal rotate 22.5 deg / translate 10 cm
+        // (DNA_scene_types.h SnapAngle 5; UTransformGizmoEditorSettings / EditorViewportSettings).
+        if (style == GizmoStyle::Unreal)
+        {
+            m_snap.m_angleStepDegrees = 22.5f;
+            m_snap.m_gridSize = 0.1f;
+        }
+        else
+        {
+            m_snap.m_angleStepDegrees = 5.0f;
+            m_snap.m_gridSize = 0.1f;
+        }
         RebuildManipulators();
     }
 
@@ -285,9 +300,41 @@ namespace CrossEngineEditor
         case GizmoMode::Rotate:
             BuildRotate(theme);
             break;
+        case GizmoMode::Combined:
+            BuildCombined(theme);
+            break;
         }
 
         RefreshSpace();
+    }
+
+    void GizmoManager::BuildCombined(const GizmoTheme& theme)
+    {
+        // Blender's default transform gizmo shows move + rotate + scale together, radially separated
+        // so the handle sets do not overlap (gizmo_line_range, transform_gizmo_3d.cc:1173-1203) and,
+        // crucially, the move arrow draws ONLY its head - no stem - when rotate/scale are also shown
+        // (draw_options=0, transform_gizmo_3d.cc:1539-1543). The pick bounds still span the whole
+        // axis (see ArrowGizmoView/BoxGizmoView), so every handle stays easy to grab.
+        // Absolute line ranges with all three visible:
+        //   translate arrow: start = (1.0 - 0.125) + 0.215 = 1.09, end = 1.0 + 0.215 + 0.2 = 1.415
+        //                    (head only, sitting OUTSIDE the rings).
+        //   scale bar:       start = 0.2 (unchanged), end = 1.0 - 0.225 = 0.775  -> box just inside.
+        //   rotate rings:    radius 1.0 (unchanged).
+        GizmoTheme moveTheme = theme;
+        moveTheme.m_axisLineStart = 1.09f;    // head base position (stem hidden).
+        moveTheme.m_arrowAxisLength = 1.415f; // arrow head base / tip.
+        moveTheme.m_drawArrowStem = false;    // Blender hides the stem in the combined gizmo.
+
+        GizmoTheme scaleTheme = theme;
+        scaleTheme.m_scaleLineStart = 0.2f;   // Blender keeps the scale bar start at 0.2 when combined.
+        scaleTheme.m_scaleAxisLength = 0.775f; // end = 1.0 - 0.225.
+        scaleTheme.m_scaleBoxCenter = 0.825f;  // box centre = end + half-extent (0.775 + 0.05).
+
+        // Plane handles are omitted in the combined gizmo (Blender's combined layout is already dense;
+        // its plane handles read poorly stacked with the rings) - BuildMoveAxes/BuildScaleAxes only.
+        BuildRotate(theme);
+        BuildMoveAxes(moveTheme);
+        BuildScaleAxes(scaleTheme);
     }
 
     void GizmoManager::DrawOverlay(
@@ -299,12 +346,24 @@ namespace CrossEngineEditor
         }
         const GizmoTheme theme = MakeGizmoTheme(m_style);
 
-        // Rotate-mode trackball view ring (Blender only; Unreal's screen ring is opt-in) is drawn
-        // once around the pivot, decoupled from the three per-axis dials.
-        if (m_mode == GizmoMode::Rotate && theme.m_rotateGeometry == RotationRingGeometry::BlenderHalfRingFade)
+        // Rotate-mode screen-aligned ring (Blender thin white view ring / Unreal thick screen band)
+        // is drawn once around the pivot, decoupled from the three per-axis dials. Also shown in the
+        // combined gizmo, which includes the rotate rings.
+        if ((m_mode == GizmoMode::Rotate || m_mode == GizmoMode::Combined) && theme.m_hasScreenRing)
         {
             const AZ::Vector3 worldPivot = EntityWorldTransformNoScale().GetTranslation();
             DrawTrackballViewRing(debugDisplay, cameraState, worldPivot, theme);
+        }
+
+        // Move/Scale center handle (Blender wire circle(s) / Unreal solid sphere/cube). Drawn as an
+        // overlay so it reads exactly like both editors; the uniform-drag interaction is provided by
+        // the axis handles and (for scale) the existing uniform-scale maths. Skipped in Combined mode
+        // (crowded layout) - matching Blender, whose combined gizmo has no centre dot.
+        if ((m_mode == GizmoMode::Move || m_mode == GizmoMode::Scale) &&
+            theme.m_centerGeometry != CenterHandleGeometry::None)
+        {
+            const AZ::Vector3 worldPivot = EntityWorldTransformNoScale().GetTranslation();
+            DrawCenterHandle(debugDisplay, cameraState, worldPivot, theme);
         }
 
         // Interaction-time aids (constraint line, ghost arc, snap ticks, numeric readout).
@@ -315,6 +374,12 @@ namespace CrossEngineEditor
     }
 
     void GizmoManager::BuildMove(const GizmoTheme& theme)
+    {
+        BuildMoveAxes(theme);
+        BuildMovePlanes(theme);
+    }
+
+    void GizmoManager::BuildMoveAxes(const GizmoTheme& theme)
     {
         const AZ::Transform space = EntityWorldTransformNoScale();
         const AZ::EntityId entityId = m_entityId;
@@ -375,6 +440,22 @@ namespace CrossEngineEditor
             manipulator->Register(m_managerId);
             m_linearManipulators.emplace_back(AZStd::move(manipulator));
         }
+    }
+
+    void GizmoManager::BuildMovePlanes(const GizmoTheme& theme)
+    {
+        const AZ::Transform space = EntityWorldTransformNoScale();
+        const AZ::EntityId entityId = m_entityId;
+
+        auto applyTranslation = [entityId, this](const AZ::Vector3& localOffsetIn)
+        {
+            const AZ::Vector3 localOffset =
+                m_snap.m_gridSnapEnabled ? SnapVector(localOffsetIn, m_snap.m_gridSize) : localOffsetIn;
+            const AZ::Vector3 worldOffset = m_dragStartSpace.TransformVector(localOffset);
+            AZ::TransformBus::Event(
+                entityId, &AZ::TransformBus::Events::SetWorldTranslation, m_dragStartTranslation + worldOffset);
+            return worldOffset;
+        };
 
         // Planar handles on each pair of axes (XY / YZ / ZX).
         const AZStd::pair<GizmoAxis, GizmoAxis> planes[] = {
@@ -420,6 +501,12 @@ namespace CrossEngineEditor
     }
 
     void GizmoManager::BuildScale(const GizmoTheme& theme)
+    {
+        BuildScaleAxes(theme);
+        BuildScalePlanes(theme);
+    }
+
+    void GizmoManager::BuildScaleAxes(const GizmoTheme& theme)
     {
         const AZ::Transform space = EntityWorldTransformNoScale();
         const AZ::EntityId entityId = m_entityId;
@@ -469,6 +556,61 @@ namespace CrossEngineEditor
         }
     }
 
+    void GizmoManager::BuildScalePlanes(const GizmoTheme& theme)
+    {
+        const AZ::Transform space = EntityWorldTransformNoScale();
+        const AZ::EntityId entityId = m_entityId;
+
+        // Scale plane handles (Blender: same diamond as move; Unreal: L-shaped 2-segment line).
+        // Dragging a scale plane applies uniform scale from the summed in-plane offset.
+        const AZStd::pair<GizmoAxis, GizmoAxis> planes[] = {
+            { GizmoAxis::X, GizmoAxis::Y }, { GizmoAxis::Y, GizmoAxis::Z }, { GizmoAxis::Z, GizmoAxis::X }
+        };
+        for (const auto& [a1, a2] : planes)
+        {
+            auto manipulator = PlanarManipulator::MakeShared(space);
+            manipulator->AddEntityComponentIdPair(AZ::EntityComponentIdPair(entityId, AZ::InvalidComponentId));
+            manipulator->SetAxes(GizmoAxisToVector(a1), GizmoAxisToVector(a2));
+            manipulator->SetViews(MakeViews(AZStd::make_shared<PlaneGizmoView>(theme, a1, a2, /*scaleMode=*/true)));
+
+            manipulator->InstallLeftMouseDownCallback(
+                [entityId, a1, a2, this](const PlanarManipulator::Action&)
+                {
+                    AZ::TransformBus::EventResult(m_dragStartScale, entityId, &AZ::TransformBus::Events::GetLocalUniformScale);
+                    m_dragStartSpace = EntityWorldTransformNoScale();
+                    m_dragKind = DragKind::Plane;
+                    m_dragAxis = a1;
+                    m_dragAxis2 = a2;
+                    m_dragScale = m_dragStartScale;
+                    m_undoBatch = AZStd::make_unique<ScopedUndoBatch>("Scale Entity");
+                });
+            manipulator->InstallMouseMoveCallback(
+                [entityId, this](const PlanarManipulator::Action& action)
+                {
+                    const float delta = action.LocalPositionOffset().GetX() + action.LocalPositionOffset().GetY() +
+                        action.LocalPositionOffset().GetZ();
+                    float newScale = AZStd::max(0.01f, m_dragStartScale + delta);
+                    if (m_snap.m_scaleSnapEnabled)
+                    {
+                        newScale = AZStd::max(0.01f, SnapScalar(newScale, m_snap.m_scaleStep));
+                    }
+                    m_dragScale = newScale;
+                    AZ::TransformBus::Event(entityId, &AZ::TransformBus::Events::SetLocalUniformScale, newScale);
+                });
+            manipulator->InstallLeftMouseUpCallback(
+                [entityId, this](const PlanarManipulator::Action&)
+                {
+                    ScopedUndoBatch::MarkEntityDirty(entityId);
+                    m_undoBatch.reset();
+                    m_dragKind = DragKind::None;
+                    RefreshSpace();
+                });
+
+            manipulator->Register(m_managerId);
+            m_planarManipulators.emplace_back(AZStd::move(manipulator));
+        }
+    }
+
     void GizmoManager::BuildRotate(const GizmoTheme& theme)
     {
         const AZ::Transform space = EntityWorldTransformNoScale();
@@ -480,7 +622,7 @@ namespace CrossEngineEditor
             auto manipulator = AngularManipulator::MakeShared(space);
             manipulator->AddEntityComponentIdPair(AZ::EntityComponentIdPair(entityId, AZ::InvalidComponentId));
             manipulator->SetAxis(GizmoAxisToVector(axis));
-            manipulator->SetView(AZStd::make_unique<DialGizmoView>(theme, axis));
+            manipulator->SetView(AZStd::make_unique<DialGizmoView>(theme, axis, m_rotateDragState));
 
             manipulator->InstallLeftMouseDownCallback(
                 [entityId, axis, this](const AngularManipulator::Action&)
@@ -491,6 +633,8 @@ namespace CrossEngineEditor
                     m_dragKind = DragKind::Angle;
                     m_dragAxis = axis;
                     m_dragAngle = 0.0f;
+                    m_rotateDragState->m_rotating = true;
+                    m_rotateDragState->m_axis = axis;
                     m_undoBatch = AZStd::make_unique<ScopedUndoBatch>("Rotate Entity");
                 });
             manipulator->InstallMouseMoveCallback(
@@ -513,6 +657,13 @@ namespace CrossEngineEditor
                     }
                     m_dragAngle = angle;
 
+                    // Unreal clamps the accumulated rotation to +/-360 deg (UnrealWidget.cpp); Blender
+                    // supports multi-turn (ghost alpha increments). Clamp only for the Unreal style.
+                    if (m_style == GizmoStyle::Unreal)
+                    {
+                        m_dragAngle = AZ::GetClamp(m_dragAngle, -AZ::Constants::TwoPi, AZ::Constants::TwoPi);
+                    }
+
                     const AZ::Quaternion newRotation = (m_dragStartOrientation * delta).GetNormalized();
                     AZ::TransformBus::Event(entityId, &AZ::TransformBus::Events::SetLocalRotationQuaternion, newRotation);
 
@@ -526,6 +677,7 @@ namespace CrossEngineEditor
                     ScopedUndoBatch::MarkEntityDirty(entityId);
                     m_undoBatch.reset();
                     m_dragKind = DragKind::None;
+                    m_rotateDragState->m_rotating = false;
                     RefreshSpace();
                 });
 
@@ -589,11 +741,39 @@ namespace CrossEngineEditor
             }
         }
 
-        AZStd::string FormatValue(const char* prefix, float value)
+        //! Rotation start/stop marker: an isosceles triangle at the arc angle, apex at the outer
+        //! radius (Unreal DrawStartStopMarker). Hollow (3 edge lines) for the start marker, filled
+        //! for the current marker. Height = 0.8 * band width, half-width = height * tan30.
+        void DrawRotationMarker(
+            AzFramework::DebugDisplayRequests& debugDisplay, const AZ::Vector3& pivot, const AZ::Vector3& u,
+            const AZ::Vector3& v, float angle, float rInner, float rOuter, const AZ::Color& color, bool filled)
         {
-            char buffer[64];
-            azsnprintf(buffer, sizeof(buffer), "%s%.3f", prefix, value);
-            return AZStd::string(buffer);
+            const AZ::Vector3 dir = u * cosf(angle) + v * sinf(angle);
+            const AZ::Vector3 tangent = -u * sinf(angle) + v * cosf(angle);
+            const float bandWidth = rOuter - rInner;
+            const float height = 0.8f * bandWidth;
+            const float halfWidth = height * 0.57735026f; // tan(30 deg).
+            const AZ::Vector3 apex = pivot + dir * rOuter;
+            const AZ::Vector3 baseCenter = pivot + dir * (rOuter - height);
+            const AZ::Vector3 c0 = baseCenter + tangent * halfWidth;
+            const AZ::Vector3 c1 = baseCenter - tangent * halfWidth;
+            if (filled)
+            {
+                AZ::Color f = color;
+                f.SetA(0x7f / 255.0f);
+                debugDisplay.SetColor(f.GetAsVector4());
+                debugDisplay.DrawTri(apex, c0, c1);
+            }
+            else
+            {
+                AZ::Color e = color;
+                e.SetA(1.0f);
+                debugDisplay.SetColor(e.GetAsVector4());
+                debugDisplay.SetLineWidth(1.0f);
+                debugDisplay.DrawLine(apex, c0);
+                debugDisplay.DrawLine(c0, c1);
+                debugDisplay.DrawLine(c1, apex);
+            }
         }
 
         //! Angle readout format. Unreal CacheRotationHUDText uses "%3.2f" (2 decimals); match it.
@@ -659,102 +839,197 @@ namespace CrossEngineEditor
             const float radius = theme.m_ringRadius * scale;
             const AZ::Color axisColor = GizmoAxisColor(theme, m_dragAxis);
 
+            // Blender area-header status text: "Rotation: X.XXdeg" (transform_mode_rotate.cc).
+            if (m_style == GizmoStyle::Blender)
+            {
+                char header[96];
+                azsnprintf(header, sizeof(header), "Rotation: %.2f deg", static_cast<double>(AZ::RadToDeg(m_dragAngle)));
+                static_cast<GenericDebugDisplay&>(debugDisplay).SetHeaderText(header);
+            }
+
             if (theme.m_rotateGeometry == RotationRingGeometry::BlenderHalfRingFade)
             {
-                // Blender dial ghost: filled pie sector 0..delta in the ring colour at half alpha,
-                // plus a helpline at the start angle and at the current angle.
-                AZ::Color fill = axisColor;
-                fill.SetA(0.5f);
-                FillSector(debugDisplay, pivot, u, v, radius, 0.0f, m_dragAngle, fill);
+                // Blender dial ghost: filled pie sector 0..delta in a GREY {0.8,0.8,0.8,0.2} - NOT
+                // the axis colour (dial3d_gizmo.cc). Helplines: start width 1.0, current width 3.0.
+                FillSector(debugDisplay, pivot, u, v, radius, 0.0f, m_dragAngle, theme.m_ghostArcColor);
 
+                // Modal drag disables the clip plane, so the dragged dial is drawn as a FULL ring
+                // (dial3d_gizmo.cc use_clip_plane = !is_modal). The idle dial for this axis is
+                // suppressed (GizmoDragState) so this replaces it cleanly.
                 debugDisplay.SetColor(axisColor.GetAsVector4());
                 debugDisplay.SetLineWidth(theme.m_ringLineWidth);
+                {
+                    const int segs = AZStd::max(48, theme.m_ringSegments);
+                    AZ::Vector3 prevRing = pivot + u * radius;
+                    for (int i = 1; i <= segs; ++i)
+                    {
+                        const float t = (static_cast<float>(i) / static_cast<float>(segs)) * AZ::Constants::TwoPi;
+                        const AZ::Vector3 pt = pivot + (u * cosf(t) + v * sinf(t)) * radius;
+                        debugDisplay.DrawLine(prevRing, pt);
+                        prevRing = pt;
+                    }
+                }
+
+                debugDisplay.SetColor(axisColor.GetAsVector4());
+                debugDisplay.SetLineWidth(theme.m_helplineStartWidth);
                 debugDisplay.DrawLine(pivot, pivot + u * radius);
+                debugDisplay.SetLineWidth(theme.m_helplineCurrentWidth);
                 const AZ::Vector3 cur = u * cosf(m_dragAngle) + v * sinf(m_dragAngle);
                 debugDisplay.DrawLine(pivot, pivot + cur * radius);
+
+                // Blender also draws the CON_AXIS constraint line through the pivot while rotating
+                // (transform_constraints.cc drawConstraint fires for TFM_ROTATION too).
+                DrawBlenderConstraintLine(debugDisplay, theme, space, m_dragAxis, pivot);
+
+                // Snap ticks (dial_ghostarc_draw_incremental_angle): a ring of white 1px ticks at
+                // radius DIAL_WIDTH*1.1 .. *1.21, count = round(2pi/increment), only while snapping.
+                if (m_snap.m_angleSnapEnabled && m_snap.m_angleStepDegrees > 0.0f)
+                {
+                    const float inc = AZ::DegToRad(m_snap.m_angleStepDegrees);
+                    const int total = AZStd::max(1, static_cast<int>(roundf(AZ::Constants::TwoPi / inc)));
+                    const float rIn = radius * 1.1f;
+                    const float rOut = radius * 1.21f;
+                    debugDisplay.SetColor(AZ::Color(1.0f, 1.0f, 1.0f, 1.0f).GetAsVector4());
+                    debugDisplay.SetLineWidth(1.0f);
+                    for (int i = 0; i < total; ++i)
+                    {
+                        const float a = inc * static_cast<float>(i);
+                        const AZ::Vector3 dir = u * cosf(a) + v * sinf(a);
+                        debugDisplay.DrawLine(pivot + dir * rIn, pivot + dir * rOut);
+                    }
+                }
             }
             else
             {
-                // Unreal DrawRotationArc dragging branch (DrawPartialRotationArc): fill the annulus
-                // BAND (inner..outer radius) 0..delta at LargeOuterAlpha, faded remainder at
-                // SmallOuterAlpha, then start (Yellow highlight) / current markers.
+                // Unreal DrawRotationArc dragging branch (DrawPartialRotationArc): the dragged axis
+                // band turns YELLOW (RGB) at 0x7f, faded remainder at 0x0f, then triangle markers.
                 const float rInner = theme.m_ringInnerRadius * scale;
                 const float rOuter = theme.m_ringOuterRadius * scale;
-                AZ::Color filled = axisColor;
+                AZ::Color filled = theme.m_highlightColor; // yellow.
                 filled.SetA(0x7f / 255.0f);
                 FillBand(debugDisplay, pivot, u, v, rInner, rOuter, 0.0f, m_dragAngle, filled);
-                AZ::Color remainder = axisColor;
+                AZ::Color remainder = theme.m_highlightColor;
                 remainder.SetA(0x0f / 255.0f);
                 const float rest = (m_dragAngle >= 0.0f ? AZ::Constants::TwoPi : -AZ::Constants::TwoPi) - m_dragAngle;
                 FillBand(debugDisplay, pivot, u, v, rInner, rOuter, m_dragAngle, rest, remainder);
 
-                debugDisplay.SetColor(theme.m_highlightColor.GetAsVector4());
-                debugDisplay.SetLineWidth(theme.m_ringLineWidth);
-                debugDisplay.DrawLine(pivot + u * rInner, pivot + u * rOuter);
-                const AZ::Vector3 cur = u * cosf(m_dragAngle) + v * sinf(m_dragAngle);
-                debugDisplay.DrawLine(pivot + cur * rInner, pivot + cur * rOuter);
-            }
+                // Start marker = hollow yellow triangle (A=0), current = filled yellow triangle
+                // (A=0x7f); apex at the outer radius, height 0.8*band, half-width height*tan30
+                // (UnrealWidgetRender.cpp DrawStartStopMarker).
+                DrawRotationMarker(debugDisplay, pivot, u, v, 0.0f, rInner, rOuter, theme.m_highlightColor, false);
+                DrawRotationMarker(debugDisplay, pivot, u, v, m_dragAngle, rInner, rOuter, theme.m_highlightColor, true);
 
-            // Numeric readout (both editors show degrees). Anchor exactly like Unreal
-            // CacheRotationHUDText: the first of the four in-plane quadrant directions that is on
-            // screen, at ROTATION_TEXT_RADIUS. Rendered as a fixed-size screen-space label by the
-            // viewport (QPainter), so it never scales or is occluded.
-            const AZ::Vector3 labelPos = RotationLabelAnchor(pivot, u, v, scale, cameraState);
-            debugDisplay.SetColor(theme.m_highlightColor.GetAsVector4());
-            debugDisplay.DrawTextLabel(labelPos, 1.2f, FormatAngle(AZ::RadToDeg(m_dragAngle)).c_str(), true, 0, 0);
-        }
-        else if (m_dragKind == DragKind::Axis || m_dragKind == DragKind::Plane)
-        {
-            const bool isScale = (m_mode == GizmoMode::Scale);
-
-            // Blender draws a full-length axis constraint line through the pivot while translating /
-            // scaling (transform_constraints.cc drawConstraint). Unreal shows no such line - it only
-            // surfaces the numeric delta - so gate the line to the Blender style for 1:1 parity.
-            if (m_style == GizmoStyle::Blender)
-            {
-                // Blender's constraint line colour is NOT the gizmo axis colour. drawLine() blends a
-                // base grey 50/50 with TH_AXIS_x then shades by -10 per channel
-                // (transform_constraints.cc make_axis_color -> get_color_blend_shade_3ubv, fac 0.5,
-                // offset -10). Dragging a gizmo handle is a CON_AXIS constraint, so the base grey is
-                // the DRAWLIGHT value (220,220,220) (transform_constraints.cc:748), and the axes are
-                // drawn via the CON_AXISn branch (:836-844). Line width is U.pixelsize*2.
-                auto blenderConstraintColor = [](const AZ::Color& axisColor)
+                // Snap ticks (DrawSnapMarker): radial yellow lines from the outer radius inward by
+                // band*PercentSize (0.75 for 22.5deg multiples, else 0.25), skipping 90deg multiples;
+                // only while RotGridEnabled. Band = rOuter - rInner.
+                if (m_snap.m_angleSnapEnabled && m_snap.m_angleStepDegrees > 0.0f)
                 {
-                    // DRAWLIGHT base grey (220,220,220) blended 50/50 with the axis colour, shade -10.
-                    auto channel = [](float axisC)
+                    const float band = rOuter - rInner;
+                    debugDisplay.SetColor(theme.m_highlightColor.GetAsVector4());
+                    debugDisplay.SetLineWidth(1.0f);
+                    for (float deg = 0.0f; deg < 360.0f; deg += m_snap.m_angleStepDegrees)
                     {
-                        const float k_base = 220.0f / 255.0f;
-                        const float blended = floorf((0.5f * k_base + 0.5f * axisC) * 255.0f) - 10.0f;
-                        return AZ::GetClamp(blended, 0.0f, 255.0f) / 255.0f;
-                    };
-                    return AZ::Color(
-                        channel(axisColor.GetR()), channel(axisColor.GetG()), channel(axisColor.GetB()),
-                        1.0f);
-                };
-                auto drawConstraintLine = [&](GizmoAxis a)
-                {
-                    const AZ::Vector3 dir = space.TransformVector(GizmoAxisToVector(a)).GetNormalized();
-                    const float half = 1000.0f; // effectively the whole viewport (Blender uses clip_end).
-                    const AZ::Color col = blenderConstraintColor(GizmoAxisColor(theme, a));
-                    debugDisplay.SetColor(col.GetAsVector4());
-                    debugDisplay.SetLineWidth(2.0f); // U.pixelsize * 2.0f.
-                    debugDisplay.DrawLine(pivot - dir * half, pivot + dir * half);
-                };
-                drawConstraintLine(m_dragAxis);
-                if (m_dragKind == DragKind::Plane)
-                {
-                    drawConstraintLine(m_dragAxis2);
+                        if (fmodf(deg, 90.0f) == 0.0f)
+                        {
+                            continue; // 90deg multiples use the wide axis markers instead.
+                        }
+                        const float pct = (fmodf(deg, 22.5f) == 0.0f) ? 0.75f : 0.25f;
+                        const float a = AZ::DegToRad(deg);
+                        const AZ::Vector3 dir = u * cosf(a) + v * sinf(a);
+                        debugDisplay.DrawLine(pivot + dir * rOuter, pivot + dir * (rOuter - band * pct));
+                    }
+                    // 0/90/180/270 wide axis markers (PercentSize 0.25 from the outer radius).
+                    for (int q = 0; q < 4; ++q)
+                    {
+                        const float a = AZ::DegToRad(90.0f * static_cast<float>(q));
+                        const AZ::Vector3 dir = u * cosf(a) + v * sinf(a);
+                        debugDisplay.DrawLine(pivot + dir * rOuter, pivot + dir * (rOuter - band * 0.25f));
+                    }
                 }
             }
 
-            // Readout: distance moved, or the resulting scale factor, near the pivot.
-            debugDisplay.SetColor(theme.m_highlightColor.GetAsVector4());
-            const AZStd::string text = isScale
-                ? FormatValue("S: ", m_dragScale)
-                : FormatValue("D: ", m_dragOffset.GetLength());
-            debugDisplay.DrawTextLabel(pivot + AZ::Vector3(0.0f, 0.0f, 0.25f * scale), 1.2f, text.c_str(), true, 0, 0);
+            // Numeric readout. Unreal shows a white-on-black-block HUD only for rotation
+            // (CacheRotationHUDText); anchor at the first of the four in-plane quadrant directions
+            // that is on screen, at ROTATION_TEXT_RADIUS. Blender shows the angle in the area header
+            // (handled by the Qt overlay), not floating in the viewport.
+            if (m_style == GizmoStyle::Unreal)
+            {
+                const AZ::Vector3 labelPos = RotationLabelAnchor(pivot, u, v, scale, cameraState);
+                debugDisplay.SetColor(AZ::Color(1.0f, 1.0f, 1.0f, 1.0f).GetAsVector4()); // white text.
+                // Our editor only ever routes gizmo drawing through GenericDebugDisplay, so this is
+                // the concrete type; request the Unreal black HUD block behind the next label.
+                static_cast<GenericDebugDisplay&>(debugDisplay).SetNextLabelBackgroundBlock(true);
+                debugDisplay.DrawTextLabel(labelPos, 1.2f, FormatAngle(AZ::RadToDeg(m_dragAngle)).c_str(), true, 0, 0);
+            }
+        }
+        else if (m_dragKind == DragKind::Axis || m_dragKind == DragKind::Plane)
+        {
+            // Blender draws a full-length CON_AXIS constraint line through the pivot while
+            // translating / scaling (transform_constraints.cc drawConstraint). Unreal shows NO line
+            // and NO viewport HUD for translate/scale (Render_Translate has no dragging branch) - its
+            // hover/drag difference is only the yellow tint - so all feedback here is Blender-only.
+            if (m_style == GizmoStyle::Blender)
+            {
+                DrawBlenderConstraintLine(debugDisplay, theme, space, m_dragAxis, pivot);
+                if (m_dragKind == DragKind::Plane)
+                {
+                    DrawBlenderConstraintLine(debugDisplay, theme, space, m_dragAxis2, pivot);
+                }
+                // Modal drag draws a filled ORIGIN dot at the pivot in the axis colour
+                // (ED_GIZMO_ARROW_DRAW_FLAG_ORIGIN, point size 10*pixelsize, 8-seg fill).
+                const AZ::Color axisColor = GizmoAxisColor(theme, m_dragAxis);
+                debugDisplay.SetColor(axisColor.GetAsVector4());
+                AZ::Vector3 du, dv;
+                PlaneBasis(cameraState.m_forward.GetNormalizedSafe(), du, dv);
+                const float dotR = 0.08f * scale; // ~10px screen-constant.
+                AZ::Vector3 prevDot = pivot + du * dotR;
+                for (int i = 1; i <= 8; ++i)
+                {
+                    const float t = (static_cast<float>(i) / 8.0f) * AZ::Constants::TwoPi;
+                    const AZ::Vector3 cur = pivot + (du * cosf(t) + dv * sinf(t)) * dotR;
+                    debugDisplay.DrawTri(pivot, prevDot, cur);
+                    prevDot = cur;
+                }
+                // Blender's numeric delta lives in the area header (Qt overlay), not the viewport.
+                char header[96];
+                if (m_mode == GizmoMode::Scale)
+                {
+                    azsnprintf(header, sizeof(header), "Scale: %.4f", static_cast<double>(m_dragScale));
+                }
+                else
+                {
+                    const AZ::Vector3 d = m_dragOffset;
+                    azsnprintf(
+                        header, sizeof(header), "D: %.4f (%.4f, %.4f, %.4f)", static_cast<double>(d.GetLength()),
+                        static_cast<double>(d.GetX()), static_cast<double>(d.GetY()), static_cast<double>(d.GetZ()));
+                }
+                static_cast<GenericDebugDisplay&>(debugDisplay).SetHeaderText(header);
+            }
         }
 
         debugDisplay.DepthTestOn();
+    }
+
+    void GizmoManager::DrawBlenderConstraintLine(
+        AzFramework::DebugDisplayRequests& debugDisplay, const GizmoTheme& theme, const AZ::Transform& space,
+        GizmoAxis axis, const AZ::Vector3& pivot) const
+    {
+        // Blender's constraint line colour is NOT the gizmo axis colour. drawLine() blends a base
+        // grey 50/50 with TH_AXIS_x then shades by -10 per channel (transform_constraints.cc
+        // make_axis_color -> get_color_blend_shade_3ubv, fac 0.5, offset -10). Dragging a gizmo
+        // handle is a CON_AXIS constraint, so the base grey is DRAWLIGHT (220,220,220). Width 2px.
+        auto channel = [](float axisC)
+        {
+            const float k_base = 220.0f / 255.0f;
+            const float blended = floorf((0.5f * k_base + 0.5f * axisC) * 255.0f) - 10.0f;
+            return AZ::GetClamp(blended, 0.0f, 255.0f) / 255.0f;
+        };
+        const AZ::Color axisColor = GizmoAxisColor(theme, axis);
+        const AZ::Color col(channel(axisColor.GetR()), channel(axisColor.GetG()), channel(axisColor.GetB()), 1.0f);
+        const AZ::Vector3 dir = space.TransformVector(GizmoAxisToVector(axis)).GetNormalized();
+        const float half = 1000.0f; // effectively the whole viewport (Blender uses clip_end).
+        debugDisplay.SetColor(col.GetAsVector4());
+        debugDisplay.SetLineWidth(2.0f); // U.pixelsize * 2.0f.
+        debugDisplay.DrawLine(pivot - dir * half, pivot + dir * half);
     }
 } // namespace CrossEngineEditor

@@ -36,6 +36,8 @@ AZ_PUSH_DISABLE_WARNING(4251 4244 4267, "-Wunknown-warning-option")
 #include "Graphics/GraphicsEngine/interface/RenderDevice.h"
 #include "Graphics/GraphicsEngine/interface/DeviceContext.h"
 #include "Graphics/GraphicsEngine/interface/SwapChain.h"
+#include "Graphics/GraphicsEngine/interface/Texture.h"
+#include "Graphics/GraphicsEngine/interface/TextureView.h"
 AZ_POP_DISABLE_WARNING
 
 #include <atomic>
@@ -85,10 +87,21 @@ namespace CrossEngineEditor
             void ApplyPendingResize();
             //! Release the swapchain (surface teardown) while keeping the device alive for reuse.
             void ReleaseSwapChain();
+            //! (Re)create the 4x MSAA offscreen colour + depth textures at the given size. Called on
+            //! surface create and after every swapchain resize so the MSAA target tracks the window.
+            void CreateMsaaTargets(uint32_t width, uint32_t height);
 
             Diligent::RefCntAutoPtr<Diligent::IRenderDevice> m_device;
             Diligent::RefCntAutoPtr<Diligent::IDeviceContext> m_context;
             Diligent::RefCntAutoPtr<Diligent::ISwapChain> m_swapChain;
+
+            //! 4x MSAA offscreen targets. The whole viewport (grid + gizmos + future scene) is drawn
+            //! into these for hardware edge antialiasing, then resolved into the swapchain back buffer
+            //! before Present - the standard editor-overlay AA path (UE/Unity/Godot all do this).
+            Diligent::RefCntAutoPtr<Diligent::ITexture> m_msaaColor;
+            Diligent::RefCntAutoPtr<Diligent::ITexture> m_msaaDepth;
+            Diligent::RefCntAutoPtr<Diligent::ITextureView> m_msaaColorRTV;
+            Diligent::RefCntAutoPtr<Diligent::ITextureView> m_msaaDepthDSV;
 
             DiligentDebugRenderer m_debugRenderer;
 

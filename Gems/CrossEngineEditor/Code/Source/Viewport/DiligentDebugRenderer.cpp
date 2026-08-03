@@ -67,7 +67,8 @@ void main(in PSInput PSIn, out PSOutput PSOut)
     } // namespace
 
     bool DiligentDebugRenderer::Initialize(
-        IRenderDevice* device, IDeviceContext* context, TEXTURE_FORMAT rtvFormat, TEXTURE_FORMAT dsvFormat)
+        IRenderDevice* device, IDeviceContext* context, TEXTURE_FORMAT rtvFormat, TEXTURE_FORMAT dsvFormat,
+        uint8_t sampleCount)
     {
         if (m_initialized)
         {
@@ -137,7 +138,13 @@ void main(in PSInput PSIn, out PSOutput PSOut)
             gp.DSVFormat = dsvFormat;
             gp.PrimitiveTopology = topology;
             gp.RasterizerDesc.CullMode = CULL_MODE_NONE;
-            gp.RasterizerDesc.AntialiasedLineEnable = (topology == PRIMITIVE_TOPOLOGY_LINE_LIST) ? True : False;
+            // Edge smoothing comes from the offscreen MSAA target (SampleCount 4); when MSAA is on we
+            // must NOT also set AntialiasedLineEnable (illegal with MultisampleEnable on D3D). Only
+            // fall back to the legacy 1px line-AA raster feature when rendering without MSAA.
+            gp.SmplDesc.Count = sampleCount;
+            const bool msaa = sampleCount > 1;
+            gp.RasterizerDesc.AntialiasedLineEnable =
+                (!msaa && topology == PRIMITIVE_TOPOLOGY_LINE_LIST) ? True : False;
             // Overlays only ever TEST depth, never WRITE it: gizmo/grid geometry must not pollute the
             // depth buffer for later scene passes, and translucent handles blend over each other.
             //   depthTest == true  -> depth-LE against the scene (occluded by geometry in front).

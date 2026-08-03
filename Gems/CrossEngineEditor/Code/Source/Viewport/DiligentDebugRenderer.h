@@ -46,10 +46,11 @@ namespace CrossEngineEditor
         DiligentDebugRenderer& operator=(const DiligentDebugRenderer&) = delete;
 
         //! Create the PSOs, shaders, vertex/constant buffers. rtvFormat/dsvFormat must match the
-        //! swapchain the caller will draw into. Returns false on shader/PSO failure.
+        //! render targets the caller will draw into, and sampleCount their MSAA sample count (1 =
+        //! no MSAA, 4 = the editor's 4x MSAA offscreen target). Returns false on shader/PSO failure.
         bool Initialize(
             Diligent::IRenderDevice* device, Diligent::IDeviceContext* context,
-            Diligent::TEXTURE_FORMAT rtvFormat, Diligent::TEXTURE_FORMAT dsvFormat);
+            Diligent::TEXTURE_FORMAT rtvFormat, Diligent::TEXTURE_FORMAT dsvFormat, uint8_t sampleCount = 1);
 
         //! Release all GPU resources (call with the render thread's context idle).
         void Shutdown();

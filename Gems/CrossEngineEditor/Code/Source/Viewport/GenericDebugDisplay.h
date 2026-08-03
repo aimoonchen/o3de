@@ -26,11 +26,17 @@
 
 #include <AzCore/Math/Color.h>
 #include <AzCore/Math/Matrix3x4.h>
+#include <AzCore/Math/Matrix4x4.h>
 #include <AzCore/Math/Transform.h>
 #include <AzCore/Math/Vector3.h>
 #include <AzCore/std/containers/span.h>
 #include <AzCore/std/containers/vector.h>
 #include <AzCore/std/string/string.h>
+
+namespace AzFramework
+{
+    struct CameraState;
+} // namespace AzFramework
 
 namespace CrossEngineEditor
 {
@@ -46,29 +52,34 @@ namespace CrossEngineEditor
         float m_size;
         bool m_center;
         AZStd::string m_text;
+        //! Draw a semi-transparent black block behind the text (Unreal rotation HUD style,
+        //! UnrealWidgetRender.cpp: FLinearColor(0,0,0,0.25) with a 5px margin). Off = 1px shadow only.
+        bool m_backgroundBlock = false;
     };
 
-    //! Blender-inspired visual tuning shared by every overlay draw. Kept as a small,
-    //! central struct so the whole editor gets a consistent, modern gizmo look.
+    //! A world-space line segment queued with its requested on-screen width. Diligent (and every
+    //! Diligent backend) cannot render wide lines portably (D3D has no wide lines, Vulkan needs the
+    //! wideLines feature), so any segment wider than ~1px is expanded at flush time into a
+    //! camera-facing quad (two triangles) that keeps a constant pixel width - exactly what Blender's
+    //! polyline shader does. Thin (1px) segments stay in the cheap LINE_LIST batch.
+    struct DebugLineSegment
+    {
+        AZ::Vector3 m_start;
+        AZ::Vector3 m_end;
+        AZ::Color m_startColor;
+        AZ::Color m_endColor;
+        float m_widthPx;
+    };
+
+    //! Tessellation resolution shared by every overlay draw. Kept as a small central struct so the
+    //! whole editor gets a consistent smoothness. (Gizmo colours live in GizmoTheme; this display is
+    //! a pass-through renderer under route B, so no palette lives here.)
     struct DebugDisplayStyle
     {
         //! Segments used to approximate a full circle. Higher = smoother (Blender-grade).
         int m_circleSegments = 64;
         //! Segments around the base of cones/cylinders/spheres.
         int m_capSegments = 32;
-
-        //! Remap the engine's hard-coded manipulator colors to Blender's default theme
-        //! (source: userdef_default_theme.c). The manipulator geometry (arrow / ring /
-        //! box) already matches Blender; only the axis + highlight colors differ, and
-        //! every draw call funnels through SetColor, so a single remap here re-skins all
-        //! gizmos for free without forking the engine's manipulator code.
-        bool m_blenderGizmoPalette = true;
-        //! Blender theme.xaxis / yaxis / zaxis.
-        AZ::Color m_axisXColor = AZ::Color(1.0f, 0.200f, 0.322f, 1.0f);  // #ff3352
-        AZ::Color m_axisYColor = AZ::Color(0.545f, 0.863f, 0.0f, 1.0f);  // #8bdc00
-        AZ::Color m_axisZColor = AZ::Color(0.157f, 0.565f, 1.0f, 1.0f);  // #2890ff
-        //! Blender theme.gizmo_hi (mouse-over / selected highlight).
-        AZ::Color m_highlightColor = AZ::Color(1.0f, 1.0f, 1.0f, 1.0f);  // #ffffff
     };
 
     class GenericDebugDisplay final
@@ -82,7 +93,9 @@ namespace CrossEngineEditor
 
         //! Flush the accumulated line/triangle batches to the backend. Split by depth
         //! state so gizmos submitted with DepthTestOff stay drawn-in-front (Blender look).
-        void Flush(ISceneRenderer& renderer);
+        //! The camera state is needed to expand wide lines into screen-constant-width
+        //! camera-facing quads (Diligent has no portable wide-line support).
+        void Flush(ISceneRenderer& renderer, const AzFramework::CameraState& cameraState);
 
         DebugDisplayStyle& Style() { return m_style; }
 
@@ -150,6 +163,22 @@ namespace CrossEngineEditor
         //! World-space text labels collected this frame (painted by the Qt viewport after flush).
         const AZStd::vector<DebugTextLabel>& TextLabels() const { return m_textLabels; }
 
+        //! Area-header status text (Blender ED_area_status_text): a single line the Qt overlay paints
+        //! at the top of the viewport during a drag. Empty = nothing to show. Set each frame.
+        void SetHeaderText(const AZStd::string& text) { m_headerText = text; }
+        const AZStd::string& HeaderText() const { return m_headerText; }
+
+        //! Set whether the NEXT DrawTextLabel gets a black background block (Unreal HUD). Auto-reset
+        //! after each label is queued. Lets the gizmo manager request the Unreal HUD look through the
+        //! generic DebugDisplayRequests interface without widening the base API.
+        void SetNextLabelBackgroundBlock(bool enabled) { m_nextLabelBackgroundBlock = enabled; }
+
+        //! Solid cone with an explicit segment count (Blender arrow heads use 8, Unreal 32). The base
+        //! DrawSolidCone always uses the shared cap-segment count; the gizmo arrow views call this so
+        //! the arrowhead tessellation matches the source editor exactly.
+        void DrawSolidConeWithSegments(
+            const AZ::Vector3& pos, const AZ::Vector3& dir, float radius, float height, int segments);
+
     private:
         enum class Axis
         {
@@ -166,9 +195,19 @@ namespace CrossEngineEditor
 
         //! Push a world-space line segment (already transformed) into the line batch.
         void EmitLine(const AZ::Vector3& worldStart, const AZ::Vector3& worldEnd, const AZ::Color& color);
+        void EmitLine(
+            const AZ::Vector3& worldStart, const AZ::Vector3& worldEnd, const AZ::Color& startColor,
+            const AZ::Color& endColor);
         //! Push a world-space triangle (already transformed) into the triangle batch.
         void EmitTriangle(
             const AZ::Vector3& w0, const AZ::Vector3& w1, const AZ::Vector3& w2, const AZ::Color& color);
+
+        //! Expand the wide (width > ~1px) line segments in a batch into camera-facing quads and
+        //! append them to the matching triangle batch; thin segments are emitted into outThinLines
+        //! as a LINE_LIST. Called by Flush once the camera is known.
+        void ExpandLineSegments(
+            const AZStd::vector<DebugLineSegment>& segments, const AzFramework::CameraState& cameraState,
+            AZStd::vector<DebugVertex>& outThinLines, AZStd::vector<DebugVertex>& outTriangles) const;
 
         //! Two orthonormal basis vectors spanning the plane perpendicular to a unit axis.
         static void BasisFromAxis(const AZ::Vector3& axis, AZ::Vector3& outU, AZ::Vector3& outV);
@@ -182,14 +221,17 @@ namespace CrossEngineEditor
         AZ::Color m_color = AZ::Colors::White;
         float m_lineWidth = 1.0f;
         bool m_depthTest = true;
+        bool m_nextLabelBackgroundBlock = false;
+        AZStd::string m_headerText;
 
         AZStd::vector<AZ::Matrix3x4> m_transformStack;
 
         // Batches accumulated for the current frame. Depth-tested and drawn-in-front
-        // geometry is kept apart so the backend can render gizmos over the scene.
-        AZStd::vector<DebugVertex> m_depthLines;
+        // geometry is kept apart so the backend can render gizmos over the scene. Lines carry
+        // their requested width so Flush can expand wide ones into camera-facing quads.
+        AZStd::vector<DebugLineSegment> m_depthLines;
         AZStd::vector<DebugVertex> m_depthTriangles;
-        AZStd::vector<DebugVertex> m_overlayLines;
+        AZStd::vector<DebugLineSegment> m_overlayLines;
         AZStd::vector<DebugVertex> m_overlayTriangles;
         AZStd::vector<DebugTextLabel> m_textLabels;
     };

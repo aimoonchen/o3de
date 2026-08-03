@@ -57,7 +57,10 @@ namespace CrossEngineEditor
     {
         Move,
         Rotate,
-        Scale
+        Scale,
+        //! Blender-style combined gizmo: move + rotate + scale handles shown together (the default
+        //! transform gizmo group). All three manipulator sets are built and drawn at once.
+        Combined
     };
 
     //! Gizmo orientation space. World = axis-aligned handles (Unreal COORD_World / Blender Global);
@@ -186,6 +189,15 @@ namespace CrossEngineEditor
         void BuildMove(const GizmoTheme& theme);
         void BuildScale(const GizmoTheme& theme);
         void BuildRotate(const GizmoTheme& theme);
+        //! Combined move+rotate+scale gizmo (Blender default), radially offset to avoid overlap.
+        void BuildCombined(const GizmoTheme& theme);
+        //! Axis-only handle builders (no planar handles) - shared by the single-mode Build* and the
+        //! combined gizmo, which omits the plane handles to keep the crowded layout readable.
+        void BuildMoveAxes(const GizmoTheme& theme);
+        void BuildScaleAxes(const GizmoTheme& theme);
+        //! Planar (two-axis) handle builders - the plane half of BuildMove / BuildScale.
+        void BuildMovePlanes(const GizmoTheme& theme);
+        void BuildScalePlanes(const GizmoTheme& theme);
 
         //! Feedback drawn while a drag is active: the constraint/reference line, rotation ghost
         //! arc + helplines, snap ticks and the numeric readout. Mirrors Blender's drawConstraint /
@@ -193,6 +205,12 @@ namespace CrossEngineEditor
         void DrawDragFeedback(
             AzFramework::DebugDisplayRequests& debugDisplay, const AzFramework::CameraState& cameraState,
             const GizmoTheme& theme) const;
+
+        //! Draw Blender's CON_AXIS constraint reference line through the pivot along one axis
+        //! (grey-blended axis colour, 2px). Shared by translate/scale and rotate drag feedback.
+        void DrawBlenderConstraintLine(
+            AzFramework::DebugDisplayRequests& debugDisplay, const GizmoTheme& theme, const AZ::Transform& space,
+            GizmoAxis axis, const AZ::Vector3& pivot) const;
 
         //! State captured continuously during a drag so DrawOverlay can render the aids. m_dragKind
         //! is None when no drag is in flight.
@@ -210,6 +228,10 @@ namespace CrossEngineEditor
         GizmoSpace m_space = GizmoSpace::World;
         GizmoSnapSettings m_snap;
         AZ::EntityId m_entityId;
+
+        //! Shared with the dial views so a per-axis dial can suppress its idle arc while its axis is
+        //! being rotated (the manager draws the full drag arc/ghost instead).
+        AZStd::shared_ptr<GizmoDragState> m_rotateDragState;
 
         AZStd::vector<AZStd::shared_ptr<AzToolsFramework::LinearManipulator>> m_linearManipulators;
         AZStd::vector<AZStd::shared_ptr<AzToolsFramework::PlanarManipulator>> m_planarManipulators;

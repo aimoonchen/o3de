@@ -65,6 +65,7 @@ namespace CrossEngineEditor
         void OnTransformModeMove();
         void OnTransformModeRotate();
         void OnTransformModeScale();
+        void OnTransformModeCombined();
 
     private:
         void BuildMenuBar();

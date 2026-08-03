@@ -8,6 +8,10 @@
 #include <BackendAPI/ISceneRenderer.h>
 
 #include <AzCore/Math/MathUtils.h>
+#include <AzCore/Math/Vector2.h>
+
+#include <AzFramework/Viewport/CameraState.h>
+#include <AzFramework/Viewport/ViewportScreen.h>
 
 namespace CrossEngineEditor
 {
@@ -50,83 +54,166 @@ namespace CrossEngineEditor
         m_color = AZ::Colors::White;
         m_lineWidth = 1.0f;
         m_depthTest = true;
+        m_nextLabelBackgroundBlock = false;
+        m_headerText.clear();
         m_transformStack.clear();
         m_transformStack.push_back(AZ::Matrix3x4::CreateIdentity());
     }
 
-    void GenericDebugDisplay::Flush(ISceneRenderer& renderer)
+    void GenericDebugDisplay::Flush(ISceneRenderer& renderer, const AzFramework::CameraState& cameraState)
     {
+        // Expand wide line segments into camera-facing quads (constant on-screen width) and keep
+        // the thin 1px ones as a cheap LINE_LIST. Wide-quad triangles are appended to the matching
+        // triangle batch so they share the triangle PSO. Local copies keep ClearFrame simple.
+        AZStd::vector<DebugVertex> depthThinLines;
+        AZStd::vector<DebugVertex> depthTriangles = m_depthTriangles;
+        ExpandLineSegments(m_depthLines, cameraState, depthThinLines, depthTriangles);
+
+        AZStd::vector<DebugVertex> overlayThinLines;
+        AZStd::vector<DebugVertex> overlayTriangles = m_overlayTriangles;
+        ExpandLineSegments(m_overlayLines, cameraState, overlayThinLines, overlayTriangles);
+
         // Depth-tested pass first (occluded by the scene), then the drawn-in-front
         // overlay pass so gizmos stay visible - matching Blender's gizmo compositing.
         renderer.SetDepthTest(true);
-        if (!m_depthTriangles.empty())
+        if (!depthTriangles.empty())
         {
-            renderer.SubmitTriangles(m_depthTriangles);
+            renderer.SubmitTriangles(depthTriangles);
         }
-        if (!m_depthLines.empty())
+        if (!depthThinLines.empty())
         {
-            renderer.SubmitLines(m_depthLines);
+            renderer.SubmitLines(depthThinLines);
         }
 
         renderer.SetDepthTest(false);
-        if (!m_overlayTriangles.empty())
+        if (!overlayTriangles.empty())
         {
-            renderer.SubmitTriangles(m_overlayTriangles);
+            renderer.SubmitTriangles(overlayTriangles);
         }
-        if (!m_overlayLines.empty())
+        if (!overlayThinLines.empty())
         {
-            renderer.SubmitLines(m_overlayLines);
+            renderer.SubmitLines(overlayThinLines);
+        }
+    }
+
+    void GenericDebugDisplay::ExpandLineSegments(
+        const AZStd::vector<DebugLineSegment>& segments, const AzFramework::CameraState& cameraState,
+        AZStd::vector<DebugVertex>& outThinLines, AZStd::vector<DebugVertex>& outTriangles) const
+    {
+        // A segment wider than this is drawn as a quad; at or below it stays a hardware 1px line.
+        constexpr float k_thinThresholdPx = 1.5f;
+        // Wide segments are projected to screen and unprojected back, which is only valid in front of
+        // the camera. Clip each wide segment to the near plane first: WorldToScreen divides by w with
+        // no guard (ViewportScreen.cpp), so a point behind the camera folds/explodes and paints a
+        // full-screen quad. Blender's constraint line runs pivot+/-1000 so one end is always behind.
+        const AZ::Vector3 forward = cameraState.m_forward.GetNormalizedSafe();
+        const float nearZ = cameraState.m_nearClip + 1e-3f;
+
+        for (const DebugLineSegment& seg : segments)
+        {
+            if (seg.m_widthPx <= k_thinThresholdPx)
+            {
+                outThinLines.push_back(DebugVertex{ seg.m_start, seg.m_startColor });
+                outThinLines.push_back(DebugVertex{ seg.m_end, seg.m_endColor });
+                continue;
+            }
+
+            // Near-plane clip (camera-space depth d = (p - camPos).forward).
+            AZ::Vector3 start = seg.m_start;
+            AZ::Vector3 end = seg.m_end;
+            AZ::Color startColor = seg.m_startColor;
+            AZ::Color endColor = seg.m_endColor;
+            const float d0 = (start - cameraState.m_position).Dot(forward);
+            const float d1 = (end - cameraState.m_position).Dot(forward);
+            if (d0 < nearZ && d1 < nearZ)
+            {
+                continue; // wholly behind the near plane.
+            }
+            if (d0 < nearZ || d1 < nearZ)
+            {
+                const float t = (nearZ - d0) / (d1 - d0);
+                const AZ::Vector3 hit = start + (end - start) * t;
+                const AZ::Color hitColor = startColor.Lerp(endColor, t);
+                if (d0 < nearZ)
+                {
+                    start = hit;
+                    startColor = hitColor;
+                }
+                else
+                {
+                    end = hit;
+                    endColor = hitColor;
+                }
+            }
+
+            // Project both endpoints to screen, offset perpendicular to the screen-space segment
+            // direction by half the width (in pixels), then unproject each of the four quad corners
+            // back to world at the endpoint's own depth so the ribbon keeps a constant pixel width
+            // regardless of distance/projection (Blender polyline shader approach).
+            const AzFramework::ScreenPoint s0 = AzFramework::WorldToScreen(start, cameraState);
+            const AzFramework::ScreenPoint s1 = AzFramework::WorldToScreen(end, cameraState);
+            const AZ::Vector2 p0(static_cast<float>(s0.m_x), static_cast<float>(s0.m_y));
+            const AZ::Vector2 p1(static_cast<float>(s1.m_x), static_cast<float>(s1.m_y));
+
+            AZ::Vector2 dir = p1 - p0;
+            const float len = dir.GetLength();
+            if (len < AZ::Constants::FloatEpsilon)
+            {
+                continue;
+            }
+            dir = dir / len;
+            const AZ::Vector2 normal(-dir.GetY(), dir.GetX());
+            const float half = 0.5f * seg.m_widthPx;
+            const AZ::Vector2 off = normal * half;
+
+            // Unproject a pixel offset around a screen point back to world at the given reference
+            // world point's depth (keeps the ribbon co-planar with the segment).
+            auto cornerWorld = [&](const AZ::Vector2& screenPt, const AZ::Vector3& refWorld)
+            {
+                const AzFramework::ScreenPoint sp(
+                    static_cast<int>(screenPt.GetX()), static_cast<int>(screenPt.GetY()));
+                // ScreenToWorld yields a ray point on the near plane; project it so it sits at the
+                // reference world point's distance along the view direction for stable depth.
+                const AZ::Vector3 nearPt = AzFramework::ScreenToWorld(sp, cameraState);
+                const AZ::Vector3 rayDir = (nearPt - cameraState.m_position).GetNormalizedSafe();
+                const float refDist = (refWorld - cameraState.m_position).Dot(forward);
+                const float cosTheta = rayDir.Dot(forward);
+                const float t = (AZ::GetAbs(cosTheta) > AZ::Constants::FloatEpsilon) ? (refDist / cosTheta) : refDist;
+                return cameraState.m_position + rayDir * t;
+            };
+
+            const AZ::Vector3 c0 = cornerWorld(p0 + off, start);
+            const AZ::Vector3 c1 = cornerWorld(p0 - off, start);
+            const AZ::Vector3 c2 = cornerWorld(p1 - off, end);
+            const AZ::Vector3 c3 = cornerWorld(p1 + off, end);
+
+            outTriangles.push_back(DebugVertex{ c0, startColor });
+            outTriangles.push_back(DebugVertex{ c1, startColor });
+            outTriangles.push_back(DebugVertex{ c2, endColor });
+            outTriangles.push_back(DebugVertex{ c0, startColor });
+            outTriangles.push_back(DebugVertex{ c2, endColor });
+            outTriangles.push_back(DebugVertex{ c3, endColor });
         }
     }
 
     AZ::Color GenericDebugDisplay::CurrentColor() const
     {
-        if (!m_style.m_blenderGizmoPalette)
-        {
-            return m_color;
-        }
-
-        // Re-skin the engine's hard-coded manipulator colors to Blender's palette. The
-        // manipulator views set pure-channel axis colors (R/G/B) and a highlight color;
-        // match on the dominant hue and swap in the Blender equivalent, preserving alpha.
-        const float r = m_color.GetR();
-        const float g = m_color.GetG();
-        const float b = m_color.GetB();
-        const float a = m_color.GetA();
-
-        auto withAlpha = [a](const AZ::Color& c)
-        {
-            return AZ::Color(c.GetR(), c.GetG(), c.GetB(), a);
-        };
-
-        constexpr float k_dominant = 0.75f; // channel is clearly the axis color.
-        constexpr float k_muted = 0.35f;    // other channels are low.
-
-        // Highlight (engine uses bright yellow / white when moused-over or selected).
-        if (r >= k_dominant && g >= k_dominant && b >= k_muted)
-        {
-            return withAlpha(m_style.m_highlightColor);
-        }
-        if (r >= k_dominant && g < k_muted && b < k_muted)
-        {
-            return withAlpha(m_style.m_axisXColor);
-        }
-        if (g >= k_dominant && r < k_muted && b < k_muted)
-        {
-            return withAlpha(m_style.m_axisYColor);
-        }
-        if (b >= k_dominant && r < k_muted && g < k_muted)
-        {
-            return withAlpha(m_style.m_axisZColor);
-        }
+        // Route B: the self-drawn gizmo views (GizmoViews.cpp) already emit final themed colours, so
+        // this display is a dumb pass-through - no palette remap (that would repaint e.g. Unreal's
+        // blue Z axis and EditorHelpers icons).
         return m_color;
     }
 
     void GenericDebugDisplay::EmitLine(const AZ::Vector3& worldStart, const AZ::Vector3& worldEnd, const AZ::Color& color)
     {
+        EmitLine(worldStart, worldEnd, color, color);
+    }
+
+    void GenericDebugDisplay::EmitLine(
+        const AZ::Vector3& worldStart, const AZ::Vector3& worldEnd, const AZ::Color& startColor, const AZ::Color& endColor)
+    {
         auto& batch = m_depthTest ? m_depthLines : m_overlayLines;
-        batch.push_back(DebugVertex{ worldStart, color });
-        batch.push_back(DebugVertex{ worldEnd, color });
+        batch.push_back(DebugLineSegment{ worldStart, worldEnd, startColor, endColor, m_lineWidth });
     }
 
     void GenericDebugDisplay::EmitTriangle(
@@ -210,9 +297,9 @@ namespace CrossEngineEditor
     void GenericDebugDisplay::DrawLine(
         const AZ::Vector3& p1, const AZ::Vector3& p2, const AZ::Vector4& col1, const AZ::Vector4& col2)
     {
-        auto& batch = m_depthTest ? m_depthLines : m_overlayLines;
-        batch.push_back(DebugVertex{ ToWorld(p1), AZ::Color::CreateFromVector3AndFloat(col1.GetAsVector3(), col1.GetW()) });
-        batch.push_back(DebugVertex{ ToWorld(p2), AZ::Color::CreateFromVector3AndFloat(col2.GetAsVector3(), col2.GetW()) });
+        EmitLine(
+            ToWorld(p1), ToWorld(p2), AZ::Color::CreateFromVector3AndFloat(col1.GetAsVector3(), col1.GetW()),
+            AZ::Color::CreateFromVector3AndFloat(col2.GetAsVector3(), col2.GetW()));
     }
 
     void GenericDebugDisplay::DrawLines(const AZStd::vector<AZ::Vector3>& lines, const AZ::Color& color)
@@ -477,11 +564,17 @@ namespace CrossEngineEditor
     void GenericDebugDisplay::DrawSolidCone(
         const AZ::Vector3& pos, const AZ::Vector3& dir, float radius, float height, [[maybe_unused]] bool drawShaded)
     {
+        DrawSolidConeWithSegments(pos, dir, radius, height, m_style.m_capSegments);
+    }
+
+    void GenericDebugDisplay::DrawSolidConeWithSegments(
+        const AZ::Vector3& pos, const AZ::Vector3& dir, float radius, float height, int segments)
+    {
         const AZ::Vector3 worldBase = ToWorld(pos);
         const AZ::Vector3 worldAxis = ToWorldVector(dir).GetNormalizedSafe();
         const AZ::Vector3 apex = worldBase + worldAxis * height;
         AZStd::vector<AZ::Vector3> ring;
-        BuildRing(worldBase, worldAxis, radius, m_style.m_capSegments, ring);
+        BuildRing(worldBase, worldAxis, radius, AZStd::max(3, segments), ring);
 
         const AZ::Color color = CurrentColor();
         const int count = static_cast<int>(ring.size());
@@ -658,7 +751,8 @@ namespace CrossEngineEditor
         AZ::Vector3 world = ToWorld(pos);
         // Pixel nudges are applied in screen space by the painter; fold them into the label so the
         // Qt overlay stays a dumb consumer.
-        m_textLabels.push_back(DebugTextLabel{ world, CurrentColor(), size, bCenter, text });
+        m_textLabels.push_back(DebugTextLabel{ world, CurrentColor(), size, bCenter, text, m_nextLabelBackgroundBlock });
+        m_nextLabelBackgroundBlock = false;
         (void)srcOffsetX;
         (void)srcOffsetY;
     }

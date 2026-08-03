@@ -107,11 +107,16 @@ namespace CrossEngineEditor
         m_editorHelpers->DisplayHelpers(
             viewportInfo, cameraState, debugDisplay, [](AZ::EntityId) { return true; });
 
-        // Our themed transform gizmos (and any other registered manipulators).
+        // Our themed transform gizmos (and any other registered manipulators). Gizmos are always
+        // drawn-in-front (depth test off) so scene geometry never occludes the handles - the standard
+        // editor behaviour and the user's requirement. DrawDragFeedback toggles depth internally too;
+        // it is balanced there, and we restore depth-test-on afterwards for any later consumer.
         m_currentInteraction.m_keyboardModifiers = VI::QueryKeyboardModifiers();
+        debugDisplay.DepthTestOff();
         m_manipulatorManager->DrawManipulators(debugDisplay, cameraState, m_currentInteraction);
 
-        // Gizmo-level overlays drawn once per frame (rotate-mode trackball view ring).
+        // Gizmo-level overlays drawn once per frame (rotate-mode trackball view ring, drag feedback).
         m_gizmoManager->DrawOverlay(debugDisplay, cameraState);
+        debugDisplay.DepthTestOn();
     }
 } // namespace CrossEngineEditor

@@ -19,6 +19,9 @@
 
 #include <AzToolsFramework/Manipulators/ManipulatorView.h>
 
+#include <AzCore/Math/Vector3.h>
+#include <AzCore/std/smart_ptr/shared_ptr.h>
+
 namespace CrossEngineEditor
 {
     //! Which axis a directional handle acts on (drives which theme color is used).
@@ -32,6 +35,16 @@ namespace CrossEngineEditor
     //! Unit vector for a gizmo axis. Single source of truth shared by views and the manager
     //! (defined in GizmoViews.cpp) so the mapping is never duplicated.
     AZ::Vector3 GizmoAxisToVector(GizmoAxis axis);
+
+    //! Live drag state shared between the manager and the dial views so a per-axis rotation dial can
+    //! suppress its idle arc while its axis is being dragged (the manager draws the drag band/ghost
+    //! instead), matching both editors (Unreal replaces the idle quadrant with the full drag arc;
+    //! Blender draws the full ghost). Held by shared_ptr so views see the manager's live updates.
+    struct GizmoDragState
+    {
+        bool m_rotating = false; //!< a rotation drag is in flight.
+        GizmoAxis m_axis = GizmoAxis::X; //!< the axis being rotated.
+    };
 
     //! Resting themed colour for an axis (X/Y/Z), used by both the views and the manager's
     //! drag-feedback overlay so the constraint line / ghost arc match the handle colour.
@@ -51,6 +64,11 @@ namespace CrossEngineEditor
     protected:
         AZ::Color ResolvedColor(bool mouseOver) const;
         AZ::Vector3 AxisVector() const;
+
+        //! Blender view-angle fade factor for this axis handle (1.0 = fully visible, 0.0 = hidden as
+        //! the axis points at the camera). Returns 1.0 when the theme has no fade (Unreal). isPlane
+        //! selects the plane handle window. worldAxis is the handle axis in world space.
+        float ViewFadeFactor(const AZ::Vector3& worldAxis, const AzFramework::CameraState& cameraState, bool isPlane) const;
 
         GizmoTheme m_theme;
         GizmoAxis m_axis;
@@ -97,7 +115,9 @@ namespace CrossEngineEditor
     {
     public:
         AZ_CLASS_ALLOCATOR(PlaneGizmoView, AZ::SystemAllocator)
-        PlaneGizmoView(const GizmoTheme& theme, GizmoAxis axis1, GizmoAxis axis2);
+        //! scaleMode selects the scale-style plane handle (Unreal L-line / Blender diamond is shared)
+        //! vs the move-style handle (Unreal corner bracket).
+        PlaneGizmoView(const GizmoTheme& theme, GizmoAxis axis1, GizmoAxis axis2, bool scaleMode = false);
 
         void Draw(
             AzToolsFramework::ManipulatorManagerId managerId,
@@ -109,9 +129,20 @@ namespace CrossEngineEditor
             const AzToolsFramework::ViewportInteraction::MouseInteraction& mouseInteraction) override;
 
     private:
+        void DrawBlenderDiamond(
+            AzFramework::DebugDisplayRequests& debugDisplay, AzToolsFramework::ManipulatorManagerId managerId,
+            AzToolsFramework::ManipulatorId manipulatorId, const AzToolsFramework::ManipulatorState& manipulatorState,
+            const AZ::Vector3& origin, const AZ::Vector3& a1, const AZ::Vector3& a2, float scale, bool mouseOver);
+        void DrawUnrealCorner(
+            AzFramework::DebugDisplayRequests& debugDisplay, AzToolsFramework::ManipulatorManagerId managerId,
+            AzToolsFramework::ManipulatorId manipulatorId, const AzToolsFramework::ManipulatorState& manipulatorState,
+            const AZ::Vector3& origin, const AZ::Vector3& a1, const AZ::Vector3& a2, float scale, bool mouseOver);
+
         GizmoTheme m_theme;
         GizmoAxis m_axis1;
         GizmoAxis m_axis2;
+        bool m_scaleMode = false;
+        float m_planeFade = 1.0f; //!< current view-angle fade factor (multiplies handle alpha).
     };
 
     //! Rotate handle: a themed ring around one axis (Blender dial). Blender draws a single-colour
@@ -122,7 +153,11 @@ namespace CrossEngineEditor
     {
     public:
         AZ_CLASS_ALLOCATOR(DialGizmoView, AZ::SystemAllocator)
-        using ThemedGizmoView::ThemedGizmoView;
+        DialGizmoView(const GizmoTheme& theme, GizmoAxis axis, AZStd::shared_ptr<const GizmoDragState> dragState = nullptr)
+            : ThemedGizmoView(theme, axis)
+            , m_dragState(AZStd::move(dragState))
+        {
+        }
 
         void Draw(
             AzToolsFramework::ManipulatorManagerId managerId,
@@ -132,7 +167,18 @@ namespace CrossEngineEditor
             AzFramework::DebugDisplayRequests& debugDisplay,
             const AzFramework::CameraState& cameraState,
             const AzToolsFramework::ViewportInteraction::MouseInteraction& mouseInteraction) override;
+
+    private:
+        AZStd::shared_ptr<const GizmoDragState> m_dragState;
     };
+
+    //! Draw the central move/scale handle (Blender screen-aligned wire circle(s), Unreal solid
+    //! sphere/cube) once, centred on the gizmo pivot, matching the theme's CenterHandleGeometry.
+    void DrawCenterHandle(
+        AzFramework::DebugDisplayRequests& debugDisplay,
+        const AzFramework::CameraState& cameraState,
+        const AZ::Vector3& worldPivot,
+        const GizmoTheme& theme);
 
     //! Draw the screen-aligned trackball outline (Blender's view ring) once, centred on the
     //! rotate gizmo pivot. Kept out of DialGizmoView so it is drawn exactly once per frame
