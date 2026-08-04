@@ -7,6 +7,28 @@
  *
  */
 
+/*
+ * Qt6: draw the menu background via the style sheet itself.
+ *
+ * The menu background used to come solely from AzQtComponents::Style::drawPrimitive(PE_PanelMenu)
+ * -> Menu::drawFrame (#222222 rounded panel). That only fires when the QStyleSheetStyle that Qt6
+ * wraps around the app style falls back to our Style (chain SSS -> Style -> Fusion). When another
+ * base style ends up under the SSS (e.g. QWindows11Style, which paints nothing for PE_PanelMenu on
+ * a frameless translucent popup), the menu renders as text floating on a transparent window.
+ *
+ * Giving QMenu a base rule here makes QStyleSheetStyle::drawPrimitive(PE_PanelMenu) paint the
+ * background on its own (rule.hasDrawable() == true), so the menu is correct regardless of the
+ * underlying base style. Menu::drawFrame remains as the no-stylesheet fallback.
+ * Values mirror Menu::defaultConfig() (backgroundColor #222222, radius 2, verticalPadding 4).
+ */
+QMenu
+{
+    background-color: #222222;
+    border: 1px solid #1e1e1e;
+    border-radius: 2px;
+    padding: 4px 0px;
+}
+
 QMenu::item
 {
     color: #FFFFFF;
