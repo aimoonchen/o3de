@@ -123,11 +123,14 @@ namespace CrossEngineEditor
         }
         m_style = style;
         // Per-style default snap increments (only the increments, not the enabled flags): Blender
-        // rotate 5 deg / grid follows the scene; Unreal rotate 22.5 deg / translate 10 cm
-        // (DNA_scene_types.h SnapAngle 5; UTransformGizmoEditorSettings / EditorViewportSettings).
+        // rotate 5 deg / grid follows the scene; Unreal rotate 10 deg / translate 10 cm.
+        // Unreal's default rotation grid is CommonRotGridSizes[1] = 10 deg (BaseEditorPerProject
+        // UserSettings.ini), NOT 22.5. 22.5 is only the LONG-TICK threshold and is applied
+        // separately in the tick loop (fmod(deg,22.5)) - keeping the step at 10 restores the short
+        // 0.25 ticks that a 22.5 step wrongly turned into dead code (N2).
         if (style == GizmoStyle::Unreal)
         {
-            m_snap.m_angleStepDegrees = 22.5f;
+            m_snap.m_angleStepDegrees = 10.0f;
             m_snap.m_gridSize = 0.1f;
         }
         else
@@ -415,6 +418,7 @@ namespace CrossEngineEditor
                     m_dragStartSpace = EntityWorldTransformNoScale();
                     m_dragKind = DragKind::Axis;
                     m_dragAxis = axis;
+                    m_dragAxisIsScale = false;
                     m_dragOffset = AZ::Vector3::CreateZero();
                     m_undoBatch = AZStd::make_unique<ScopedUndoBatch>("Move Entity");
                 });
@@ -526,6 +530,7 @@ namespace CrossEngineEditor
                     m_dragStartSpace = EntityWorldTransformNoScale();
                     m_dragKind = DragKind::Axis;
                     m_dragAxis = axis;
+                    m_dragAxisIsScale = true;
                     m_dragScale = m_dragStartScale;
                     m_undoBatch = AZStd::make_unique<ScopedUndoBatch>("Scale Entity");
                 });
@@ -625,7 +630,7 @@ namespace CrossEngineEditor
             manipulator->SetView(AZStd::make_unique<DialGizmoView>(theme, axis, m_rotateDragState));
 
             manipulator->InstallLeftMouseDownCallback(
-                [entityId, axis, this](const AngularManipulator::Action&)
+                [entityId, axis, this](const AngularManipulator::Action& action)
                 {
                     AZ::TransformBus::EventResult(
                         m_dragStartOrientation, entityId, &AZ::TransformBus::Events::GetLocalRotationQuaternion);
@@ -633,6 +638,9 @@ namespace CrossEngineEditor
                     m_dragKind = DragKind::Angle;
                     m_dragAxis = axis;
                     m_dragAngle = 0.0f;
+                    // Grab point in world space; the draw code projects it onto the ring plane to
+                    // recover the grab angle theta0 that the ghost sector/helpline anchor to (N1).
+                    m_dragStartHitWorld = action.m_start.m_worldHitPosition;
                     m_rotateDragState->m_rotating = true;
                     m_rotateDragState->m_axis = axis;
                     m_undoBatch = AZStd::make_unique<ScopedUndoBatch>("Rotate Entity");
@@ -849,9 +857,22 @@ namespace CrossEngineEditor
 
             if (theme.m_rotateGeometry == RotationRingGeometry::BlenderHalfRingFade)
             {
-                // Blender dial ghost: filled pie sector 0..delta in a GREY {0.8,0.8,0.8,0.2} - NOT
-                // the axis colour (dial3d_gizmo.cc). Helplines: start width 1.0, current width 3.0.
-                FillSector(debugDisplay, pivot, u, v, radius, 0.0f, m_dragAngle, theme.m_ghostArcColor);
+                // Blender anchors the ghost arc/helplines to the GRAB angle theta0, not to the ring
+                // 0deg (dial3d_gizmo.cc dial_ghostarc_get_angles: angle_ofs = projected mouse-down
+                // direction). Recover theta0 by projecting the grab hit onto the (u,v) ring plane.
+                float theta0 = 0.0f;
+                {
+                    AZ::Vector3 rel = m_dragStartHitWorld - pivot;
+                    rel -= axis * rel.Dot(axis); // project onto ring plane.
+                    if (rel.GetLengthSq() > 1e-8f)
+                    {
+                        theta0 = atan2f(rel.Dot(v), rel.Dot(u));
+                    }
+                }
+
+                // Blender dial ghost: filled pie sector [theta0, theta0+delta] in a GREY
+                // {0.8,0.8,0.8,0.2} - NOT the axis colour (dial3d_gizmo.cc).
+                FillSector(debugDisplay, pivot, u, v, radius, theta0, m_dragAngle, theme.m_ghostArcColor);
 
                 // Modal drag disables the clip plane, so the dragged dial is drawn as a FULL ring
                 // (dial3d_gizmo.cc use_clip_plane = !is_modal). The idle dial for this axis is
@@ -870,11 +891,14 @@ namespace CrossEngineEditor
                     }
                 }
 
+                // Helplines: 1px at the grab angle theta0, 3px at the current angle theta0+delta
+                // (dial_ghostarc_draw_with_helplines).
                 debugDisplay.SetColor(axisColor.GetAsVector4());
+                const AZ::Vector3 startDir = u * cosf(theta0) + v * sinf(theta0);
                 debugDisplay.SetLineWidth(theme.m_helplineStartWidth);
-                debugDisplay.DrawLine(pivot, pivot + u * radius);
+                debugDisplay.DrawLine(pivot, pivot + startDir * radius);
                 debugDisplay.SetLineWidth(theme.m_helplineCurrentWidth);
-                const AZ::Vector3 cur = u * cosf(m_dragAngle) + v * sinf(m_dragAngle);
+                const AZ::Vector3 cur = u * cosf(theta0 + m_dragAngle) + v * sinf(theta0 + m_dragAngle);
                 debugDisplay.DrawLine(pivot, pivot + cur * radius);
 
                 // Blender also draws the CON_AXIS constraint line through the pivot while rotating
@@ -939,6 +963,9 @@ namespace CrossEngineEditor
                         debugDisplay.DrawLine(pivot + dir * rOuter, pivot + dir * (rOuter - band * pct));
                     }
                     // 0/90/180/270 wide axis markers (PercentSize 0.25 from the outer radius).
+                    // UE colours these with the DRAGGED-AXIS colour (RGB rotation of InColor), not
+                    // the highlight yellow (UnrealWidgetRender.cpp DrawSnapMarker, N8).
+                    debugDisplay.SetColor(axisColor.GetAsVector4());
                     for (int q = 0; q < 4; ++q)
                     {
                         const float a = AZ::DegToRad(90.0f * static_cast<float>(q));
@@ -975,6 +1002,22 @@ namespace CrossEngineEditor
                 {
                     DrawBlenderConstraintLine(debugDisplay, theme, space, m_dragAxis2, pivot);
                 }
+
+                // Combined gizmo only: at idle the move/scale axis is stem-less (draw_options=0), but
+                // Blender's modal draw switches the dragged axis to a FULL-LENGTH stem from the pivot
+                // (gizmo_3d_setup_draw_modal: length=end, STEM|ORIGIN, transform_gizmo_3d.cc). Draw
+                // that stem here so the dragged direction visibly grows out of the origin (N3).
+                if (m_mode == GizmoMode::Combined && m_dragKind == DragKind::Axis)
+                {
+                    const AZ::Color axisCol = GizmoAxisColor(theme, m_dragAxis);
+                    const AZ::Vector3 axisDir = space.TransformVector(GizmoAxisToVector(m_dragAxis)).GetNormalized();
+                    // Move end = 1.415, scale end = 0.775 in handle-relative units (BuildCombined).
+                    const float stemEnd = (m_dragAxisIsScale ? 0.775f : 1.415f) * scale;
+                    debugDisplay.SetColor(axisCol.GetAsVector4());
+                    debugDisplay.SetLineWidth(theme.m_axisLineWidth);
+                    debugDisplay.DrawLine(pivot, pivot + axisDir * stemEnd);
+                }
+
                 // Modal drag draws a filled ORIGIN dot at the pivot in the axis colour
                 // (ED_GIZMO_ARROW_DRAW_FLAG_ORIGIN, point size 10*pixelsize, 8-seg fill).
                 const AZ::Color axisColor = GizmoAxisColor(theme, m_dragAxis);

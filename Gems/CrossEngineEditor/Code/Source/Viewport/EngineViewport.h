@@ -63,6 +63,9 @@ namespace CrossEngineEditor
         //! Surface visibility changed - the controller pauses/resumes its frame loop (§2.14).
         void VisibilityChanged(bool visible);
 
+        //! Viewport focus gained/lost - engine camera input start/stop (§2.12).
+        void FocusChanged(bool hasFocus);
+
     private:
         EngineViewportWindow* m_window = nullptr;
         QWidget* m_container = nullptr;

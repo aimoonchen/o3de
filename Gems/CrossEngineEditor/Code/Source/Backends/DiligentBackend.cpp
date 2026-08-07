@@ -242,10 +242,16 @@ namespace CrossEngineEditor
         }
         ApplyPendingResize();
 
-        // Render the whole viewport into the 4x MSAA offscreen targets (resolved to the back buffer
-        // in EndOverlayFrame). Fall back to the raw back buffer if the MSAA target is unavailable.
-        ITextureView* rtv = m_msaaColorRTV ? m_msaaColorRTV.RawPtr() : m_swapChain->GetCurrentBackBufferRTV();
-        ITextureView* dsv = m_msaaDepthDSV ? m_msaaDepthDSV.RawPtr() : m_swapChain->GetDepthBufferDSV();
+        // The whole viewport renders into the 4x MSAA offscreen targets (resolved to the back
+        // buffer in EndOverlayFrame). The overlay PSOs are compiled for SampleCount=4, so there is
+        // NO valid single-sample fallback: drawing them into the sample=1 back buffer is a
+        // validation error. If the MSAA target is missing, skip this frame rather than draw broken.
+        if (!m_msaaColorRTV || !m_msaaDepthDSV)
+        {
+            return;
+        }
+        ITextureView* rtv = m_msaaColorRTV.RawPtr();
+        ITextureView* dsv = m_msaaDepthDSV.RawPtr();
         ITextureView* rtvs[] = { rtv };
         m_context->SetRenderTargets(1, rtvs, dsv, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
         m_context->ClearRenderTarget(rtv, k_clearColor, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
@@ -285,8 +291,8 @@ namespace CrossEngineEditor
             m_frameOpen = false;
             return;
         }
-        // Resolve the 4x MSAA colour into the swapchain back buffer, then present. (No-op path if
-        // the MSAA target is unavailable - geometry was drawn straight to the back buffer.)
+        // Resolve the 4x MSAA colour into the swapchain back buffer, then present. m_msaaColor is
+        // always valid here: BeginOverlayFrame returns early (frame skipped) when it is not.
         if (m_msaaColor)
         {
             ITexture* backBuffer = m_swapChain->GetCurrentBackBufferRTV()->GetTexture();

@@ -92,10 +92,16 @@ namespace CrossEngineEditor
         connect(saveLevel, &QAction::triggered, this, &EditorMainWindow::OnSaveLevel);
 
         QMenu* editMenu = bar->addMenu(QStringLiteral("&Edit"));
-        // Match the engine's EditorAction hot-key semantics (WidgetWithChildrenShortcut):
-        // the action lives on the main window, so it fires whichever docked child holds
-        // focus, without globally hijacking the shortcut. A full ActionManager-based
-        // registration is deferred to the action/menu system phase.
+        // Shortcut context deliberately matches O3DE's ActionManager (EditorAction.cpp sets every
+        // editor action to Qt::WidgetWithChildrenShortcut). O3DE does NOT rely on Qt's native
+        // QShortcutMap for cross-widget firing: it installs an ActionContextWidgetWatcher on the
+        // main window that intercepts the bubbling QEvent::ShortcutOverride and triggers matching
+        // actions manually. Keeping WidgetWithChildrenShortcut (NOT ApplicationShortcut) means these
+        // actions carry over unchanged when the O3DE ActionManager is adopted.
+        // RISK to verify: our viewport is a native QWindow behind createWindowContainer, unlike
+        // O3DE's QWidget+winId viewport. ShortcutOverride must still bubble across the window-
+        // container boundary up to this window; if it does not, a QWindow->main-window shortcut
+        // bridge is required (see plan §Viewport/O3DE adaptation).
         QAction* createEntity = editMenu->addAction(QStringLiteral("Create &Entity"));
         createEntity->setShortcutContext(Qt::WidgetWithChildrenShortcut);
         createEntity->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+N")));
@@ -141,7 +147,11 @@ namespace CrossEngineEditor
             QAction* action = toolBar->addAction(text);
             action->setCheckable(true);
             action->setShortcut(QKeySequence(key));
-            action->setShortcutContext(Qt::WindowShortcut);
+            // Same context as the Edit actions above (O3DE ActionManager alignment): the toolbar
+            // lives on the main window, so WidgetWithChildrenShortcut lets the key fire while any
+            // docked child (incl. the viewport, pending the ShortcutOverride bubble verification)
+            // holds focus, without an ApplicationShortcut global hijack.
+            action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
             connect(action, &QAction::triggered, this, slot);
             return action;
         };

@@ -692,11 +692,21 @@ namespace CrossEngineEditor
         switch (theme.m_centerGeometry)
         {
         case CenterHandleGeometry::UnrealSolidSphere:
+            // UE draws the screen-space centre handle only in perspective views
+            // (UnrealWidgetRender.cpp: ... && Space.bIsPerspective). Skip it in ortho (N5).
+            if (cameraState.m_orthographic)
+            {
+                break;
+            }
             debugDisplay.SetColor(color.GetAsVector4());
             debugDisplay.DrawBall(worldPivot, radius, true);
             break;
         case CenterHandleGeometry::UnrealSolidCube:
         {
+            if (cameraState.m_orthographic)
+            {
+                break;
+            }
             const AZ::Vector3 he(radius, radius, radius);
             debugDisplay.SetColor(color.GetAsVector4());
             debugDisplay.DrawSolidBox(worldPivot - he, worldPivot + he);

@@ -8,6 +8,7 @@
 
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QExposeEvent>
+#include <QFocusEvent>
 #include <QGuiApplication>
 #include <QResizeEvent>
 #include <QtGui/QPlatformSurfaceEvent>
@@ -127,6 +128,18 @@ namespace CrossEngineEditor
             m_lastPhysicalSize = physical;
             Q_EMIT PhysicalResized(physical);
         }
+    }
+
+    void EngineViewportWindow::focusInEvent(QFocusEvent* event)
+    {
+        QWindow::focusInEvent(event);
+        Q_EMIT FocusChanged(true); // engine: resume camera input (§2.12).
+    }
+
+    void EngineViewportWindow::focusOutEvent(QFocusEvent* event)
+    {
+        QWindow::focusOutEvent(event);
+        Q_EMIT FocusChanged(false); // engine: stop camera input so it does not run while unfocused.
     }
 
     bool EngineViewportWindow::event(QEvent* event)

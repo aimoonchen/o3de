@@ -79,7 +79,7 @@ namespace CrossEngineEditor
         bool m_gridSnapEnabled = false;
         float m_gridSize = 0.25f; //!< metres per grid step for translation.
         bool m_angleSnapEnabled = false;
-        float m_angleStepDegrees = 15.0f; //!< degrees per rotation step (Blender default 5, UE 22.5; 15 is neutral).
+        float m_angleStepDegrees = 15.0f; //!< degrees per rotation step (Blender default 5, UE 10; 15 is neutral).
         bool m_scaleSnapEnabled = false;
         float m_scaleStep = 0.1f;
     };
@@ -254,5 +254,11 @@ namespace CrossEngineEditor
         AZ::Vector3 m_dragOffset = AZ::Vector3::CreateZero(); //!< world translation offset (move).
         float m_dragAngle = 0.0f; //!< signed rotation delta in radians (rotate).
         float m_dragScale = 1.0f; //!< resulting uniform scale (scale).
+        //! For a DragKind::Axis drag in the combined gizmo, whether the grabbed handle is a scale
+        //! bar (true) or a move arrow (false). Selects the modal stem length in the feedback (N3).
+        bool m_dragAxisIsScale = false;
+        //! World-space hit point at rotation grab. Blender anchors the ghost sector and the start
+        //! helpline to the grab angle (dial3d_gizmo.cc angle_ofs), not to the ring's 0 degrees (N1).
+        AZ::Vector3 m_dragStartHitWorld = AZ::Vector3::CreateZero();
     };
 } // namespace CrossEngineEditor

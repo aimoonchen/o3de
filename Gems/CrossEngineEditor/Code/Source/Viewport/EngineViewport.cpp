@@ -61,6 +61,7 @@ namespace CrossEngineEditor
         connect(m_window, &EngineViewportWindow::AboutToClose, this, &EngineViewport::AboutToClose);
         connect(m_window, &EngineViewportWindow::InputEvent, this, &EngineViewport::InputEvent);
         connect(m_window, &EngineViewportWindow::VisibilityChanged, this, &EngineViewport::VisibilityChanged);
+        connect(m_window, &EngineViewportWindow::FocusChanged, this, &EngineViewport::FocusChanged);
     }
 
     EngineViewport::~EngineViewport() = default;

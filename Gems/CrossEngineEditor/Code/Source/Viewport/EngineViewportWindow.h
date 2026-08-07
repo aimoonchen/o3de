@@ -28,6 +28,7 @@
 
 class QExposeEvent;
 class QResizeEvent;
+class QFocusEvent;
 
 namespace CrossEngineEditor
 {
@@ -70,9 +71,15 @@ namespace CrossEngineEditor
         //! frame loop while hidden so it stops presenting to an invisible surface (§2.14).
         void VisibilityChanged(bool visible);
 
+        //! Viewport focus gained/lost. The engine starts/stops camera input on this (§2.12);
+        //! the O3DE ActionManager integration also keys off it (see plan §Shortcut bridge).
+        void FocusChanged(bool hasFocus);
+
     protected:
         void exposeEvent(QExposeEvent* event) override;
         void resizeEvent(QResizeEvent* event) override;
+        void focusInEvent(QFocusEvent* event) override;
+        void focusOutEvent(QFocusEvent* event) override;
         bool event(QEvent* event) override;
 
     private:
