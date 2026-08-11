@@ -6,9 +6,16 @@
 
 #include <Application/CrossEngineEditorApplication.h>
 #include <Application/EntityMirrorBridge.h>
+#include <Framework/EngineNodeComponent.h>
 #include <Backends/NullBackend.h>
 #if defined(CEE_HAVE_DILIGENT)
 #include <Backends/DiligentBackend.h>
+#endif
+#if defined(CEE_HAVE_RBFX)
+#include <Backends/RbfxBackend.h>
+#endif
+#if defined(CEE_HAVE_GODOT)
+#include <Backends/GodotBackend.h>
 #endif
 #include <BackendAPI/IEngineBackend.h>
 #include <Viewport/CrossEngineViewportSelection.h>
@@ -27,6 +34,7 @@
 #include <AzToolsFramework/ViewportSelection/EditorInteractionSystemViewportSelectionRequestBus.h>
 
 #include <AzCore/std/smart_ptr/unique_ptr.h>
+#include <AzCore/std/string/conversions.h>
 
 #include <AzQtComponents/Components/GlobalEventFilter.h>
 #include <AzQtComponents/Components/StyleManager.h>
@@ -50,6 +58,17 @@ namespace CrossEngineEditor
                 fprintf(f, "%s\n", stage);
                 fclose(f);
             }
+        }
+
+        //! Read the value following a "--key" token in the argument list, or an empty string.
+        AZStd::string ReadArgValue(const QStringList& args, const char* key)
+        {
+            const int idx = args.indexOf(QString::fromUtf8(key));
+            if (idx >= 0 && idx + 1 < args.size())
+            {
+                return AZStd::string(args.at(idx + 1).toUtf8().constData());
+            }
+            return {};
         }
     } // namespace
 
@@ -95,6 +114,9 @@ namespace CrossEngineEditor
     void CrossEngineEditorApplication::Reflect(AZ::ReflectContext* context)
     {
         ToolsApplication::Reflect(context);
+        // The single self-authored mirror component (plan section 3.1). Reflected here so the
+        // SerializeContext/EditContext know its typed property set for the Inspector.
+        EngineNodeComponent::Reflect(context);
     }
 
     void CrossEngineEditorApplication::CreateReflectionManager()
@@ -110,21 +132,36 @@ namespace CrossEngineEditor
         ToolsApplication::StartCommon(systemEntity);
         BootLog("StartCommon:base-done");
 
+        // Register the mirror component descriptor so it can be added to mirror entities and
+        // shown in the Inspector (plan section 3.1). Reflection is done in Reflect().
+        RegisterComponentDescriptor(EngineNodeComponent::CreateDescriptor());
+
         // Intercept general editor requests (required-component creation, asset browsing,
         // main-window parenting) before any entity/level is created.
         AzToolsFramework::EditorRequests::Bus::Handler::BusConnect();
 
         // Register the engine backend first so the main window can wire the viewport to its
-        // scene renderer while building panels (plan §6 阶段1/阶段2/阶段3). When the Diligent
-        // submodule is built, use the D3D12 backend that presents its swapchain straight into the
-        // viewport's native surface; otherwise fall back to the do-nothing NullBackend. Real
-        // engine backends replace this via the same AZ::Interface.
-#if defined(CEE_HAVE_DILIGENT)
-        m_backend = AZStd::make_unique<DiligentBackend>();
-#else
-        m_backend = AZStd::make_unique<NullBackend>();
-#endif
+        // scene renderer while building panels. The backend is chosen by --backend on the
+        // command line (plan section 6.1): rbfx | godot | diligent | null. Unavailable choices
+        // (submodule not built) fall back to the best compiled-in option. --project <path>
+        // selects the engine project to edit and is forwarded via BackendInitParams.
+        m_backend = CreateBackendFromCommandLine();
         AZ::Interface<IEngineBackend>::Register(m_backend.get());
+
+        // Bring the engine runtime up for the selected project (plan section 6.1). Surface
+        // creation still flows through ISceneRenderer signals; this readies the entity mirror
+        // and asset source. A failure is non-fatal - the shell keeps running on the empty
+        // contracts so the editor UI still comes up.
+        {
+            const QStringList args = arguments();
+            BackendInitParams initParams;
+            initParams.m_projectPath = ReadArgValue(args, "--project");
+            initParams.m_scenePath = ReadArgValue(args, "--scene");
+            if (auto result = m_backend->Initialize(initParams); !result.has_value())
+            {
+                AZ_Warning("CrossEngineEditor", false, "Engine backend Initialize failed; running on empty contracts.");
+            }
+        }
 
         // Bridge editor edits back to the engine object model and pull engine objects in
         // (plan §6 阶段4 / C6). Connects to the standard transform/property buses.
@@ -188,6 +225,34 @@ namespace CrossEngineEditor
     QWidget* CrossEngineEditorApplication::GetMainWindow()
     {
         return m_mainWindow.get();
+    }
+
+    AZStd::unique_ptr<IEngineBackend> CrossEngineEditorApplication::CreateBackendFromCommandLine()
+    {
+        AZStd::string choice = ReadArgValue(arguments(), "--backend");
+        AZStd::to_lower(choice.begin(), choice.end());
+
+#if defined(CEE_HAVE_RBFX)
+        if (choice == "rbfx")
+        {
+            return AZStd::make_unique<RbfxBackend>();
+        }
+#endif
+#if defined(CEE_HAVE_GODOT)
+        if (choice == "godot")
+        {
+            return AZStd::make_unique<GodotBackend>();
+        }
+#endif
+#if defined(CEE_HAVE_DILIGENT)
+        if (choice == "diligent" || choice.empty())
+        {
+            // Diligent is the default "no-engine" demo backend when nothing is requested.
+            return AZStd::make_unique<DiligentBackend>();
+        }
+#endif
+        // "null", an unknown value, or no compiled-in match: run on the do-nothing backend.
+        return AZStd::make_unique<NullBackend>();
     }
 
     void CrossEngineEditorApplication::CreateEditorRepresentation(AZ::Entity* entity)
@@ -269,6 +334,15 @@ namespace CrossEngineEditor
         if (auto* backend = AZ::Interface<IEngineBackend>::Get())
         {
             backend->Tick(deltaSeconds);
+
+            // One-shot engine->editor pull. The backend builds its scene lazily on first surface
+            // expose (OnSurfaceCreated), so we can only mirror its nodes into the Outliner once
+            // the surface is ready. Do it exactly once.
+            if (!m_engineSynced && m_mirrorBridge && backend->GetSceneRenderer().IsSurfaceReady())
+            {
+                m_mirrorBridge->SyncFromEngine();
+                m_engineSynced = true;
+            }
         }
 
         // Idle at a lower rate when the window is not active to free CPU/GPU.

@@ -10,6 +10,11 @@ set(FILES
     Source/Application/CrossEngineEditorApplication.cpp
     Source/Application/EntityMirrorBridge.h
     Source/Application/EntityMirrorBridge.cpp
+    Source/Framework/EngineTransformConverter.h
+    Source/Framework/EngineProperty.h
+    Source/Framework/EngineProperty.cpp
+    Source/Framework/EngineNodeComponent.h
+    Source/Framework/EngineNodeComponent.cpp
     Source/Window/EditorMainWindow.h
     Source/Window/EditorMainWindow.cpp
     Source/Window/AssetBrowserPanel.h

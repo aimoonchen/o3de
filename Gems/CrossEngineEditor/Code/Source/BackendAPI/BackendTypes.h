@@ -34,6 +34,7 @@ namespace CrossEngineEditor
     struct BackendInitParams
     {
         AZStd::string m_projectPath;   //!< Root path of the engine project to edit.
+        AZStd::string m_scenePath;     //!< Optional engine scene to open on start (resource-relative).
         bool m_headless = false;       //!< True for automated tests (no window surface).
     };
 

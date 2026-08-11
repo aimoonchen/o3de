@@ -10,6 +10,7 @@
 #include <Viewport/GizmoManager.h>
 #include <Viewport/EditorViewportWidget.h>
 #include <BackendAPI/IEngineBackend.h>
+#include <BackendAPI/IEntityMirror.h>
 
 #include <AzCore/Interface/Interface.h>
 #include <AzCore/IO/FileIO.h>
@@ -396,6 +397,18 @@ namespace CrossEngineEditor
 
     void EditorMainWindow::OnSaveLevel()
     {
+        // Plan §3.7: with an engine backend the engine's native scene is the single source of
+        // truth, so route Save to the backend (Godot PackedScene+ResourceSaver / rbfx SaveFile).
+        // Passing an empty path lets the backend save to the scene's current file. If the backend
+        // can't save (null/diligent, or no scene), fall back to the O3DE prefab path below.
+        if (IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get())
+        {
+            if (backend->GetEntityMirror().SaveScene(AZStd::string{}))
+            {
+                return;
+            }
+        }
+
         const QString path = QFileDialog::getSaveFileName(
             this, QStringLiteral("Save Level"), QStringLiteral("NewLevel.prefab"), QStringLiteral("Prefab (*.prefab)"));
         if (path.isEmpty())

@@ -12,6 +12,8 @@
 #include <AzCore/Component/TransformBus.h>
 #include <AzCore/Interface/Interface.h>
 
+#include <AzToolsFramework/Entity/EditorEntityContextBus.h>
+
 namespace CrossEngineEditor
 {
     EntityMirrorBridge::EntityMirrorBridge()
@@ -34,13 +36,47 @@ namespace CrossEngineEditor
 
     void EntityMirrorBridge::SyncFromEngine()
     {
-        // Engine -> editor. NullBackend returns nothing; a real backend fills the list
-        // and the shell would add the entities to the editor entity context.
-        if (auto* backend = GetBackend())
+        // Engine -> editor (plan section 3.5). The backend hands us fully-built mirror
+        // entities (each already carrying an EngineNodeComponent and, for a real backend,
+        // its parent EntityId on the TransformComponent so the Outliner tree forms). Here we
+        // run the standard editor-entity intake so the Outliner / Inspector pick them up.
+        auto* backend = GetBackend();
+        if (!backend)
         {
-            AZStd::vector<AZ::Entity*> mirrored;
-            backend->GetEntityMirror().SyncToEditor(mirrored);
+            return;
         }
+
+        AZStd::vector<AZ::Entity*> mirrored;
+        backend->GetEntityMirror().SyncToEditor(mirrored);
+
+        using AzToolsFramework::EditorEntityContextRequestBus;
+        for (AZ::Entity* entity : mirrored)
+        {
+            if (!entity)
+            {
+                continue;
+            }
+
+            // Add the 9 required editor components (TransformComponent + editor bookkeeping)
+            // if the backend has not already, then bring the entity into the editor context so
+            // the Outliner shows it. Sequence verified against EditorEntityContextComponent.
+            EditorEntityContextRequestBus::Broadcast(
+                &EditorEntityContextRequestBus::Events::AddRequiredComponents, *entity);
+
+            if (entity->GetState() == AZ::Entity::State::Constructed)
+            {
+                entity->Init();
+            }
+
+            EditorEntityContextRequestBus::Broadcast(
+                &EditorEntityContextRequestBus::Events::AddEditorEntity, entity);
+            EditorEntityContextRequestBus::Broadcast(
+                &EditorEntityContextRequestBus::Events::FinalizeEditorEntity, entity);
+        }
+
+        // All mirror entities are now added and activated; let the backend wire the
+        // parent-child links (TransformBus::SetParent) so the Outliner tree forms.
+        backend->GetEntityMirror().FinishSync();
     }
 
     void EntityMirrorBridge::OnEntityTransformChanged(const AzToolsFramework::EntityIdList& entityIds)

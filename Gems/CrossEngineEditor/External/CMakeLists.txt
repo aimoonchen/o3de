@@ -94,6 +94,18 @@ set(CEE_DILIGENT_ROOT ${CEE_EXTERNAL_ROOT}/DiligentEngine)
 # `git submodule update --init` (non-recursive) does not force a multi-minute RHI build.
 option(CEE_ENABLE_DILIGENT "Build the DiligentEngine RHI backend for CrossEngineEditor" ON)
 
+# rbfx VENDORS its own full copy of DiligentEngine (Source/ThirdParty/Diligent) and always
+# builds it as its renderer. Our standalone DiligentEngine submodule declares the SAME
+# Diligent-* target names, which is a fatal duplicate-target collision. rbfx + Godot are the
+# primary real-engine backends, so when rbfx is enabled we suppress our standalone Diligent
+# submodule (the DiligentBackend is only a bring-up RHI and is superseded by rbfx here).
+option(CEE_ENABLE_RBFX "Build the rbfx (Urho3D) engine backend for CrossEngineEditor" ON)
+if(CEE_ENABLE_RBFX AND CEE_ENABLE_DILIGENT)
+    message(STATUS "CrossEngineEditor: rbfx enabled -> disabling standalone DiligentEngine submodule "
+                   "(rbfx vendors its own Diligent; avoids duplicate Diligent-* targets).")
+    set(CEE_ENABLE_DILIGENT OFF)
+endif()
+
 if(CEE_ENABLE_DILIGENT AND EXISTS ${CEE_DILIGENT_ROOT}/CMakeLists.txt)
     # Diligent build knobs (see DiligentEngine/BuildTools + DiligentCore CMake options).
     # The editor's first bring-up presents through D3D12 only, so disable every other backend.
@@ -188,4 +200,148 @@ else()
             "CrossEngineEditor will build with the NullBackend (no GPU rendering).")
     endif()
     set(CEE_HAVE_DILIGENT FALSE PARENT_SCOPE)
+endif()
+
+# =======================================================================================
+# rbfx (Urho3D fork) - optional real engine backend, gated so the editor still builds
+# without it. Uses the local checkout via add_subdirectory (plan section 6.2).
+# =======================================================================================
+# rbfx is large; building it is opt-in. Default ON per project requirement.
+# Path to the rbfx source checkout. Override with -DCEE_RBFX_ROOT=<path> if needed.
+set(CEE_RBFX_ROOT "I:/rbfx" CACHE PATH "Path to the rbfx (Urho3D) source checkout")
+
+if(CEE_ENABLE_RBFX AND EXISTS ${CEE_RBFX_ROOT}/CMakeLists.txt)
+    # rbfx build knobs: we only need the engine library, no samples/tools/tests.
+    set(URHO3D_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(URHO3D_TOOLS OFF CACHE BOOL "" FORCE)
+    set(URHO3D_PLAYER OFF CACHE BOOL "" FORCE)
+    set(URHO3D_EDITOR OFF CACHE BOOL "" FORCE)
+    set(URHO3D_EXTRAS OFF CACHE BOOL "" FORCE)
+    set(URHO3D_PCH ON CACHE BOOL "" FORCE)
+    # O3DE's RecastNavigation Gem pulls recastnavigation via FetchContent, which creates the
+    # targets Recast/Detour/DetourCrowd/DetourTileCache. rbfx bundles its OWN copies of these
+    # same-named ThirdParty targets under Source/ThirdParty, causing a fatal duplicate-target
+    # collision at configure time. The editor backend needs no navmesh, so disable rbfx's
+    # navigation subsystem (drops its Detour/Recast targets entirely).
+    set(URHO3D_NAVIGATION OFF CACHE BOOL "" FORCE)
+    # rbfx bundles its OWN copies of ImGui / OpenSSL / tracy / libdatachannel under
+    # Source/ThirdParty. Those collide with O3DE's ImGui Gem target and other 3rd-party
+    # targets already in this build. None are needed by a headless editor backend, so
+    # disable the subsystems that pull them in.
+    set(URHO3D_SYSTEMUI OFF CACHE BOOL "" FORCE)   # drops bundled ImGui/ImGuizmo
+    set(URHO3D_RMLUI OFF CACHE BOOL "" FORCE)       # drops RmlUi (also uses ImGui)
+    set(URHO3D_PROFILING OFF CACHE BOOL "" FORCE)   # drops tracy/TracyImGui
+    set(URHO3D_NETWORK OFF CACHE BOOL "" FORCE)     # drops libdatachannel/OpenSSL alias
+    set(URHO3D_TESTING OFF CACHE BOOL "" FORCE)
+    # The editor presents through D3D12 only (matching the DiligentBackend bring-up). Disable the
+    # Vulkan/OpenGL/D3D11 renderer backends so rbfx does not pull vulkan/vulkan.h, volk, GLEW, etc.
+    # Keep the shader translator ON so the NO_* options are honoured (they are forced ON when the
+    # translator is OFF, which would disable D3D12 too).
+    set(URHO3D_SHADER_TRANSLATOR ON CACHE BOOL "" FORCE)
+    set(URHO3D_GRAPHICS_NO_VULKAN ON CACHE BOOL "" FORCE)
+    set(URHO3D_GRAPHICS_NO_GL ON CACHE BOOL "" FORCE)
+    set(URHO3D_GRAPHICS_NO_D3D11 ON CACHE BOOL "" FORCE)
+    set(URHO3D_GRAPHICS_NO_D3D12 OFF CACHE BOOL "" FORCE)
+
+    # Same /WX handling as Diligent: strip warnings-as-errors in this directory scope so
+    # rbfx third-party code (and EASTL) compiles under O3DE's global /W4 /WX flags. O3DE
+    # first-party code is compiled in its own scopes and is unaffected.
+    string(REGEX REPLACE "/WX( |$)" " " CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    string(REGEX REPLACE "/WX( |$)" " " CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+    string(REGEX REPLACE "/W4( |$)" " " CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    string(REGEX REPLACE "/W4( |$)" " " CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+    string(REGEX REPLACE "/we[0-9]+( |$)" " " CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    string(REGEX REPLACE "/we[0-9]+( |$)" " " CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+    if(MSVC)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W0 /WX-")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W0 /WX-")
+    endif()
+
+    # rbfx has an extremely deep ThirdParty tree. Under the default binary dir
+    # (build/windows/External/CrossEngineEditor-XXXX/Code/CrossEngineExternal/rbfx/...) MSBuild's
+    # per-project .tlog paths blow past Windows' 260-char MAX_PATH and fail with MSB3501. Build
+    # rbfx under a short, fixed root instead. Override with -DCEE_RBFX_BUILD_DIR=<short path>.
+    set(CEE_RBFX_BUILD_DIR "${CMAKE_BINARY_DIR}/rbfx" CACHE PATH "Short binary dir for rbfx subbuild")
+    add_subdirectory(${CEE_RBFX_ROOT} ${CEE_RBFX_BUILD_DIR} EXCLUDE_FROM_ALL)
+    if(NOT TARGET Urho3D)
+        message(FATAL_ERROR "rbfx present at ${CEE_RBFX_ROOT} but no 'Urho3D' target was created.")
+    endif()
+
+    if(MSVC)
+        target_compile_options(Urho3D PRIVATE /WX-)
+    endif()
+
+    # Facade target the editor links against (single stable name), mirroring CrossEngine::Diligent.
+    add_library(CrossEngine_Rbfx INTERFACE)
+    add_library(CrossEngine::Rbfx ALIAS CrossEngine_Rbfx)
+    target_link_libraries(CrossEngine_Rbfx INTERFACE Urho3D)
+    # rbfx public headers are included as <Urho3D/...>, so expose the source root.
+    target_include_directories(CrossEngine_Rbfx INTERFACE ${CEE_RBFX_ROOT}/Source)
+    target_compile_definitions(CrossEngine_Rbfx INTERFACE CEE_HAVE_RBFX=1)
+
+    # Pre-seed O3DE's runtime-dependency walker so it treats the rbfx subtree as walked
+    # leaves (same rationale as Diligent: static lib graph would overflow the walker).
+    foreach(_rbfx_cached Urho3D CrossEngine_Rbfx)
+        set_property(GLOBAL PROPERTY O3DE_COPY_DEPENDENCIES_${_rbfx_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_TARGET_DEPENDENCIES_${_rbfx_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_LINK_DEPENDENCIES_${_rbfx_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_IMPORTED_DEPENDENCIES_${_rbfx_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_DEPENDENCIES_CACHED_${_rbfx_cached} TRUE)
+    endforeach()
+
+    set(CEE_HAVE_RBFX TRUE PARENT_SCOPE)
+else()
+    if(CEE_ENABLE_RBFX)
+        message(WARNING
+            "rbfx checkout not found at ${CEE_RBFX_ROOT}. "
+            "Set -DCEE_RBFX_ROOT=<path> to your rbfx source. "
+            "CrossEngineEditor will build without the rbfx backend.")
+    endif()
+    set(CEE_HAVE_RBFX FALSE PARENT_SCOPE)
+endif()
+
+# =======================================================================================
+# Godot (libgodot) - optional real engine backend, gated so the editor still builds
+# without it. Default ON per project requirement.
+#
+# Unlike rbfx/Diligent we do NOT add_subdirectory Godot: it is built out-of-tree with scons
+# (scons platform=windows target=editor library_type=shared_library) into a libgodot DLL,
+# and the editor loads that DLL at RUNTIME via LoadLibrary + libgodot_create_godot_instance
+# (plan §1/§6.3). At BUILD time we only need Godot's GDExtension C-API headers so GodotBackend
+# can call libgodot.h / gdextension_interface.h. This keeps Godot's enormous build graph out
+# of our configure entirely and means enabling Godot never forces a multi-hour scons build.
+# =======================================================================================
+option(CEE_ENABLE_GODOT "Build the Godot (libgodot) engine backend for CrossEngineEditor" ON)
+set(CEE_GODOT_ROOT "I:/godot" CACHE PATH "Path to the Godot source checkout (for libgodot GDExtension headers)")
+
+if(CEE_ENABLE_GODOT AND EXISTS ${CEE_GODOT_ROOT}/core/extension/libgodot.h)
+    # Header-only INTERFACE facade: exposes Godot's include roots so GodotBackend can
+    # #include "core/extension/libgodot.h" and the generated gdextension_interface header.
+    # No link libraries: libgodot is resolved at runtime via LoadLibrary.
+    add_library(CrossEngine_Godot INTERFACE)
+    add_library(CrossEngine::Godot ALIAS CrossEngine_Godot)
+    target_include_directories(CrossEngine_Godot INTERFACE
+        ${CEE_GODOT_ROOT}
+        ${CEE_GODOT_ROOT}/core/extension)
+    target_compile_definitions(CrossEngine_Godot INTERFACE CEE_HAVE_GODOT=1)
+
+    # The generated gdextension_interface.gen.h only exists after Godot has been built once.
+    # Fall back to the checked-in gdextension_interface.h when the generated one is absent so
+    # a from-scratch checkout still configures/compiles the header-facing scaffold.
+    if(NOT EXISTS ${CEE_GODOT_ROOT}/core/extension/gdextension_interface.gen.h
+       AND EXISTS ${CEE_GODOT_ROOT}/core/extension/gdextension_interface.h)
+        target_compile_definitions(CrossEngine_Godot INTERFACE
+            CEE_GODOT_GDEXTENSION_HEADER="core/extension/gdextension_interface.h")
+    endif()
+
+    set(CEE_HAVE_GODOT TRUE PARENT_SCOPE)
+    set(CEE_GODOT_ROOT_OUT ${CEE_GODOT_ROOT} PARENT_SCOPE)
+else()
+    if(CEE_ENABLE_GODOT)
+        message(WARNING
+            "Godot checkout (libgodot.h) not found at ${CEE_GODOT_ROOT}. "
+            "Set -DCEE_GODOT_ROOT=<path> to your Godot source. "
+            "CrossEngineEditor will build without the Godot backend.")
+    endif()
+    set(CEE_HAVE_GODOT FALSE PARENT_SCOPE)
 endif()

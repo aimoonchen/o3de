@@ -66,6 +66,10 @@ namespace CrossEngineEditor
     private:
         void OnIdle();
 
+        //! Build the engine backend selected by --backend on the command line (plan 6.1),
+        //! falling back to the best compiled-in option when the choice is unavailable.
+        AZStd::unique_ptr<IEngineBackend> CreateBackendFromCommandLine();
+
         //! Create an empty in-memory level prefab and focus it so the Outliner has a
         //! root container and entity creation works (plan §2 modern EC/Prefab workflow).
         void CreateNewLevel();
@@ -77,5 +81,9 @@ namespace CrossEngineEditor
 
         //! Last idle timestamp, used to derive the per-frame delta for the backend tick.
         std::chrono::steady_clock::time_point m_lastIdleTime = std::chrono::steady_clock::now();
+
+        //! Set once the engine scene has been pulled into the editor (after the surface is
+        //! ready and the backend has built its scene). Guards the one-shot SyncFromEngine.
+        bool m_engineSynced = false;
     };
 } // namespace CrossEngineEditor

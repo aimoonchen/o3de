@@ -65,6 +65,9 @@ if(CEE_HAVE_ADS)
     target_compile_definitions(CrossEngineEditor PRIVATE CEE_HAVE_ADS=1)
 endif()
 
+if(PAL_TRAIT_BUILD_EXTERNAL_CRASH_HANDLER_SUPPORTED)
+    ly_target_link_libraries(CrossEngineEditor PRIVATE AZ::ToolsCrashHandler)
+endif()
 if(CEE_HAVE_DILIGENT)
     # Link Diligent with plain target_link_libraries (NOT ly_target_link_libraries): the latter
     # registers the dependency into O3DE's runtime-dependency walker, which recurses Diligent's
@@ -88,8 +91,58 @@ if(CEE_HAVE_DILIGENT)
     )
 endif()
 
-if(PAL_TRAIT_BUILD_EXTERNAL_CRASH_HANDLER_SUPPORTED)
-    ly_target_link_libraries(CrossEngineEditor PRIVATE AZ::ToolsCrashHandler)
+if(CEE_HAVE_RBFX)
+    # Link rbfx via the External facade with plain target_link_libraries (same rationale as
+    # Diligent: keep O3DE's runtime-dependency walker out of the static-lib graph).
+    target_link_libraries(CrossEngineEditor PRIVATE CrossEngine::Rbfx)
+    target_compile_definitions(CrossEngineEditor PRIVATE CEE_HAVE_RBFX=1)
+    # The rbfx backend includes Urho3D/EASTL headers, which define many macros/containers that
+    # clash across translation units when merged, so keep it out of unity builds.
+    target_sources(CrossEngineEditor PRIVATE
+        Source/Backends/RbfxBackend.h
+        Source/Backends/RbfxBackend.cpp
+    )
+    set_source_files_properties(
+        Source/Backends/RbfxBackend.cpp
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON
+    )
+    # rbfx public headers pull in rapidjson, which trips C5054 (operator '|' between different
+    # enum types). O3DE promotes this to an error via /we5054, and that /weNNNN promotion cannot
+    # be undone by an in-header #pragma warning(disable) once the force-included VSCompat re-asserts
+    # it per-TU. Demote it back to a (silenced) warning for the whole editor target instead.
+    if(MSVC)
+        target_compile_options(CrossEngineEditor PRIVATE /wd5054)
+    endif()
+endif()
+
+if(CEE_HAVE_GODOT)
+    # Godot is embedded via the libgodot DLL loaded at RUNTIME (LoadLibrary), so there is no
+    # build-time link dependency — only the header-only facade exposing Godot's include roots.
+    target_link_libraries(CrossEngineEditor PRIVATE CrossEngine::Godot)
+    target_compile_definitions(CrossEngineEditor PRIVATE CEE_HAVE_GODOT=1)
+    # Keep out of unity builds: the Godot GDExtension headers define many macros/enums that
+    # clash across translation units when merged (same rationale as rbfx/Diligent).
+    target_sources(CrossEngineEditor PRIVATE
+        Source/Backends/GodotBackend.h
+        Source/Backends/GodotBackend.cpp
+    )
+    set_source_files_properties(
+        Source/Backends/GodotBackend.cpp
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON
+    )
+
+    # Copy the runtime libgodot DLL next to the editor executable so `--backend godot` loads it
+    # via LoadLibrary without needing it on PATH. Only if a built DLL exists (scons produces
+    # godot.windows.editor.*.dll); silently skipped otherwise so a header-only configure still
+    # builds. Point at your build with -DCEE_GODOT_ROOT=<path>.
+    file(GLOB _cee_godot_dll "${CEE_GODOT_ROOT}/bin/godot.windows.editor*.x86_64.dll")
+    if(_cee_godot_dll)
+        list(GET _cee_godot_dll 0 _cee_godot_dll0)
+        add_custom_command(TARGET CrossEngineEditor POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_cee_godot_dll0}" "$<TARGET_FILE_DIR:CrossEngineEditor>"
+            COMMENT "Copying libgodot runtime DLL next to CrossEngineEditor")
+    endif()
 endif()
 
 ly_set_gem_variant_to_load(TARGETS CrossEngineEditor VARIANTS Tools)
