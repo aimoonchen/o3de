@@ -145,6 +145,32 @@ if(CEE_HAVE_GODOT)
     endif()
 endif()
 
+# ---------------------------------------------------------------------------------------
+# Tracy profiler client. Linked with plain target_link_libraries so its PUBLIC TRACY_ENABLE
+# define + public/ include dir propagate to every CrossEngineEditor TU that #includes
+# <tracy/Tracy.hpp> (via Source/Profiling/CrossEngineProfiler.h). CEE_HAVE_TRACY lets the
+# profiler wrapper header no-op cleanly when the submodule is absent / disabled.
+# ---------------------------------------------------------------------------------------
+if(CEE_HAVE_TRACY)
+    target_link_libraries(CrossEngineEditor PRIVATE CrossEngine::Tracy)
+    target_compile_definitions(CrossEngineEditor PRIVATE CEE_HAVE_TRACY=1)
+    # rbfx vendors its OWN (older) copy of Tracy under Source/ThirdParty/tracy/public and adds it
+    # to our include path transitively. If <tracy/Tracy.hpp> resolves to THAT copy the client and
+    # the instrumentation disagree on the config-mangled symbol names (GetProfiler_CFG_... vs the
+    # plain GetProfiler), and the editor fails to link. Force OUR v0.14.0 public/ dir to the FRONT
+    # of the search order (BEFORE) so <tracy/Tracy.hpp> always resolves to the same headers that
+    # built TracyClient.cpp.
+    target_include_directories(CrossEngineEditor BEFORE PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/../External/tracy/public)
+    # Tracy's inline client code (ZoneScoped/plots expanded at every call site) trips a handful of
+    # MSVC warnings that O3DE promotes to errors under /WX. They fire in OUR TUs at the macro
+    # expansion point, so an in-header #pragma push/pop cannot reliably cover every instantiation;
+    # demote them to silenced warnings for the whole editor target (same pattern as rbfx's /wd5054).
+    if(MSVC)
+        target_compile_options(CrossEngineEditor PRIVATE /wd4366 /wd4267 /wd4244 /wd4324 /wd4245)
+    endif()
+endif()
+
 ly_set_gem_variant_to_load(TARGETS CrossEngineEditor VARIANTS Tools)
 
 # Inject LY_CMAKE_TARGET so the application can locate its generated dependency .setreg.

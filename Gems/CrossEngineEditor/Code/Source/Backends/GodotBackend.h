@@ -51,7 +51,7 @@ namespace CrossEngineEditor
     //! Opaque handle to a created Godot instance (a GodotInstance GDExtension object).
     using GodotInstanceHandle = void*;
 
-    //! Godot node handle stored in EngineNodeComponent's non-reflected node handle. Godot uses
+    //! Godot node handle stored in EngineNodeComponent's reflected node handle. Godot uses
     //! a 64-bit ObjectID for stable per-scene identity, mirrored here as AZ::u64.
     using GodotObjectId = AZ::u64;
 
@@ -86,13 +86,15 @@ namespace CrossEngineEditor
             bool m_running = false;                //!< True once the GodotInstance is started.
             bool m_started = false;                //!< Guards one-shot start() after create.
             bool m_reparented = false;             //!< Guards one-shot Win32 reparent of Godot's window.
+            bool m_vsyncDisabled = false;          //!< Guards one-shot vsync-off (avoids present blocking Tick).
 
             // ---- GDExtension access (resolved in the init callback, plan §3.2) ----
             GodotApi m_api;                        //!< Thin GDExtension C-API facade.
             GDExtensionObjectPtr m_sceneTree = nullptr; //!< SceneTree MainLoop (Engine.get_main_loop).
             GDExtensionObjectPtr m_editorCamera = nullptr; //!< Camera3D we own to view the scene.
-            GDExtensionObjectPtr m_overlayMesh = nullptr;  //!< MeshInstance3D holding the ImmediateMesh.
-            GDExtensionObjectPtr m_overlayImmediate = nullptr; //!< ImmediateMesh for gizmo/grid 3 primitives.
+            GDExtensionObjectPtr m_overlayMesh = nullptr;  //!< MeshInstance3D holding the ArrayMesh.
+            GDExtensionObjectPtr m_overlayArrayMesh = nullptr; //!< ArrayMesh: gizmo/grid geometry, bulk-submitted per frame.
+            GDExtensionObjectPtr m_overlayMaterial = nullptr; //!< StandardMaterial3D: unshaded + albedo-from-vertex-color.
         };
 
     private:
@@ -122,9 +124,19 @@ namespace CrossEngineEditor
             //! Lazily create the editor camera + overlay MeshInstance3D under the scene root.
             void EnsureOverlayNodes();
 
+            //! Append one ArrayMesh surface of the given primitive from `vertices` in a single bulk
+            //! add_surface_from_arrays call (Godot editor-gizmo path). Falls back to SurfaceTool if
+            //! the GDExtension ABI lacks a required bulk entry point.
+            void SubmitSurface(int64_t primitive, AZStd::span<const DebugVertex> vertices);
+            void SubmitSurfaceViaSurfaceTool(int64_t primitive, AZStd::span<const DebugVertex> vertices);
+
             EngineState& m_state;
             bool m_depthTest = true;
             bool m_frameOpen = false;
+            //! Reused per-frame scratch so the bulk submit does not reallocate: positions xyz,
+            //! colors rgba, contiguous, memcpy'd straight into the packed arrays.
+            AZStd::vector<float> m_posScratch;
+            AZStd::vector<float> m_colorScratch;
         };
 
         // ----- IEntityMirror --------------------------------------------------------------
@@ -140,6 +152,7 @@ namespace CrossEngineEditor
             AZ::EntityId CreateObject(const ObjectSpec& spec) override;
             void DestroyObject(AZ::EntityId entityId) override;
             bool SaveScene(const AZStd::string& path) override;
+            AZ::Aabb GetWorldBounds(AZ::EntityId entityId) const override;
 
         private:
             //! Mirror one Godot Node into an AZ::Entity and recurse over its children.
@@ -147,12 +160,17 @@ namespace CrossEngineEditor
                 GDExtensionObjectPtr node, AZ::EntityId parentId, AZStd::vector<AZ::Entity*>& outEntities);
             //! Read a node's editable properties into a typed PropertyBag (plan §3.2).
             void ReadProperties(GDExtensionObjectPtr node, PropertyBag& outBag) const;
-            //! Resolve the Godot Node for a mirror entity (via its stored ObjectID), or null.
-            GDExtensionObjectPtr FindNode(AZ::EntityId entityId) const;
+            //! Resolve the Godot Node for a mirror entity via the live EngineNodeComponent's
+            //! reflected ObjectID handle, or null (warns on miss). Single resolution path for every
+            //! post-sync operation: the editor entity context can re-home the mirror entity (and
+            //! change its AZ::EntityId), whereas the reflected handle survives that re-home.
+            GDExtensionObjectPtr ResolveNode(AZ::EntityId entityId) const;
 
             EngineState& m_state;
+            //! Mirror entity id -> Godot ObjectID, populated during SyncToEditor and consumed only by
+            //! the synchronous FinishSync transform seeding in the same batch. NOT a resolution path
+            //! for later edits - use ResolveNode for those.
             AZStd::unordered_map<AZ::EntityId, GodotObjectId> m_entityToNode;
-            AZStd::unordered_map<GodotObjectId, AZ::EntityId> m_nodeToEntity;
             //! Child mirror entity -> parent mirror entity, applied in FinishSync via TransformBus.
             AZStd::unordered_map<AZ::EntityId, AZ::EntityId> m_pendingParent;
         };

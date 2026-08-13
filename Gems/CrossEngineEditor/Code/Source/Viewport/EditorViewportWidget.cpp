@@ -8,6 +8,14 @@
 #include <Viewport/EngineViewport.h>
 #include <BackendAPI/ISceneRenderer.h>
 
+#include <AzCore/Interface/Interface.h>
+#include <Framework/EngineNodeComponent.h>
+
+#include <Profiling/CrossEngineProfiler.h>
+
+#include <AzCore/Component/Entity.h>
+#include <AzToolsFramework/Entity/EditorEntityContextBus.h>
+
 #include <AzFramework/Entity/EntityDebugDisplayBus.h>
 #include <AzFramework/Viewport/ScreenGeometry.h>
 #include <AzFramework/Viewport/ViewportScreen.h>
@@ -30,7 +38,6 @@ AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QMouseEvent>
 #include <QPainter>
 #include <QResizeEvent>
-#include <QTimer>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 AZ_POP_DISABLE_WARNING
@@ -199,44 +206,29 @@ namespace CrossEngineEditor
             {
                 HandleNativeInput(event);
             });
-        // Pause the idle tick while the surface is hidden (dock tab / auto-hide): no point
-        // presenting to an invisible surface. Resume when it comes back (new_editor_plan §2.14).
+        // Track surface visibility so TickRender can skip presenting to a hidden surface (dock
+        // tab / auto-hide, §2.14). The single loop keeps calling TickRender either way; we just
+        // gate the actual draw+present. Replaces the old QTimer start/stop.
         connect(m_engineViewport, &EngineViewport::VisibilityChanged, this,
             [this](bool visible)
             {
-                if (!m_frameTimer)
-                {
-                    return;
-                }
-                if (visible)
-                {
-                    if (!m_frameTimer->isActive())
-                    {
-                        m_frameTimer->start(16);
-                    }
-                }
-                else
-                {
-                    m_frameTimer->stop();
-                }
+                m_surfaceVisible = visible;
             });
 
         UpdateCameraState();
         AzToolsFramework::ViewportInteraction::ViewportInteractionRequestBus::Handler::BusConnect(m_viewportId);
+        AzToolsFramework::ViewportInteraction::EditorEntityViewportInteractionRequestBus::Handler::BusConnect(m_viewportId);
 
-        // Drive continuous repaint so hover/animation feedback stays live (v1 idle tick). Frames
-        // only present once the surface is ready; before that we still step the camera controller.
-        m_frameTimer = new QTimer(this);
-        // PreciseTimer, not the default CoarseTimer: on Windows the coarse timer snaps to the
-        // ~15.6ms system tick, so a 16ms interval jitters between 30 and 60 fps. A precise timer
-        // holds a steady cadence for the main-thread present path (v1). See new_editor_plan §2.9.
-        m_frameTimer->setTimerType(Qt::PreciseTimer);
-        connect(m_frameTimer, &QTimer::timeout, this, &EditorViewportWidget::OnFrameTick);
-        m_frameTimer->start(16);
+        // Register as THE viewport render step for the editor's single main loop; OnIdle calls
+        // TickRender() once per throttled frame (see IViewportTick.h). Replaces the old render QTimer.
+        AZ::Interface<IViewportTick>::Register(this);
     }
 
     EditorViewportWidget::~EditorViewportWidget()
     {
+        // Stop being driven by the single loop before anything else tears down.
+        AZ::Interface<IViewportTick>::Unregister(this);
+        AzToolsFramework::ViewportInteraction::EditorEntityViewportInteractionRequestBus::Handler::BusDisconnect();
         AzToolsFramework::ViewportInteraction::ViewportInteractionRequestBus::Handler::BusDisconnect();
         // The backend releases its swapchain via OnSurfaceAboutToBeDestroyed (driven by the
         // EngineViewport's AboutToClose during native surface teardown); nothing GL-specific here.
@@ -283,13 +275,20 @@ namespace CrossEngineEditor
         }
     }
 
-    void EditorViewportWidget::OnFrameTick()
+    void EditorViewportWidget::TickRender(float deltaSeconds)
     {
+        CEE_PROFILE_FUNCTION();
+        // Apply the frame's coalesced mouse-move once (camera + hover) before stepping the camera,
+        // so orbit navigation reflects the latest cursor without per-message flooding.
+        ApplyPendingMouseMove();
+
         // Step the camera each frame so smoothing/inertia and held-key movement advance, even
         // before the surface exists (so the view is settled the moment it comes up).
-        UpdateCameraState();
+        UpdateCameraState(deltaSeconds);
 
-        if (!m_sceneRenderer || !m_sceneRenderer->IsSurfaceReady())
+        // Skip the draw+present entirely when the surface is missing, not ready, or hidden
+        // (dock tab / auto-hide). The single loop still called us so the camera stayed live.
+        if (!m_sceneRenderer || !m_sceneRenderer->IsSurfaceReady() || !m_surfaceVisible)
         {
             return;
         }
@@ -334,11 +333,38 @@ namespace CrossEngineEditor
         return AzFramework::ScreenSize(AZStd::max(m_physicalSize.width(), 1), AZStd::max(m_physicalSize.height(), 1));
     }
 
-    void EditorViewportWidget::UpdateCameraState()
+    void EditorViewportWidget::ApplyPendingMouseMove()
+    {
+        if (!m_hasPendingMove)
+        {
+            return;
+        }
+        m_hasPendingMove = false;
+
+        // Synthesize one QMouseEvent from the frame's latest coalesced position and drive the
+        // camera + selection hover exactly once (industry-standard per-frame input apply). The
+        // camera sees the total delta since the previous frame's position, so orbit is unchanged.
+        CEE_PROFILE_SCOPE("Input::ApplyPendingMove");
+        QMouseEvent moveEvent(
+            QEvent::MouseMove, m_pendingMovePos, m_pendingMovePos, Qt::NoButton, m_pendingMoveButtons,
+            m_pendingMoveModifiers);
+        m_cameraController.HandleMouseMove(moveEvent, ViewportSize());
+        HandleMouseEvent(
+            AzToolsFramework::ViewportInteraction::MouseEvent::Move, m_pendingMovePos.toPoint(), Qt::NoButton,
+            m_pendingMoveButtons, m_pendingMoveModifiers, 0.0f);
+    }
+
+    void EditorViewportWidget::UpdateCameraState(float deltaSeconds)
     {
         // Advance the reusable AzFramework camera controller (orbit/pan/dolly/fly) and take
-        // the resulting engine-neutral camera state for rendering and picking.
-        m_cameraState = m_cameraController.StepCamera(ViewportSize(), 1.0f / 60.0f);
+        // the resulting engine-neutral camera state for rendering and picking. deltaSeconds is the
+        // real elapsed time from the single loop (TickRender), so smoothing/inertia track the
+        // actual frame cadence instead of an assumed 60 fps.
+        if (deltaSeconds <= 0.0f)
+        {
+            deltaSeconds = 1.0f / 60.0f;
+        }
+        m_cameraState = m_cameraController.StepCamera(ViewportSize(), deltaSeconds);
     }
 
     AzFramework::CameraState EditorViewportWidget::GetCameraState()
@@ -367,6 +393,26 @@ namespace CrossEngineEditor
         return m_pixelRatio > 0.0 ? aznumeric_cast<float>(m_pixelRatio) : 1.0f;
     }
 
+    void EditorViewportWidget::FindVisibleEntities(AZStd::vector<AZ::EntityId>& visibleEntities)
+    {
+        CEE_PROFILE_FUNCTION();
+        // The picker only tests entities returned here. Hand it every loose mirror entity (see the
+        // header for why we skip frustum culling). Filtering to entities that carry an
+        // EngineNodeComponent keeps prefab containers and other non-mirror entities out of the set.
+        AzToolsFramework::EntityList looseEntities;
+        AzToolsFramework::EditorEntityContextRequestBus::Broadcast(
+            &AzToolsFramework::EditorEntityContextRequests::GetLooseEditorEntities, looseEntities);
+
+        visibleEntities.reserve(looseEntities.size());
+        for (const AZ::Entity* entity : looseEntities)
+        {
+            if (entity && entity->FindComponent<EngineNodeComponent>() != nullptr)
+            {
+                visibleEntities.push_back(entity->GetId());
+            }
+        }
+    }
+
     AzFramework::ScreenPoint EditorViewportWidget::ToPhysicalScreenPoint(const QPointF& logicalPos) const
     {
         // Native window input arrives in the window's logical pixels; the camera/picking math is
@@ -378,7 +424,15 @@ namespace CrossEngineEditor
 
     void EditorViewportWidget::HandleNativeInput(QEvent* event)
     {
+        CEE_PROFILE_FUNCTION();
         using AzToolsFramework::ViewportInteraction::MouseEvent;
+
+        // Flush any coalesced move before a discrete event (press/release/wheel/click) so it acts
+        // on the latest cursor position - moves are recorded but only applied per frame otherwise.
+        if (event->type() != QEvent::MouseMove)
+        {
+            ApplyPendingMouseMove();
+        }
 
         switch (event->type())
         {
@@ -403,10 +457,15 @@ namespace CrossEngineEditor
             }
         case QEvent::MouseMove:
             {
+                // Coalesce: record only the latest move; TickRender applies it once per frame.
+                // This is the fix for the pick-then-orbit stall - the OS floods hundreds of moves
+                // per frame during orbit and stepping the camera + hover picking on each one cost
+                // 300-490 ms/frame in the pump. Cheap here, applied once in ApplyPendingMouseMove.
                 auto* me = static_cast<QMouseEvent*>(event);
-                m_cameraController.HandleMouseMove(*me, ViewportSize());
-                HandleMouseEvent(
-                    MouseEvent::Move, me->position().toPoint(), Qt::NoButton, me->buttons(), me->modifiers(), 0.0f);
+                m_pendingMovePos = me->position();
+                m_pendingMoveButtons = me->buttons();
+                m_pendingMoveModifiers = me->modifiers();
+                m_hasPendingMove = true;
                 break;
             }
         case QEvent::MouseButtonDblClick:
@@ -487,6 +546,7 @@ namespace CrossEngineEditor
         AzToolsFramework::ViewportInteraction::MouseEvent mouseEvent, const QPoint& position, Qt::MouseButton eventButton,
         Qt::MouseButtons buttons, Qt::KeyboardModifiers modifiers, float /*wheelDelta*/)
     {
+        CEE_PROFILE_FUNCTION();
         namespace VI = AzToolsFramework::ViewportInteraction;
 
         // Compose the button mask: Qt's release event no longer lists the released button,

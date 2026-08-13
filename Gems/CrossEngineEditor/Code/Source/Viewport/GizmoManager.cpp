@@ -294,6 +294,10 @@ namespace CrossEngineEditor
 
         switch (m_mode)
         {
+        case GizmoMode::Select:
+            // Pure selection: no manipulators (ClearManipulators above already left the set empty).
+            // The selection outline is drawn by CrossEngineViewportSelection regardless of mode.
+            return;
         case GizmoMode::Move:
             BuildMove(theme);
             break;

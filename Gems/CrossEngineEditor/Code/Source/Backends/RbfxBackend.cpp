@@ -7,6 +7,8 @@
 #include <Backends/RbfxBackend.h>
 #include <Framework/EngineNodeComponent.h>
 
+#include <Profiling/CrossEngineProfiler.h>
+
 #include <AzCore/Component/Entity.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzCore/Component/TransformBus.h>
@@ -17,6 +19,7 @@
 #include <AzCore/Math/MathUtils.h>
 
 #include <cmath>
+#include <limits>
 
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QDir>
@@ -34,12 +37,15 @@ AZ_PUSH_DISABLE_WARNING(4251 4244 4245 4267 4100 4263 4264 4265 4266, "-Wunknown
 #include <Urho3D/Engine/EngineDefs.h>
 #include <Urho3D/Graphics/Camera.h>
 #include <Urho3D/Graphics/DebugRenderer.h>
+#include <Urho3D/Graphics/Drawable.h>
 #include <Urho3D/Graphics/Octree.h>
+#include <Urho3D/Graphics/OctreeQuery.h>
 #include <Urho3D/Graphics/Renderer.h>
 #include <Urho3D/Graphics/Viewport.h>
 #include <Urho3D/IO/File.h>
 #include <Urho3D/Math/Color.h>
 #include <Urho3D/Math/Quaternion.h>
+#include <Urho3D/Math/Ray.h>
 #include <Urho3D/Math/Vector3.h>
 #include <Urho3D/Scene/Node.h>
 #include <Urho3D/Scene/Serializable.h>
@@ -405,6 +411,7 @@ namespace CrossEngineEditor
 
     void RbfxBackend::RbfxSceneRenderer::SubmitLines(AZStd::span<const DebugVertex> vertices)
     {
+        CEE_PROFILE_FUNCTION();
         if (!m_frameOpen)
         {
             return;
@@ -420,6 +427,7 @@ namespace CrossEngineEditor
 
     void RbfxBackend::RbfxSceneRenderer::SubmitTriangles(AZStd::span<const DebugVertex> vertices)
     {
+        CEE_PROFILE_FUNCTION();
         if (!m_frameOpen)
         {
             return;
@@ -440,6 +448,7 @@ namespace CrossEngineEditor
 
     void RbfxBackend::RbfxSceneRenderer::EndOverlayFrame()
     {
+        CEE_PROFILE_FUNCTION();
         // Pump exactly one rbfx frame now, at the close of the overlay cycle. The DebugRenderer
         // geometry submitted this cycle (SubmitLines/Triangles) is drawn by this RunFrame and then
         // auto-cleared at frame end, so scene + overlay always present coherently in lock-step
@@ -447,6 +456,7 @@ namespace CrossEngineEditor
         // note in RbfxBackend::Tick.
         if (m_state.m_initialized && m_state.m_engine && !m_state.m_engine->IsExiting())
         {
+            CEE_PROFILE_SCOPE("Rbfx.RunFrame(present)");
             m_state.m_engine->RunFrame();
         }
         m_frameOpen = false;
@@ -454,14 +464,151 @@ namespace CrossEngineEditor
 
     // ------------------------------------------------------------ RbfxEntityMirror
 
-    Urho3D::Node* RbfxBackend::RbfxEntityMirror::FindNode(AZ::EntityId entityId) const
+    Urho3D::Node* RbfxBackend::RbfxEntityMirror::ResolveNode(AZ::EntityId entityId) const
     {
-        auto it = m_entityToNode.find(entityId);
-        if (it == m_entityToNode.end() || !m_state.m_scene)
+        // Single resolution path: read the rbfx node id off the live EngineNodeComponent's
+        // reflected handle. The handle survives the editor entity context re-homing the mirror
+        // entity into its prefab (which can change the AZ::EntityId), so this never silently
+        // no-ops the way an entity-id -> node-id map would.
+        if (!m_state.m_scene)
         {
             return nullptr;
         }
-        return m_state.m_scene->GetNode(it->second);
+        AZ::Entity* entity = nullptr;
+        AZ::ComponentApplicationBus::BroadcastResult(entity, &AZ::ComponentApplicationBus::Events::FindEntity, entityId);
+        auto* comp = entity ? entity->FindComponent<EngineNodeComponent>() : nullptr;
+        if (!comp)
+        {
+            AZ_Warning("CrossEngineEditor", false,
+                "rbfx ResolveNode: no EngineNodeComponent for entity %s.", entityId.ToString().c_str());
+            return nullptr;
+        }
+        Urho3D::Node* node = m_state.m_scene->GetNode(static_cast<unsigned>(comp->GetNodeHandle()));
+        AZ_Warning("CrossEngineEditor", node != nullptr,
+            "rbfx ResolveNode: node handle %llu no longer in scene for entity %s.",
+            static_cast<AZ::u64>(comp->GetNodeHandle()), entityId.ToString().c_str());
+        return node;
+    }
+
+    AZ::Aabb RbfxBackend::RbfxEntityMirror::GetWorldBounds(AZ::EntityId entityId) const
+    {
+        CEE_PROFILE_FUNCTION();
+        Urho3D::Node* node = ResolveNode(entityId);
+        if (!node)
+        {
+            return AZ::Aabb::CreateNull();
+        }
+
+        // Union the world bounding boxes of the Drawables ON THIS NODE ONLY (SelfDerived, not the
+        // whole sub-tree) - see the per-node rationale in IEntityMirror::GetWorldBounds.
+        Urho3D::BoundingBox engineBox; // default-constructed = undefined; Merge grows it.
+        ea::vector<Urho3D::Drawable*> drawables;
+        node->FindComponents<Urho3D::Drawable>(drawables, Urho3D::ComponentSearchFlag::SelfDerived);
+        for (Urho3D::Drawable* drawable : drawables)
+        {
+            // Skip environment / non-geometry Drawables that editors never ray-pick: Skybox
+            // (background, follows the camera with a huge world box that always wins the ray test),
+            // Zone (lighting / fog / reflection volume - invisible bounds), and Light (selectable
+            // via its icon, not its Drawable bounds). Matches Godot / Unity / Unreal, where sky and
+            // volumes are excluded from viewport picking. IsInstanceOf catches subclasses too.
+            if (drawable &&
+                !drawable->IsInstanceOf(Urho3D::StringHash("Skybox")) &&
+                !drawable->IsInstanceOf(Urho3D::StringHash("Zone")) &&
+                !drawable->IsInstanceOf(Urho3D::StringHash("Light")))
+            {
+                engineBox.Merge(drawable->GetWorldBoundingBox());
+            }
+        }
+
+        if (!engineBox.Defined())
+        {
+            // Non-visual node (no Drawable): NOT ray-pickable - return null so PickEntity skips it
+            // (see IEntityMirror::GetWorldBounds). Still selectable via its editor icon / the Outliner.
+            return AZ::Aabb::CreateNull();
+        }
+
+        const AZ::Aabb engineAabb = AZ::Aabb::CreateFromMinMax(
+            AZ::Vector3(engineBox.min_.x_, engineBox.min_.y_, engineBox.min_.z_),
+            AZ::Vector3(engineBox.max_.x_, engineBox.max_.y_, engineBox.max_.z_));
+        return EngineTransformConverter::ConvertAabb(k_space, engineAabb);
+    }
+
+    bool RbfxBackend::RbfxEntityMirror::RaycastNode(
+        AZ::EntityId entityId,
+        const AZ::Vector3& rayOrigin,
+        const AZ::Vector3& rayDirection,
+        bool& outHit,
+        float& outDistance) const
+    {
+        // Precise triangle-level pick for THIS node only (pick_final_plan §8 seam). Fixes the
+        // rotated-mesh problem where a big model's world-axis-aligned AABB inflates to cover empty
+        // space and steals clicks from smaller objects behind it (e.g. "Geometry 100", a scale-100
+        // rotated teapot). We test the ray against the node's own drawables' triangles instead of
+        // trusting the coarse AABB. Returns true (= "a precise test ran"), with outHit telling the
+        // caller whether any triangle was actually hit; false means "no precise path, keep AABB".
+        outHit = false;
+
+        Urho3D::Node* node = ResolveNode(entityId);
+        if (!node)
+        {
+            return false;
+        }
+
+        // Convert the O3DE-space ray to rbfx space. PositionToEngine is a pure linear basis remap
+        // (no translation), so it is correct for both the origin (a point) and the direction (a
+        // vector). Normalise the direction so RayQueryResult::distance_ is in world metres.
+        const Urho3D::Vector3 rbfxOrigin = ToRbfx(rayOrigin);
+        Urho3D::Vector3 rbfxDir = ToRbfx(rayDirection);
+        const float dirLen = rbfxDir.Length();
+        if (dirLen <= 0.0f)
+        {
+            return false;
+        }
+        rbfxDir /= dirLen;
+        const Urho3D::Ray rbfxRay(rbfxOrigin, rbfxDir);
+
+        // Gather the node's own drawables, applying the same environment exclusions as GetWorldBounds
+        // (Skybox / Zone / Light are never ray-picked; they are selected via their editor icon).
+        ea::vector<Urho3D::Drawable*> drawables;
+        node->FindComponents<Urho3D::Drawable>(drawables, Urho3D::ComponentSearchFlag::SelfDerived);
+
+        // Drive each drawable's own triangle test directly (Drawable::ProcessRayQuery) rather than an
+        // Octree query: it targets exactly this node's geometry and does not depend on the octree
+        // being populated (the editor app does not drive the game entity context that fills it).
+        ea::vector<Urho3D::RayQueryResult> results;
+        Urho3D::RayOctreeQuery query(results, rbfxRay, Urho3D::RAY_TRIANGLE);
+
+        float nearest = std::numeric_limits<float>::max();
+        for (Urho3D::Drawable* drawable : drawables)
+        {
+            if (!drawable ||
+                drawable->IsInstanceOf(Urho3D::StringHash("Skybox")) ||
+                drawable->IsInstanceOf(Urho3D::StringHash("Zone")) ||
+                drawable->IsInstanceOf(Urho3D::StringHash("Light")))
+            {
+                continue;
+            }
+
+            results.clear();
+            drawable->ProcessRayQuery(query, results);
+            for (const Urho3D::RayQueryResult& r : results)
+            {
+                if (r.distance_ >= 0.0f && r.distance_ < nearest)
+                {
+                    nearest = r.distance_;
+                }
+            }
+        }
+
+        if (nearest < std::numeric_limits<float>::max())
+        {
+            // rbfx distance is along the unit ray in world metres. O3DE's AabbIntersectRay parametrises
+            // distance along the ORIGINAL (possibly non-unit) direction, so divide back by dirLen to
+            // return the same parameter units the caller compares across entities.
+            outHit = true;
+            outDistance = nearest / dirLen;
+        }
+        return true; // A precise test ran (hit or miss); its verdict is authoritative.
     }
 
     void RbfxBackend::RbfxEntityMirror::ReadProperties(Urho3D::Node* node, PropertyBag& outBag) const
@@ -508,7 +655,6 @@ namespace CrossEngineEditor
 
         const AZ::EntityId entityId = entity->GetId();
         m_entityToNode[entityId] = node->GetID();
-        m_nodeToEntity[node->GetID()] = entityId;
         if (parentId.IsValid())
         {
             m_pendingParent[entityId] = parentId;
@@ -526,7 +672,6 @@ namespace CrossEngineEditor
     void RbfxBackend::RbfxEntityMirror::SyncToEditor(AZStd::vector<AZ::Entity*>& outEntities)
     {
         m_entityToNode.clear();
-        m_nodeToEntity.clear();
         m_pendingParent.clear();
 
         if (!m_state.m_scene)
@@ -578,7 +723,7 @@ namespace CrossEngineEditor
 
     void RbfxBackend::RbfxEntityMirror::OnEditorTransformChanged(AZ::EntityId entityId, const AZ::Transform& worldTm)
     {
-        Urho3D::Node* node = FindNode(entityId);
+        Urho3D::Node* node = ResolveNode(entityId);
         if (!node)
         {
             return;
@@ -593,7 +738,7 @@ namespace CrossEngineEditor
 
     void RbfxBackend::RbfxEntityMirror::OnEditorPropertyChanged(AZ::EntityId entityId, const PropertyChange& /*change*/)
     {
-        Urho3D::Node* node = FindNode(entityId);
+        Urho3D::Node* node = ResolveNode(entityId);
         if (!node)
         {
             return;
@@ -664,7 +809,7 @@ namespace CrossEngineEditor
 
     void RbfxBackend::RbfxEntityMirror::DestroyObject(AZ::EntityId entityId)
     {
-        if (Urho3D::Node* node = FindNode(entityId))
+        if (Urho3D::Node* node = ResolveNode(entityId))
         {
             node->Remove();
             m_entityToNode.erase(entityId);

@@ -139,15 +139,19 @@ namespace CrossEngineEditor
     {
         // Gizmo mode switcher. Both the look AND the behaviour are ours: each button drives our
         // GizmoManager (route B, self-drawn gizmos), not the engine-native transform selection.
-        // Hot-keys 1/2/3 mirror the common transform key bindings.
+        // Hot-keys follow the industry standard Q/W/E/R (Unity/Unreal/Godot: Move=W, Rotate=E,
+        // Scale=R); Q=Select (unobstructed picking) and T=Combined. The legacy 1/2/3/4 keys are
+        // kept as alternates so existing muscle memory still works.
         auto* toolBar = addToolBar(QStringLiteral("Transform"));
         toolBar->setObjectName(QStringLiteral("TransformToolBar"));
 
-        auto addModeAction = [this, toolBar](const QString& text, const QString& key, void (EditorMainWindow::*slot)())
+        auto addModeAction = [this, toolBar](
+            const QString& text, const QString& primaryKey, const QString& altKey, void (EditorMainWindow::*slot)())
         {
             QAction* action = toolBar->addAction(text);
             action->setCheckable(true);
-            action->setShortcut(QKeySequence(key));
+            // Primary industry-standard key plus the legacy numeric key as an alternate.
+            action->setShortcuts(QList<QKeySequence>{ QKeySequence(primaryKey), QKeySequence(altKey) });
             // Same context as the Edit actions above (O3DE ActionManager alignment): the toolbar
             // lives on the main window, so WidgetWithChildrenShortcut lets the key fire while any
             // docked child (incl. the viewport, pending the ShortcutOverride bubble verification)
@@ -159,15 +163,22 @@ namespace CrossEngineEditor
 
         auto* group = new QActionGroup(this);
         group->setExclusive(true);
-        QAction* move = addModeAction(QStringLiteral("Move"), QStringLiteral("1"), &EditorMainWindow::OnTransformModeMove);
-        QAction* rotate = addModeAction(QStringLiteral("Rotate"), QStringLiteral("2"), &EditorMainWindow::OnTransformModeRotate);
-        QAction* scale = addModeAction(QStringLiteral("Scale"), QStringLiteral("3"), &EditorMainWindow::OnTransformModeScale);
-        QAction* combined = addModeAction(QStringLiteral("Combined"), QStringLiteral("4"), &EditorMainWindow::OnTransformModeCombined);
+        QAction* select = addModeAction(
+            QStringLiteral("Select"), QStringLiteral("Q"), QString(), &EditorMainWindow::OnTransformModeSelect);
+        QAction* move = addModeAction(
+            QStringLiteral("Move"), QStringLiteral("W"), QStringLiteral("1"), &EditorMainWindow::OnTransformModeMove);
+        QAction* rotate = addModeAction(
+            QStringLiteral("Rotate"), QStringLiteral("E"), QStringLiteral("2"), &EditorMainWindow::OnTransformModeRotate);
+        QAction* scale = addModeAction(
+            QStringLiteral("Scale"), QStringLiteral("R"), QStringLiteral("3"), &EditorMainWindow::OnTransformModeScale);
+        QAction* combined = addModeAction(
+            QStringLiteral("Combined"), QStringLiteral("T"), QStringLiteral("4"), &EditorMainWindow::OnTransformModeCombined);
+        group->addAction(select);
         group->addAction(move);
         group->addAction(rotate);
         group->addAction(scale);
         group->addAction(combined);
-        move->setChecked(true); // default mode is Move.
+        select->setChecked(true); // default mode is Select (industry norm: don't grab a gizmo on entry).
 
         // Gizmo theme switcher (Blender / Unreal, plan §9). Rebuilds the gizmo views on change.
         toolBar->addSeparator();
@@ -208,19 +219,20 @@ namespace CrossEngineEditor
         addSpaceAction(QStringLiteral("Local"), GizmoSpace::Local);
         worldSpace->setChecked(true); // default space is World.
 
-        // Snap toggle (plan §5.5). One checkbox enables grid + angle + scale snap at the default
-        // increments; per-increment tuning is deferred to a settings panel.
+        // Snap toggle (plan §5.5). One checkbox flips grid + angle + scale snap on/off, preserving
+        // the current style's step increments; per-increment tuning is deferred to a settings panel.
         toolBar->addSeparator();
         QAction* snap = toolBar->addAction(QStringLiteral("Snap"));
         snap->setCheckable(true);
         connect(snap, &QAction::toggled, this, [](bool enabled)
         {
-            GizmoSnapSettings settings;
-            settings.m_gridSnapEnabled = enabled;
-            settings.m_angleSnapEnabled = enabled;
-            settings.m_scaleSnapEnabled = enabled;
-            GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetSnapSettings, settings);
+            GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetSnapEnabled, enabled);
         });
+    }
+
+    void EditorMainWindow::OnTransformModeSelect()
+    {
+        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Select);
     }
 
     void EditorMainWindow::OnTransformModeMove()

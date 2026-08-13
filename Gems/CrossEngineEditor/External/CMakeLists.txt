@@ -345,3 +345,79 @@ else()
     endif()
     set(CEE_HAVE_GODOT FALSE PARENT_SCOPE)
 endif()
+
+# =======================================================================================
+# Tracy profiler (client) - https://github.com/wolfpld/tracy  (v0.14.0)
+#
+# Official standard integration (see tracy/manual, "Client markup"): compile the single
+# TU public/TracyClient.cpp into a library, expose the public/ include dir, and define
+# TRACY_ENABLE on everything that either builds that TU or #includes <tracy/Tracy.hpp>.
+# Without TRACY_ENABLE every Tracy macro compiles to nothing, so the same instrumented
+# source builds untouched when profiling is off.
+#
+# We build the client as a STATIC lib (no extra runtime DLL to deploy, matching ADS/
+# Diligent), and gate it behind CEE_ENABLE_TRACY so a release build can drop it entirely.
+# =======================================================================================
+option(CEE_ENABLE_TRACY "Build the Tracy profiler client into CrossEngineEditor" ON)
+set(CEE_TRACY_ROOT ${CEE_EXTERNAL_ROOT}/tracy CACHE PATH "Path to the Tracy source checkout")
+
+if(CEE_ENABLE_TRACY AND EXISTS ${CEE_TRACY_ROOT}/public/TracyClient.cpp)
+    add_library(CrossEngine_TracyClient STATIC ${CEE_TRACY_ROOT}/public/TracyClient.cpp)
+
+    # TRACY_ENABLE must be set both when compiling TracyClient.cpp and in every consumer TU that
+    # includes <tracy/Tracy.hpp>, otherwise client and instrumentation disagree on whether the
+    # zones exist (no-op mismatch). PUBLIC on the client TU + on the facade below covers both.
+    target_compile_definitions(CrossEngine_TracyClient PUBLIC TRACY_ENABLE)
+    target_include_directories(CrossEngine_TracyClient PUBLIC ${CEE_TRACY_ROOT}/public)
+
+    # Call-stack sampling (Windows ETW) is the source of the multi-MB traces and the SymbolWorker /
+    # DbgHelp symbol-resolution noise that polluted the §13 profiling. For reading our own
+    # instrumentation zones/plots we do NOT want it: keep sampling OFF by default so a trace only
+    # carries the ZoneScoped zones and TracyPlot values we explicitly emit. Flip CEE_TRACY_SAMPLING
+    # ON (and run the editor as administrator) only when you specifically need the sampled call
+    # stacks in the GUI's Statistics -> Sampling page.
+    option(CEE_TRACY_SAMPLING "Enable Tracy call-stack / system-trace sampling (noisy, needs admin)" OFF)
+    if(NOT CEE_TRACY_SAMPLING)
+        # TRACY_NO_SAMPLING: disable per-thread call-stack sampling.
+        # TRACY_NO_SYSTEM_TRACING: disable OS-level (ETW) context-switch / systrace capture.
+        target_compile_definitions(CrossEngine_TracyClient PUBLIC TRACY_NO_SAMPLING TRACY_NO_SYSTEM_TRACING)
+    endif()
+
+    # Tracy's own TU trips O3DE's /W4 /WX; it is third-party, so silence warnings for it only.
+    if(MSVC)
+        target_compile_options(CrossEngine_TracyClient PRIVATE /W0 /WX-)
+    else()
+        target_compile_options(CrossEngine_TracyClient PRIVATE -w)
+    endif()
+
+    # Tracy's listen socket + symbol resolution need these Win32 libs.
+    if(WIN32)
+        target_link_libraries(CrossEngine_TracyClient PUBLIC ws2_32 dbghelp)
+    endif()
+
+    # Facade the editor links against (single stable name), mirroring CrossEngine::Diligent /
+    # CrossEngine::Rbfx. Linking the STATIC client TU through an INTERFACE facade is what O3DE's
+    # ly_add_target expects (a plain link to the STATIC target directly drops its object symbols).
+    add_library(CrossEngine_Tracy INTERFACE)
+    add_library(CrossEngine::Tracy ALIAS CrossEngine_Tracy)
+    target_link_libraries(CrossEngine_Tracy INTERFACE CrossEngine_TracyClient)
+
+    # Keep O3DE's runtime-dependency walker out of these static libs (STATIC, nothing to copy).
+    foreach(_tracy_cached CrossEngine_TracyClient CrossEngine_Tracy)
+        set_property(GLOBAL PROPERTY O3DE_COPY_DEPENDENCIES_${_tracy_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_TARGET_DEPENDENCIES_${_tracy_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_LINK_DEPENDENCIES_${_tracy_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_IMPORTED_DEPENDENCIES_${_tracy_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_DEPENDENCIES_CACHED_${_tracy_cached} TRUE)
+    endforeach()
+
+    set(CEE_HAVE_TRACY TRUE PARENT_SCOPE)
+else()
+    if(CEE_ENABLE_TRACY)
+        message(WARNING
+            "Tracy checkout not found at ${CEE_TRACY_ROOT}/public/TracyClient.cpp. "
+            "Clone https://github.com/wolfpld/tracy (v0.14.0) into ${CEE_TRACY_ROOT}. "
+            "CrossEngineEditor will build without the Tracy profiler.")
+    endif()
+    set(CEE_HAVE_TRACY FALSE PARENT_SCOPE)
+endif()

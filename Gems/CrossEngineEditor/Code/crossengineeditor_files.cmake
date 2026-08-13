@@ -6,6 +6,7 @@
 
 set(FILES
     Source/main.cpp
+    Source/Profiling/CrossEngineProfiler.h
     Source/Application/CrossEngineEditorApplication.h
     Source/Application/CrossEngineEditorApplication.cpp
     Source/Application/EntityMirrorBridge.h
@@ -48,6 +49,7 @@ set(FILES
     Source/BackendAPI/ISceneRenderer.h
     Source/BackendAPI/IEntityMirror.h
     Source/BackendAPI/IAssetSource.h
+    Source/BackendAPI/IViewportTick.h
 )
 
 # QFileIconProvider/QFileInfo pull in the legacy <winsock.h>, which clashes with the

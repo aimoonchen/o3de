@@ -55,6 +55,10 @@ namespace CrossEngineEditor
     //! Which transform operation the gizmo currently drives.
     enum class GizmoMode
     {
+        //! Pure selection: no transform handles are built, only the selection outline is shown.
+        //! Clicking still selects in every mode (Unity/Godot semantics); Select mode's value is an
+        //! unobstructed viewport with no gizmo to accidentally grab.
+        Select,
         Move,
         Rotate,
         Scale,
@@ -95,7 +99,9 @@ namespace CrossEngineEditor
         virtual void SetGizmoMode(GizmoMode mode) = 0;
         virtual void SetGizmoStyle(GizmoStyle style) = 0;
         virtual void SetGizmoSpace(GizmoSpace space) = 0;
-        virtual void SetSnapSettings(const GizmoSnapSettings& snap) = 0;
+        //! Flip only the snap enabled flags, preserving the style-configured step increments
+        //! (a fresh GizmoSnapSettings would reset them to neutral defaults).
+        virtual void SetSnapEnabled(bool enabled) = 0;
     };
     using GizmoControlRequestBus = AZ::EBus<GizmoControlRequests>;
 
@@ -122,9 +128,12 @@ namespace CrossEngineEditor
         {
             SetSpace(space);
         }
-        void SetSnapSettings(const GizmoSnapSettings& snap) override
+        void SetSnapEnabled(bool enabled) override
         {
-            m_snap = snap;
+            // Keep the current step increments (set by SetStyle); only toggle the enables.
+            m_snap.m_gridSnapEnabled = enabled;
+            m_snap.m_angleSnapEnabled = enabled;
+            m_snap.m_scaleSnapEnabled = enabled;
         }
 
         //! Switch transform mode (Move / Rotate / Scale) and rebuild the gizmo.
@@ -223,7 +232,7 @@ namespace CrossEngineEditor
         };
 
         AzToolsFramework::ManipulatorManagerId m_managerId;
-        GizmoMode m_mode = GizmoMode::Move;
+        GizmoMode m_mode = GizmoMode::Select;
         GizmoStyle m_style = GizmoStyle::Blender;
         GizmoSpace m_space = GizmoSpace::World;
         GizmoSnapSettings m_snap;

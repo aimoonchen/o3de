@@ -144,6 +144,13 @@ namespace CrossEngineEditor
             AZ::EntityId CreateObject(const ObjectSpec& spec) override;
             void DestroyObject(AZ::EntityId entityId) override;
             bool SaveScene(const AZStd::string& path) override;
+            AZ::Aabb GetWorldBounds(AZ::EntityId entityId) const override;
+            bool RaycastNode(
+                AZ::EntityId entityId,
+                const AZ::Vector3& rayOrigin,
+                const AZ::Vector3& rayDirection,
+                bool& outHit,
+                float& outDistance) const override;
 
         private:
             //! Build (or reuse) a mirror entity for one rbfx node and recurse its children.
@@ -154,15 +161,20 @@ namespace CrossEngineEditor
             //! Read a node's Serializable attributes into a typed PropertyBag.
             void ReadProperties(Urho3D::Node* node, PropertyBag& outBag) const;
 
-            //! Resolve the rbfx node for a mirror entity, or nullptr.
-            Urho3D::Node* FindNode(AZ::EntityId entityId) const;
+            //! Resolve the rbfx node for a mirror entity via the live EngineNodeComponent's
+            //! reflected node handle, or nullptr (warns on miss). This is the single node
+            //! resolution path for every post-sync operation (bounds / transform / property /
+            //! destroy): the editor entity context re-homes mirror entities into its prefab when
+            //! taking ownership, so an entity-id -> node-id map can go stale, whereas the reflected
+            //! handle survives that re-home. One truth source, no silent no-ops.
+            Urho3D::Node* ResolveNode(AZ::EntityId entityId) const;
 
             EngineState& m_state;
 
-            //! Mirror entity id <-> rbfx node id. The rbfx node id is stable within a scene
-            //! and is what EngineNodeComponent stores as its opaque node handle.
+            //! Mirror entity id -> rbfx node id, populated during SyncToEditor and consumed only by
+            //! the synchronous FinishSync transform seeding in the same batch (before the entities
+            //! can be re-homed). NOT a resolution path for later edits - use ResolveNode for those.
             AZStd::unordered_map<AZ::EntityId, AZ::u32> m_entityToNode;
-            AZStd::unordered_map<AZ::u32, AZ::EntityId> m_nodeToEntity;
 
             //! Child mirror entity -> parent mirror entity, recorded during SyncToEditor and
             //! applied in FinishSync (once the entities are activated) via TransformBus.

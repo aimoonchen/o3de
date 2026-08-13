@@ -14,6 +14,7 @@
 //! bidirectional: editor edits are forwarded back to the engine object.
 
 #include <AzCore/Component/EntityId.h>
+#include <AzCore/Math/Aabb.h>
 #include <AzCore/Math/Transform.h>
 #include <AzCore/std/containers/vector.h>
 #include <AzCore/std/string/string.h>
@@ -81,5 +82,49 @@ namespace CrossEngineEditor
         //! the scene's current file". Returns false if the backend can't save (e.g. no scene open
         //! or the format isn't supported). Default: unsupported (returns false).
         virtual bool SaveScene(const AZStd::string& path) { (void)path; return false; }
+        //! Editor -> engine: world-space selection bounds for a mirror entity, in the O3DE
+        //! convention (Z-up RH metres). This is the sole engine-side input to O3DE's picking:
+        //! EngineNodeComponent answers EditorComponentSelectionRequestsBus by calling this, and
+        //! the viewport draws the selection outline from the same source. Backends return the
+        //! world bounds of THIS NODE ONLY - not its sub-tree (rbfx Drawable::GetWorldBoundingBox
+        //! with SelfDerived / Godot GeometryInstance3D::get_aabb x global transform on the node
+        //! itself). Every engine node is mirrored as its own selectable entity, so unioning the
+        //! sub-tree would make a parent swallow its children into one giant box that always wins
+        //! the ray test and makes small objects unpickable (matches each engine's per-instance
+        //! gizmo). A non-visual node returns null (not ray-pickable); EngineNodeComponent's
+        //! visibility-bus path is what wraps null with a pivot-box fallback, not this contract.
+        //! Default: null (unsupported).
+        virtual AZ::Aabb GetWorldBounds(AZ::EntityId entityId) const { (void)entityId; return AZ::Aabb::CreateNull(); }
+
+        //! Editor -> engine: precise (triangle-level) ray/geometry intersection against THIS NODE's
+        //! own renderable geometry. Ray is given in the O3DE convention (Z-up RH metres); the backend
+        //! converts it to engine space at its edge.
+        //!
+        //! Three-state result, so the caller can tell "no precise path" from "precise miss":
+        //!   * returns false               -> backend has no precise test; caller keeps its coarse
+        //!                                    AABB decision.
+        //!   * returns true,  outHit true  -> triangle hit at outDistance (authoritative).
+        //!   * returns true,  outHit false -> precise MISS; caller must reject the inflated-AABB hit.
+        //!
+        //! This is the picking "seam" (pick_final_plan §8). It fixes the rotated-mesh problem where a
+        //! large model's world-axis-aligned AABB inflates to cover empty space and steals clicks from
+        //! objects behind it (e.g. rbfx "Geometry 100", a scale-100 rotated teapot). rbfx uses
+        //! Drawable::ProcessRayQuery with RAY_TRIANGLE on the node's own drawables.
+        //!
+        //! Default: not supported (returns false).
+        virtual bool RaycastNode(
+            AZ::EntityId entityId,
+            const AZ::Vector3& rayOrigin,
+            const AZ::Vector3& rayDirection,
+            bool& outHit,
+            float& outDistance) const
+        {
+            (void)entityId;
+            (void)rayOrigin;
+            (void)rayDirection;
+            (void)outHit;
+            (void)outDistance;
+            return false;
+        }
     };
 } // namespace CrossEngineEditor

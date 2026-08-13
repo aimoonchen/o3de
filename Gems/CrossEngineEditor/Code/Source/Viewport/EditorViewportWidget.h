@@ -11,6 +11,8 @@
 #include <Viewport/EditorViewportCameraController.h>
 #include <Viewport/GenericDebugDisplay.h>
 
+#include <BackendAPI/IViewportTick.h>
+
 #include <AzFramework/Viewport/CameraState.h>
 #include <AzFramework/Viewport/ViewportId.h>
 
@@ -24,7 +26,6 @@ class QWheelEvent;
 class QKeyEvent;
 class QResizeEvent;
 class QDropEvent;
-class QTimer;
 
 namespace CrossEngineEditor
 {
@@ -51,7 +52,9 @@ namespace CrossEngineEditor
     //! surface stays blank; the manipulator logic still runs against its camera.
     class EditorViewportWidget
         : public QWidget
+        , public IViewportTick
         , public AzToolsFramework::ViewportInteraction::ViewportInteractionRequestBus::Handler
+        , public AzToolsFramework::ViewportInteraction::EditorEntityViewportInteractionRequestBus::Handler
     {
         Q_OBJECT
     public:
@@ -59,6 +62,11 @@ namespace CrossEngineEditor
         ~EditorViewportWidget() override;
 
         AzFramework::ViewportId GetViewportId() const { return m_viewportId; }
+
+        // IViewportTick - driven once per frame by the editor's single loop (OnIdle), replacing
+        // the old independent render QTimer. Steps the camera, generates overlays and presents
+        // exactly one frame. Skips presenting while the surface is hidden.
+        void TickRender(float deltaSeconds) override;
 
         //! Route overlay rendering through the given backend scene renderer (set in 阶段2/4).
         //! Passing nullptr detaches and the viewport renders nothing.
@@ -72,6 +80,18 @@ namespace CrossEngineEditor
             const AzFramework::ScreenPoint& screenPosition) override;
         float DeviceScalingFactor() override;
 
+        // AzToolsFramework::ViewportInteraction::EditorEntityViewportInteractionRequestBus::Handler...
+        //! Return the entities the picker may test against this frame. This handler is REQUIRED:
+        //! EditorVisibleEntityDataCache broadcasts FindVisibleEntities every frame, and without a
+        //! responder the visible-entity cache is empty, so EditorHelpers::FindEntityIdUnderCursor
+        //! iterates nothing and clicking never selects. We return every loose mirror entity (those
+        //! carrying an EngineNodeComponent) directly, deliberately skipping frustum culling: mirror
+        //! counts are modest, picking is low frequency, and this avoids depending on the visibility
+        //! octree being populated (its entity insertion is driven by the game entity context, which
+        //! this editor-only app does not run). Frustum culling can be layered in later as pure
+        //! optimisation without changing this contract.
+        void FindVisibleEntities(AZStd::vector<AZ::EntityId>& visibleEntities) override;
+
     protected:
         // QWidget - keep the 2D text-label overlay sized to the surface.
         void resizeEvent(QResizeEvent* event) override;
@@ -81,9 +101,6 @@ namespace CrossEngineEditor
         void OnNativeReady(void* nativeHandle, QSize physicalPx);
         void OnSurfaceResized(QSize physicalPx);
         void OnSurfaceAboutToClose();
-
-        //! Idle tick: step the camera, generate overlays, drive one presented frame.
-        void OnFrameTick();
 
     private:
         //! Raw input forwarded from the native render window; translated to editor interactions.
@@ -96,11 +113,17 @@ namespace CrossEngineEditor
         //! Current viewport size as an engine-neutral screen size in physical pixels (min 1x1).
         AzFramework::ScreenSize ViewportSize() const;
 
-        //! Advance the reusable camera controller and cache the resulting camera state.
-        void UpdateCameraState();
+        //! Advance the camera controller. deltaSeconds is the real wall-clock time since the last
+        //! frame (passed by the single loop via TickRender); the default is used by surface
+        //! callbacks that just need a settled state, not a timed step.
+        void UpdateCameraState(float deltaSeconds = 1.0f / 60.0f);
 
         //! Refresh the 2D text-label overlay (drag readouts) from the last frame's labels.
         void UpdateTextLabels();
+
+        //! Apply the coalesced mouse-move (if any) once per frame: step the camera and run
+        //! selection/manipulator hover for the latest cursor position. Called from TickRender.
+        void ApplyPendingMouseMove();
 
         //! Translate a Qt mouse event to an AzToolsFramework interaction and dispatch it to
         //! the editor selection/manipulator system. Returns true if the editor handled it.
@@ -124,8 +147,25 @@ namespace CrossEngineEditor
         EngineViewport* m_engineViewport = nullptr;
         //! Transparent 2D overlay on top of the surface for world-space text labels.
         ViewportOverlayLabels* m_labelOverlay = nullptr;
-        //! Drives the main-thread idle tick (camera step + overlay generation + present).
-        QTimer* m_frameTimer = nullptr;
+
+        //! When false (surface hidden: dock tab / auto-hide), TickRender steps the camera but
+        //! skips generating overlays and presenting - no point drawing to an invisible surface.
+        //! Replaces the old QTimer start/stop; the single loop keeps calling TickRender regardless.
+        bool m_surfaceVisible = true;
+
+        //! Coalesced mouse-move state (industry-standard input flood control). During camera
+        //! orbit the OS delivers hundreds of WM_MOUSEMOVE per frame; stepping the camera and
+        //! running selection-hover picking on each one is what produced the 300-490 ms pump
+        //! stalls. Like Godot (Input::accumulate + flush_buffered_events), O3DE
+        //! (MoveX/MoveY -> OnTick) and Blender (INBETWEEN_MOUSEMOVE), we keep each move event
+        //! cheap: HandleNativeInput only records the LATEST position/buttons/modifiers here, and
+        //! TickRender applies it once per frame. Non-move events stay immediate. The camera sees
+        //! the frame's total cursor delta (last position vs previous frame), so orbit precision
+        //! is unchanged.
+        bool m_hasPendingMove = false;
+        QPointF m_pendingMovePos{ 0.0, 0.0 };
+        Qt::MouseButtons m_pendingMoveButtons = Qt::NoButton;
+        Qt::KeyboardModifiers m_pendingMoveModifiers = Qt::NoModifier;
 
         //! Cached physical size of the native surface (updated on ready/resize).
         QSize m_physicalSize{ 1, 1 };

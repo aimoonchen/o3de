@@ -31,6 +31,7 @@ namespace AzToolsFramework
 {
     class EditorVisibleEntityDataCacheInterface;
     class ManipulatorManager;
+    class ViewportEditorModeTrackerInterface;
 } // namespace AzToolsFramework
 
 namespace CrossEngineEditor
@@ -41,7 +42,9 @@ namespace CrossEngineEditor
     {
     public:
         CrossEngineViewportSelection(
-            const AzToolsFramework::EditorVisibleEntityDataCacheInterface* entityDataCache, GizmoStyle style);
+            const AzToolsFramework::EditorVisibleEntityDataCacheInterface* entityDataCache,
+            AzToolsFramework::ViewportEditorModeTrackerInterface* viewportEditorModeTracker,
+            GizmoStyle style);
         ~CrossEngineViewportSelection() override;
 
         //! Access the gizmo manager to drive mode / theme switching from the UI.
@@ -60,11 +63,11 @@ namespace CrossEngineEditor
 
     private:
         const AzToolsFramework::EditorVisibleEntityDataCacheInterface* m_entityDataCache = nullptr;
+        AzToolsFramework::ViewportEditorModeTrackerInterface* m_viewportEditorModeTracker = nullptr;
         AZStd::unique_ptr<AzToolsFramework::EditorHelpers> m_editorHelpers;
         AZStd::shared_ptr<AzToolsFramework::ManipulatorManager> m_manipulatorManager;
         AZStd::unique_ptr<GizmoManager> m_gizmoManager;
 
-        AZ::EntityId m_hoveredEntityId; //!< Entity currently highlighted under the cursor.
         AzToolsFramework::ViewportInteraction::MouseInteraction m_currentInteraction; //!< For drawing manipulators.
     };
 } // namespace CrossEngineEditor

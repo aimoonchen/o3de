@@ -7,6 +7,8 @@
 #include <Viewport/GenericDebugDisplay.h>
 #include <BackendAPI/ISceneRenderer.h>
 
+#include <Profiling/CrossEngineProfiler.h>
+
 #include <AzCore/Math/MathUtils.h>
 #include <AzCore/Math/Vector2.h>
 
@@ -62,6 +64,7 @@ namespace CrossEngineEditor
 
     void GenericDebugDisplay::Flush(ISceneRenderer& renderer, const AzFramework::CameraState& cameraState)
     {
+        CEE_PROFILE_FUNCTION();
         // Expand wide line segments into camera-facing quads (constant on-screen width) and keep
         // the thin 1px ones as a cheap LINE_LIST. Wide-quad triangles are appended to the matching
         // triangle batch so they share the triangle PSO. Local copies keep ClearFrame simple.

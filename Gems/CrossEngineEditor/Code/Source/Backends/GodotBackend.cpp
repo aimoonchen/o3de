@@ -7,6 +7,8 @@
 #include <Backends/GodotBackend.h>
 #include <Framework/EngineNodeComponent.h>
 
+#include <Profiling/CrossEngineProfiler.h>
+
 #include <AzCore/Component/Entity.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzCore/Component/TransformBus.h>
@@ -82,8 +84,14 @@ namespace CrossEngineEditor
         }
 
         // Win32 reparent Godot's main window into the editor viewport (plan fix). Idempotent-safe:
-        // caller gates via m_reparented. Makes the window a hit-test-transparent, non-activating
-        // WS_CHILD so Qt keeps camera/gizmo input and keyboard focus (plan §2.2).
+        // caller gates via m_reparented. Godot renders here but must NOT take input: the editor (Qt)
+        // owns the cursor, picking, camera and gizmos. The reliable way to make a *child* HWND both
+        // render and stay input-transparent is WS_DISABLED - a disabled child receives no mouse or
+        // keyboard messages, so Windows routes cursor / mouse / keyboard for that region to the
+        // parent (the Qt viewport) while the window still paints normally. (WS_EX_TRANSPARENT is only
+        // dependable for layered top-level windows, not an ordinary WS_CHILD, which is why the cursor
+        // vanished and input died over the Godot child - it swallowed WM_SETCURSOR / mouse messages
+        // instead of letting them fall through. WS_DISABLED fixes both.)
         bool EmbedGodotWindow(GodotBackend::EngineState& state)
         {
             HWND godotHwnd = ResolveGodotMainWindow(state);
@@ -95,17 +103,20 @@ namespace CrossEngineEditor
 
             LONG_PTR style = ::GetWindowLongPtrW(godotHwnd, GWL_STYLE);
             style &= ~(WS_POPUP | WS_OVERLAPPEDWINDOW);
-            style |= WS_CHILD | WS_VISIBLE;
+            // WS_DISABLED: keep the child render-only so all input (cursor incl.) goes to the Qt parent.
+            style |= WS_CHILD | WS_VISIBLE | WS_DISABLED;
             ::SetWindowLongPtrW(godotHwnd, GWL_STYLE, style);
 
             LONG_PTR exStyle = ::GetWindowLongPtrW(godotHwnd, GWL_EXSTYLE);
-            exStyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
+            // NOACTIVATE so it never steals focus; drop WS_EX_TRANSPARENT (ineffective for a child and
+            // it was contributing to the swallowed-input symptom).
+            exStyle &= ~WS_EX_TRANSPARENT;
+            exStyle |= WS_EX_NOACTIVATE;
             ::SetWindowLongPtrW(godotHwnd, GWL_EXSTYLE, exStyle);
 
             ::SetParent(godotHwnd, hostHwnd);
             ::MoveWindow(godotHwnd, 0, 0, static_cast<int>(state.m_width), static_cast<int>(state.m_height), TRUE);
-            ::ShowWindow(godotHwnd, SW_SHOW);
-            ::BringWindowToTop(godotHwnd);
+            ::ShowWindow(godotHwnd, SW_SHOWNOACTIVATE);
             return true;
         }
 #endif
@@ -267,6 +278,9 @@ namespace CrossEngineEditor
 #if defined(AZ_PLATFORM_WINDOWS)
         if (m_state.m_instance != nullptr && m_state.m_libgodotModule != nullptr)
         {
+            // Release interned StringNames while the engine is still live (they hold engine-side
+            // ref-counted heap; freeing after libgodot_destroy would be use-after-teardown).
+            m_state.m_api.ReleaseCaches();
             auto destroy = reinterpret_cast<PFN_libgodot_destroy>(
                 ::GetProcAddress(static_cast<HMODULE>(m_state.m_libgodotModule), "libgodot_destroy_godot_instance"));
             if (destroy != nullptr)
@@ -302,6 +316,7 @@ namespace CrossEngineEditor
 
     void GodotBackend::Tick([[maybe_unused]] float deltaSeconds)
     {
+        CEE_PROFILE_FUNCTION();
 #if defined(AZ_PLATFORM_WINDOWS)
         if (m_state.m_instance == nullptr || !m_state.m_api.IsValid())
         {
@@ -335,7 +350,13 @@ namespace CrossEngineEditor
         // Pump exactly one Godot frame; iteration() returns true when a quit is requested. This
         // also applies the deferred scene change, after which get_current_scene resolves and the
         // surface is reported ready so the shell mirrors the scene into the Outliner (one-shot).
-        GodotVariant quit = m_state.m_api.Call(m_state.m_instance, "iteration");
+        // NOTE: iteration() runs Godot's whole frame incl. present, the prime suspect for the
+        // camera-roam / post-selection stutter (PROGRESS §11/§13) - keep it in its own zone.
+        GodotVariant quit;
+        {
+            CEE_PROFILE_SCOPE("Godot.iteration(present)");
+            quit = m_state.m_api.Call(m_state.m_instance, "iteration");
+        }
         if (m_state.m_api.TypeOf(quit) == GDEXTENSION_VARIANT_TYPE_BOOL && m_state.m_api.AsBool(quit))
         {
             m_state.m_running = false;
@@ -356,6 +377,23 @@ namespace CrossEngineEditor
         if (m_state.m_started && !m_state.m_reparented)
         {
             m_state.m_reparented = EmbedGodotWindow(m_state);
+        }
+
+        // One-shot: disable Godot's VSync. We drive Godot synchronously - one iteration() per editor
+        // Tick on this thread - and iteration() presents the frame. With Godot's default
+        // vsync_mode = ENABLED that present blocks on VBLANK (~16 ms), stalling the editor's own
+        // event loop and making camera movement stutter. Turning VSync off lets present return
+        // immediately (Vulkan IMMEDIATE / D3D12 tearing), so the host owns pacing. This is the
+        // supported knob (DisplayServer.window_set_vsync_mode, VSYNC_DISABLED == 0); done once after
+        // start() when the DisplayServer/main window exists (same readiness the reparent relies on).
+        if (m_state.m_started && !m_state.m_vsyncDisabled)
+        {
+            if (GDExtensionObjectPtr ds = m_state.m_api.GetSingleton("DisplayServer"))
+            {
+                GodotVariant args[2] = { m_state.m_api.MakeInt(0 /*VSYNC_DISABLED*/), m_state.m_api.MakeInt(0 /*MAIN_WINDOW_ID*/) };
+                m_state.m_api.Call(ds, "window_set_vsync_mode", args, 2);
+                m_state.m_vsyncDisabled = true;
+            }
         }
 #endif
     }
@@ -470,16 +508,59 @@ namespace CrossEngineEditor
                 api.Call(m_state.m_editorCamera, "make_current");
             }
 
-            // Overlay: a MeshInstance3D holding an ImmediateMesh, rebuilt every frame with the
-            // gizmo/grid 3 primitives (plan §2.3).
+            // Overlay: a MeshInstance3D holding an ArrayMesh, rebuilt every frame with the
+            // gizmo/grid primitives. ArrayMesh + add_surface_from_arrays is Godot's own editor
+            // gizmo path (EditorNode3DGizmo::add_vertices) and lets us submit each surface in a
+            // single GDExtension call instead of the per-vertex ImmediateMesh churn that
+            // PROGRESS.md §13 measured as the pick-then-orbit stall (plan-aligned fix 1).
             m_state.m_overlayMesh = api.ConstructObject("MeshInstance3D");
-            m_state.m_overlayImmediate = api.ConstructObject("ImmediateMesh");
-            if (m_state.m_overlayMesh && m_state.m_overlayImmediate)
+            m_state.m_overlayArrayMesh = api.ConstructObject("ArrayMesh");
+            if (m_state.m_overlayMesh && m_state.m_overlayArrayMesh)
             {
-                GodotVariant immV = api.MakeObject(m_state.m_overlayImmediate);
+                GodotVariant immV = api.MakeObject(m_state.m_overlayArrayMesh);
                 api.Call(m_state.m_overlayMesh, "set_mesh", &immV, 1);
                 GodotVariant meshV = api.MakeObject(m_state.m_overlayMesh);
                 api.Call(root, "add_child", &meshV, 1);
+            }
+
+            // Overlay material: an unshaded StandardMaterial3D that uses per-vertex colours as
+            // albedo. add_surface_from_arrays surfaces default to a shaded material that IGNORES the
+            // vertex colour channel (gizmos would render flat grey); this matches Godot's own gizmo
+            // material setup (node_3d_editor_gizmos.cpp:928-936: UNSHADED + ALBEDO_FROM_VERTEX_COLOR
+            // + SRGB_VERTEX_COLOR).
+            //
+            // CRITICAL (RefCounted lifetime): a freshly classdb_construct'd Resource has refcount 1
+            // but is NOT owned by anything on our side (a bare Variant(OBJECT) does not hold a Ref).
+            // It gets collected almost immediately - which is why the earlier attempt read back
+            // class=<null> and all flags 0. Fix: hand it to the MeshInstance3D via
+            // set_material_override FIRST (the node keeps a Ref<Material>, keeping it alive), THEN
+            // configure it. material_override also applies to every surface, so no per-surface bind.
+            m_state.m_overlayMaterial = api.ConstructObject("StandardMaterial3D");
+            if (m_state.m_overlayMaterial && m_state.m_overlayMesh)
+            {
+                GDExtensionObjectPtr mat = m_state.m_overlayMaterial;
+
+                // 1) Keep it alive: MeshInstance3D takes a Ref via material_override.
+                GodotVariant matV = api.MakeObject(mat);
+                api.Call(m_state.m_overlayMesh, "set_material_override", &matV, 1);
+
+                // 2) Configure (now safely owned). set_shading_mode(SHADING_MODE_UNSHADED=0).
+                GodotVariant shadeArg = api.MakeInt(0);
+                api.Call(mat, "set_shading_mode", &shadeArg, 1);
+                // set_flag(FLAG_ALBEDO_FROM_VERTEX_COLOR=1, true).
+                {
+                    GodotVariant flagV = api.MakeInt(1);
+                    GodotVariant enV = api.MakeBool(true);
+                    const GodotVariant a[2] = { AZStd::move(flagV), AZStd::move(enV) };
+                    api.Call(mat, "set_flag", a, 2);
+                }
+                // set_flag(FLAG_SRGB_VERTEX_COLOR=2, true).
+                {
+                    GodotVariant flagV = api.MakeInt(2);
+                    GodotVariant enV = api.MakeBool(true);
+                    const GodotVariant a[2] = { AZStd::move(flagV), AZStd::move(enV) };
+                    api.Call(mat, "set_flag", a, 2);
+                }
             }
         }
     }
@@ -529,60 +610,108 @@ namespace CrossEngineEditor
             }
         }
 
-        // Start a fresh overlay: clear last frame's surfaces and open a LINES surface.
-        if (m_state.m_overlayImmediate)
+        // Start a fresh overlay: drop last frame's surfaces. Each Submit* adds one surface via the
+        // bulk ArrayMesh path below.
+        if (m_state.m_overlayArrayMesh)
         {
-            api.Call(m_state.m_overlayImmediate, "clear_surfaces");
+            api.Call(m_state.m_overlayArrayMesh, "clear_surfaces");
             m_frameOpen = true;
         }
     }
 
     void GodotBackend::GodotSceneRenderer::SubmitLines(AZStd::span<const DebugVertex> vertices)
     {
-        if (!m_frameOpen || !m_state.m_overlayImmediate)
-        {
-            return;
-        }
-        GodotApi& api = m_state.m_api;
-        GDExtensionObjectPtr im = m_state.m_overlayImmediate;
-
-        GodotVariant prim = api.MakeInt(k_primitiveLines);
-        api.Call(im, "surface_begin", &prim, 1);
-        for (const DebugVertex& v : vertices)
-        {
-            GodotVariant color = api.MakeColor(v.m_color);
-            api.Call(im, "surface_set_color", &color, 1);
-            GodotVariant pos = api.MakeVector3(GodotPosFromO3de(v.m_position));
-            api.Call(im, "surface_add_vertex", &pos, 1);
-        }
-        api.Call(im, "surface_end");
+        CEE_PROFILE_FUNCTION();
+        SubmitSurface(k_primitiveLines, vertices);
     }
 
     void GodotBackend::GodotSceneRenderer::SubmitTriangles(AZStd::span<const DebugVertex> vertices)
     {
-        if (!m_frameOpen || !m_state.m_overlayImmediate)
+        CEE_PROFILE_FUNCTION();
+        SubmitSurface(k_primitiveTriangles, vertices);
+    }
+
+    void GodotBackend::GodotSceneRenderer::SubmitSurface(
+        int64_t primitive, AZStd::span<const DebugVertex> vertices)
+    {
+        GodotApi& api = m_state.m_api;
+
+        if (!m_frameOpen || !m_state.m_overlayArrayMesh || vertices.empty())
         {
             return;
         }
-        GodotApi& api = m_state.m_api;
-        GDExtensionObjectPtr im = m_state.m_overlayImmediate;
+        GDExtensionObjectPtr mesh = m_state.m_overlayArrayMesh;
+        const int64_t count = static_cast<int64_t>(vertices.size());
 
-        GodotVariant prim = api.MakeInt(k_primitiveTriangles);
-        api.Call(im, "surface_begin", &prim, 1);
+        if (api.BulkOverlayReady())
+        {
+            // Bulk path (Godot editor-gizmo pattern): pack all positions/colors into contiguous
+            // float buffers, hand them to PackedVector3Array/PackedColorArray in one shot each, then
+            // one add_surface_from_arrays call. O(1) GDExtension calls per surface instead of O(N).
+            m_posScratch.resize(static_cast<size_t>(count) * 3);
+            m_colorScratch.resize(static_cast<size_t>(count) * 4);
+            for (int64_t i = 0; i < count; ++i)
+            {
+                const AZ::Vector3 p = GodotPosFromO3de(vertices[i].m_position);
+                m_posScratch[i * 3 + 0] = p.GetX();
+                m_posScratch[i * 3 + 1] = p.GetY();
+                m_posScratch[i * 3 + 2] = p.GetZ();
+                const AZ::Color& c = vertices[i].m_color;
+                m_colorScratch[i * 4 + 0] = c.GetR();
+                m_colorScratch[i * 4 + 1] = c.GetG();
+                m_colorScratch[i * 4 + 2] = c.GetB();
+                m_colorScratch[i * 4 + 3] = c.GetA();
+            }
+            GodotVariant arrays = api.BuildSurfaceArrays(m_posScratch.data(), m_colorScratch.data(), count);
+            GodotVariant primV = api.MakeInt(primitive);
+            const GodotVariant args[2] = { AZStd::move(primV), AZStd::move(arrays) };
+            api.Call(mesh, "add_surface_from_arrays", args, 2);
+            // Vertex colour comes from the MeshInstance3D material_override set up in
+            // EnsureOverlayNodes (applies to every surface) - no per-surface material bind needed.
+            return;
+        }
+
+        // Fallback (older GDExtension ABI missing a bulk entry point): SurfaceTool builds an
+        // ArrayMesh the same way, still one commit call rather than per-vertex ImmediateMesh churn.
+        SubmitSurfaceViaSurfaceTool(primitive, vertices);
+    }
+
+    void GodotBackend::GodotSceneRenderer::SubmitSurfaceViaSurfaceTool(
+        int64_t primitive, AZStd::span<const DebugVertex> vertices)
+    {
+        GodotApi& api = m_state.m_api;
+        GDExtensionObjectPtr mesh = m_state.m_overlayArrayMesh;
+
+        // SurfaceTool.begin(primitive); per-vertex set_color/add_vertex; commit(existing_mesh).
+        // This still crosses the DLL per vertex, but is the ABI-portable fallback and only runs if
+        // the bulk packed-array path is unavailable. Kept minimal.
+        // HAZARD (see the material RefCounted note in EnsureOverlayNodes): ConstructObject makes a
+        // bare RefCounted with no Ref holder, so `st` could be freed early (UAF) or never freed
+        // (leak). Only reached when the bulk ABI entry is missing; left as-is pending a dedicated
+        // Ref-lifetime fix if this path ever activates.
+        GDExtensionObjectPtr st = api.ConstructObject("SurfaceTool");
+        if (!st)
+        {
+            return;
+        }
+        GodotVariant primV = api.MakeInt(primitive);
+        api.Call(st, "begin", &primV, 1);
         for (const DebugVertex& v : vertices)
         {
             GodotVariant color = api.MakeColor(v.m_color);
-            api.Call(im, "surface_set_color", &color, 1);
+            api.Call(st, "set_color", &color, 1);
             GodotVariant pos = api.MakeVector3(GodotPosFromO3de(v.m_position));
-            api.Call(im, "surface_add_vertex", &pos, 1);
+            api.Call(st, "add_vertex", &pos, 1);
         }
-        api.Call(im, "surface_end");
+        GodotVariant meshV = api.MakeObject(mesh);
+        api.Call(st, "commit", &meshV, 1); // append a surface onto our ArrayMesh
+        // Vertex colour comes from the MeshInstance3D material_override (see EnsureOverlayNodes).
     }
 
     void GodotBackend::GodotSceneRenderer::SetDepthTest(bool enabled)
     {
         m_depthTest = enabled;
-        // v1: overlay uses the ImmediateMesh's default material. A depth-test-disabled material
+        // v1: overlay uses the ArrayMesh's default material. A depth-test-disabled material
         // for the SetDepthTest(false) pass is a later polish item (plan §2.3); the visual result
         // matches rbfx's depth-tested overlay for the common case.
     }
@@ -596,14 +725,107 @@ namespace CrossEngineEditor
     // =====================================================================================
     // GodotEntityMirror  (G1.3 tree mirror / G1.4 properties / G1.5 create-delete)
     // =====================================================================================
-    GDExtensionObjectPtr GodotBackend::GodotEntityMirror::FindNode(AZ::EntityId entityId) const
+    GDExtensionObjectPtr GodotBackend::GodotEntityMirror::ResolveNode(AZ::EntityId entityId) const
     {
-        auto it = m_entityToNode.find(entityId);
-        if (it == m_entityToNode.end() || !m_state.m_api.IsValid())
+        // Single resolution path: read the Godot ObjectID off the live EngineNodeComponent's
+        // reflected handle. The handle survives the editor entity context re-homing the mirror
+        // entity into its prefab (which can change the AZ::EntityId), so this never silently
+        // no-ops the way an entity-id -> ObjectID map would.
+        if (!m_state.m_api.IsValid())
         {
             return nullptr;
         }
-        return m_state.m_api.ObjectFromId(it->second);
+        AZ::Entity* entity = nullptr;
+        AZ::ComponentApplicationBus::BroadcastResult(entity, &AZ::ComponentApplicationBus::Events::FindEntity, entityId);
+        auto* comp = entity ? entity->FindComponent<EngineNodeComponent>() : nullptr;
+        if (!comp)
+        {
+            AZ_Warning("CrossEngineEditor", false,
+                "godot ResolveNode: no EngineNodeComponent for entity %s.", entityId.ToString().c_str());
+            return nullptr;
+        }
+        GDExtensionObjectPtr node = m_state.m_api.ObjectFromId(static_cast<GodotObjectId>(comp->GetNodeHandle()));
+        AZ_Warning("CrossEngineEditor", node != nullptr,
+            "godot ResolveNode: ObjectID %llu no longer valid for entity %s.",
+            static_cast<AZ::u64>(comp->GetNodeHandle()), entityId.ToString().c_str());
+        return node;
+    }
+
+    AZ::Aabb GodotBackend::GodotEntityMirror::GetWorldBounds(AZ::EntityId entityId) const
+    {
+        CEE_PROFILE_FUNCTION();
+        const GodotApi& api = m_state.m_api;
+        GDExtensionObjectPtr root = ResolveNode(entityId);
+        if (!root)
+        {
+            return AZ::Aabb::CreateNull();
+        }
+
+        // Use the local AABB of THIS NODE ONLY (not the sub-tree) - see the per-node rationale in
+        // IEntityMirror::GetWorldBounds. Matches Godot's own per-instance gizmo AABB.
+        AZ::Aabb godotWorld = AZ::Aabb::CreateNull(); // accumulated in Godot space; converted once below.
+
+        // Fetch the global transform once (reused by both the visual box and the pivot fallback).
+        // Only a Node3D answers get_global_transform; guard with is_class so a plain (non-spatial)
+        // node skips the call. A missing method silently returns nil in Godot 4.8 (no console spam),
+        // but the guard avoids a pointless GDExtension round-trip and mirrors the get_aabb guard.
+        float raw[12] = {};
+        bool haveTransform = false;
+        {
+            const GodotVariant node3dArg = api.MakeString("Node3D");
+            const GodotVariant isNode3d = api.Call(root, "is_class", &node3dArg, 1);
+            if (api.TypeOf(isNode3d) == GDEXTENSION_VARIANT_TYPE_BOOL && api.AsBool(isNode3d))
+            {
+                GodotVariant tmV = api.Call(root, "get_global_transform");
+                if (api.TypeOf(tmV) == GDEXTENSION_VARIANT_TYPE_TRANSFORM3D)
+                {
+                    api.AsTransform3D(tmV, raw); // basis rows (row-major 3x3) then origin.
+                    haveTransform = true;
+                }
+            }
+        }
+
+        // get_aabb only exists on GeometryInstance3D; pre-guard with is_class so non-visual nodes
+        // skip the call (a missing method silently returns nil in Godot 4.8, plan §5.3).
+        const GodotVariant classArg = api.MakeString("GeometryInstance3D");
+        const GodotVariant isGeom = api.Call(root, "is_class", &classArg, 1);
+        const bool isGeometryInstance =
+            api.TypeOf(isGeom) == GDEXTENSION_VARIANT_TYPE_BOOL && api.AsBool(isGeom);
+
+        if (haveTransform && isGeometryInstance)
+        {
+            GodotVariant aabbV = api.Call(root, "get_aabb");
+            if (api.TypeOf(aabbV) == GDEXTENSION_VARIANT_TYPE_AABB)
+            {
+                float pos[3] = {};
+                float size[3] = {};
+                api.AsAabb(aabbV, pos, size);
+
+                // Transform the 8 local-AABB corners by the node's global Transform3D and grow the
+                // world box (a rotated AABB is no longer axis-aligned, so all corners are needed).
+                for (int corner = 0; corner < 8; ++corner)
+                {
+                    const float lx = pos[0] + ((corner & 1) ? size[0] : 0.0f);
+                    const float ly = pos[1] + ((corner & 2) ? size[1] : 0.0f);
+                    const float lz = pos[2] + ((corner & 4) ? size[2] : 0.0f);
+                    const AZ::Vector3 worldPt(
+                        raw[0] * lx + raw[1] * ly + raw[2] * lz + raw[9],
+                        raw[3] * lx + raw[4] * ly + raw[5] * lz + raw[10],
+                        raw[6] * lx + raw[7] * ly + raw[8] * lz + raw[11]);
+                    godotWorld.AddPoint(worldPt);
+                }
+            }
+        }
+
+        if (!godotWorld.IsValid())
+        {
+            // Non-visual node (not a GeometryInstance3D): NOT ray-pickable - return null so PickEntity
+            // skips it (see IEntityMirror::GetWorldBounds). Still selectable via its editor icon / the
+            // Outliner.
+            return AZ::Aabb::CreateNull();
+        }
+
+        return EngineTransformConverter::ConvertAabb(k_space, godotWorld);
     }
 
     void GodotBackend::GodotEntityMirror::ReadProperties(GDExtensionObjectPtr node, PropertyBag& outBag) const
@@ -774,7 +996,6 @@ namespace CrossEngineEditor
 
         const AZ::EntityId entityId = entity->GetId();
         m_entityToNode[entityId] = objectId;
-        m_nodeToEntity[objectId] = entityId;
         if (parentId.IsValid())
         {
             m_pendingParent[entityId] = parentId;
@@ -796,7 +1017,6 @@ namespace CrossEngineEditor
     void GodotBackend::GodotEntityMirror::SyncToEditor(AZStd::vector<AZ::Entity*>& outEntities)
     {
         m_entityToNode.clear();
-        m_nodeToEntity.clear();
         m_pendingParent.clear();
 
         GodotApi& api = m_state.m_api;
@@ -860,7 +1080,7 @@ namespace CrossEngineEditor
     void GodotBackend::GodotEntityMirror::OnEditorTransformChanged(AZ::EntityId entityId, const AZ::Transform& worldTm)
     {
         GodotApi& api = m_state.m_api;
-        GDExtensionObjectPtr node = FindNode(entityId);
+        GDExtensionObjectPtr node = ResolveNode(entityId);
         if (!node || !api.IsValid())
         {
             return;
@@ -875,7 +1095,7 @@ namespace CrossEngineEditor
     void GodotBackend::GodotEntityMirror::OnEditorPropertyChanged(AZ::EntityId entityId, const PropertyChange& /*change*/)
     {
         GodotApi& api = m_state.m_api;
-        GDExtensionObjectPtr node = FindNode(entityId);
+        GDExtensionObjectPtr node = ResolveNode(entityId);
         if (!node || !api.IsValid())
         {
             return;
@@ -991,7 +1211,7 @@ namespace CrossEngineEditor
     void GodotBackend::GodotEntityMirror::DestroyObject(AZ::EntityId entityId)
     {
         GodotApi& api = m_state.m_api;
-        GDExtensionObjectPtr node = FindNode(entityId);
+        GDExtensionObjectPtr node = ResolveNode(entityId);
         if (!node || !api.IsValid())
         {
             return;

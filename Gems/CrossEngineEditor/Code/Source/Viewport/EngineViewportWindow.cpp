@@ -6,6 +6,8 @@
 
 #include <Viewport/EngineViewportWindow.h>
 
+#include <Profiling/CrossEngineProfiler.h>
+
 #include <AzCore/PlatformDef.h>  // AZ_PUSH_DISABLE_WARNING / AZ_POP_DISABLE_WARNING
 
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
@@ -146,6 +148,7 @@ namespace CrossEngineEditor
 
     bool EngineViewportWindow::event(QEvent* event)
     {
+        CEE_PROFILE_SCOPE("EngineViewportWindow::event");
         switch (event->type())
         {
         case QEvent::PlatformSurface:

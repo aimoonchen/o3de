@@ -62,6 +62,7 @@ namespace CrossEngineEditor
         void OnRestoreWorkspace();
 
         // Transform gizmo mode switching (阶段3, engine-native EditorTransformComponentSelection).
+        void OnTransformModeSelect();
         void OnTransformModeMove();
         void OnTransformModeRotate();
         void OnTransformModeScale();

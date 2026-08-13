@@ -18,6 +18,7 @@
 #include <Backends/GodotBackend.h>
 #endif
 #include <BackendAPI/IEngineBackend.h>
+#include <BackendAPI/IViewportTick.h>
 #include <Viewport/CrossEngineViewportSelection.h>
 #include <Window/EditorMainWindow.h>
 
@@ -44,22 +45,13 @@ AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 AZ_POP_DISABLE_WARNING
 
 #include <chrono>
-#include <cstdio>
+
+#include <Profiling/CrossEngineProfiler.h>
 
 namespace CrossEngineEditor
 {
     namespace
     {
-        void BootLog(const char* stage)
-        {
-            FILE* f = nullptr;
-            if (fopen_s(&f, "cee_boot.log", "a") == 0 && f != nullptr)
-            {
-                fprintf(f, "%s\n", stage);
-                fclose(f);
-            }
-        }
-
         //! Read the value following a "--key" token in the argument list, or an empty string.
         AZStd::string ReadArgValue(const QStringList& args, const char* key)
         {
@@ -114,9 +106,10 @@ namespace CrossEngineEditor
     void CrossEngineEditorApplication::Reflect(AZ::ReflectContext* context)
     {
         ToolsApplication::Reflect(context);
-        // The single self-authored mirror component (plan section 3.1). Reflected here so the
-        // SerializeContext/EditContext know its typed property set for the Inspector.
-        EngineNodeComponent::Reflect(context);
+        // EngineNodeComponent is NOT reflected here: RegisterComponentDescriptor (in StartCommon)
+        // reflects it through the descriptor's own entry point. Reflecting it here as well would be
+        // a second, independent reflection entry for the same types, so EngineProperty et al. would
+        // be registered twice and SerializeContext asserts on the duplicated Uuid.
     }
 
     void CrossEngineEditorApplication::CreateReflectionManager()
@@ -128,12 +121,11 @@ namespace CrossEngineEditor
 
     void CrossEngineEditorApplication::StartCommon(AZ::Entity* systemEntity)
     {
-        BootLog("StartCommon:enter");
         ToolsApplication::StartCommon(systemEntity);
-        BootLog("StartCommon:base-done");
 
         // Register the mirror component descriptor so it can be added to mirror entities and
-        // shown in the Inspector (plan section 3.1). Reflection is done in Reflect().
+        // shown in the Inspector (plan section 3.1). The descriptor drives reflection (its
+        // Reflect() runs via the standard descriptor path, not a manual call).
         RegisterComponentDescriptor(EngineNodeComponent::CreateDescriptor());
 
         // Intercept general editor requests (required-component creation, asset browsing,
@@ -168,7 +160,6 @@ namespace CrossEngineEditor
         m_mirrorBridge = AZStd::make_unique<EntityMirrorBridge>();
 
         m_mainWindow = AZStd::make_unique<EditorMainWindow>();
-        BootLog("StartCommon:mainwindow-built");
         AzToolsFramework::EditorWindowRequestBus::Handler::BusConnect();
 
         // Install our viewport interaction handler. Unlike the engine default
@@ -179,16 +170,15 @@ namespace CrossEngineEditor
             AzToolsFramework::GetEntityContextId(),
             &AzToolsFramework::EditorInteractionSystemViewportSelectionRequestBus::Events::SetHandler,
             [](const AzToolsFramework::EditorVisibleEntityDataCacheInterface* entityDataCache,
-               AzToolsFramework::ViewportEditorModeTrackerInterface* /*viewportEditorModeTracker*/)
+               AzToolsFramework::ViewportEditorModeTrackerInterface* viewportEditorModeTracker)
             {
-                return AZStd::make_unique<CrossEngineViewportSelection>(entityDataCache, GizmoStyle::Blender);
+                return AZStd::make_unique<CrossEngineViewportSelection>(
+                    entityDataCache, viewportEditorModeTracker, GizmoStyle::Blender);
             });
 
         CreateNewLevel();
-        BootLog("StartCommon:level-created");
 
         m_mainWindow->show();
-        BootLog("StartCommon:shown");
     }
 
     void CrossEngineEditorApplication::Destroy()
@@ -314,35 +304,65 @@ namespace CrossEngineEditor
 
     void CrossEngineEditorApplication::OnIdle()
     {
+        CEE_PROFILE_FUNCTION();
         if (WasExitMainLoopRequested())
         {
-            BootLog("OnIdle:exit-requested");
             quit();
             return;
         }
 
         using Clock = std::chrono::steady_clock;
         const Clock::time_point now = Clock::now();
-        const float deltaSeconds = std::chrono::duration<float>(now - m_lastIdleTime).count();
-        m_lastIdleTime = now;
 
-        PumpSystemEventLoopUntilEmpty();
-        TickSystem();
-        Tick();
-
-        // C7: drive the engine backend (if one is registered) from the editor tick.
-        if (auto* backend = AZ::Interface<IEngineBackend>::Get())
+        // NOTE: OS message pumping is intentionally NOT done here. This is a Qt-hosted editor, so OS
+        // input (incl. WM_MOUSEMOVE) is drained by Qt's own dispatcher below - matching the native
+        // O3DE editor, which does zero PeekMessage/DispatchMessage in OnIdle. A former hand-written
+        // Win32 pump here double-pumped the queue and spun hundreds of moves/frame during orbit; the
+        // real per-move fix is EditorViewportWidget::ApplyPendingMouseMove. See frame_review.md.
         {
-            backend->Tick(deltaSeconds);
+            CEE_PROFILE_SCOPE("Idle::TickSystem");
+            TickSystem();
+        }
+        {
+            CEE_PROFILE_SCOPE("Idle::Tick");
+            Tick();
+        }
 
-            // One-shot engine->editor pull. The backend builds its scene lazily on first surface
-            // expose (OnSurfaceCreated), so we can only mirror its nodes into the Outliner once
-            // the surface is ready. Do it exactly once.
-            if (!m_engineSynced && m_mirrorBridge && backend->GetSceneRenderer().IsSurfaceReady())
+        // Single main loop (Unreal/Godot/rbfx all render as one step of one loop, presenting once per
+        // frame). The idle loop spins fast (~1 ms) to keep O3DE SystemTick / Qt input responsive; the
+        // render frame is gated to ~60 fps by this SINGLE throttle - the sole cadence (not redundant
+        // with vsync: Godot presents on this thread with vsync OFF, PROGRESS §11/§12). Order matters:
+        // TickRender FIRST (camera + overlay; rbfx presents in EndOverlayFrame), THEN backend->Tick
+        // (Godot's iteration() presents with the just-submitted overlay). One present per backend/frame.
+        constexpr float k_frameIntervalSeconds = 1.0f / 60.0f;
+        const float sinceLastFrame = std::chrono::duration<float>(now - m_lastBackendTickTime).count();
+        if (sinceLastFrame >= k_frameIntervalSeconds)
+        {
+            m_lastBackendTickTime = now;
+
+            if (auto* viewportTick = AZ::Interface<IViewportTick>::Get())
             {
-                m_mirrorBridge->SyncFromEngine();
-                m_engineSynced = true;
+                viewportTick->TickRender(sinceLastFrame);
             }
+
+            if (auto* backend = AZ::Interface<IEngineBackend>::Get())
+            {
+                backend->Tick(sinceLastFrame);
+
+                // One-shot engine->editor pull. The backend builds its scene lazily on first surface
+                // expose (OnSurfaceCreated), so we can only mirror its nodes into the Outliner once
+                // the surface is ready. Do it exactly once.
+                if (!m_engineSynced && m_mirrorBridge && backend->GetSceneRenderer().IsSurfaceReady())
+                {
+                    m_mirrorBridge->SyncFromEngine();
+                    m_engineSynced = true;
+                }
+            }
+
+            // Frame boundary for Tracy sits on the throttle gate: one FrameMark == one real
+            // present frame (~60 fps), not the ~1 kHz idle pump, so per-frame zones group under a
+            // stable frame and FPS/spike patterns are readable (fixes the old ~1000 "fps" artifact).
+            CEE_PROFILE_FRAME();
         }
 
         // Idle at a lower rate when the window is not active to free CPU/GPU.

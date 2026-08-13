@@ -6,6 +6,8 @@
 
 #include <Viewport/EditorViewportCameraController.h>
 
+#include <Profiling/CrossEngineProfiler.h>
+
 #include <AzCore/std/smart_ptr/make_shared.h>
 
 #include <AzFramework/Input/Devices/Keyboard/InputDeviceKeyboard.h>
@@ -178,6 +180,7 @@ namespace CrossEngineEditor
     bool EditorViewportCameraController::HandleMouseMove(
         const QMouseEvent& event, const AzFramework::ScreenSize& /*viewportSize*/)
     {
+        CEE_PROFILE_FUNCTION();
         const AzFramework::CursorEvent cursorEvent{ ScreenPointFromQt(event.pos()) };
         return m_cameraSystem.HandleEvents(AzFramework::InputState{ cursorEvent, m_modifierStates });
     }

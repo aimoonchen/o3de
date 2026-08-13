@@ -79,8 +79,11 @@ namespace CrossEngineEditor
         AZStd::unique_ptr<IEngineBackend> m_backend;
         AZStd::unique_ptr<EntityMirrorBridge> m_mirrorBridge;
 
-        //! Last idle timestamp, used to derive the per-frame delta for the backend tick.
-        std::chrono::steady_clock::time_point m_lastIdleTime = std::chrono::steady_clock::now();
+        //! Last time the engine backend was stepped. The idle loop spins fast (~1 ms) to keep O3DE's
+        //! system tick / Qt events responsive, but the backend (which renders a whole engine frame
+        //! per step) is throttled to display cadence here so it does not free-run at ~500 fps
+        //! (wasted CPU/GPU, and the 1 ms-vs-16 ms beat produced periodic stutter spikes).
+        std::chrono::steady_clock::time_point m_lastBackendTickTime = std::chrono::steady_clock::now();
 
         //! Set once the engine scene has been pulled into the editor (after the surface is
         //! ready and the backend has built its scene). Guards the one-shot SyncFromEngine.

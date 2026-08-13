@@ -22,6 +22,7 @@
 //! flips handedness (RH->LH); Godot stays RH. A handedness flip negates the rotation
 //! angle, i.e. negates the quaternion's imaginary (axis) part after the same axis remap.
 
+#include <AzCore/Math/Aabb.h>
 #include <AzCore/Math/Quaternion.h>
 #include <AzCore/Math/Matrix3x3.h>
 #include <AzCore/Math/Transform.h>
@@ -134,6 +135,32 @@ namespace CrossEngineEditor
             const AZ::Vector3 pos = c.GetTranspose() * AZ::Vector3(in12[9], in12[10], in12[11]);
             return AZ::Transform::CreateFromQuaternionAndTranslation(
                 QuaternionFromPossiblyImproper(rO3de), pos);
+        }
+
+        //! Engine world AABB -> O3DE world AABB. An axis-aligned box is no longer axis-aligned
+        //! after the basis change (the +/-90 deg rotation about X tilts it), so we transform all
+        //! eight corners and rebuild the enclosing box. Pure static math, exercised by the two
+        //! engines' end-to-end picking acceptance (plan §5, no separate test target).
+        static AZ::Aabb ConvertAabb(EngineSpace space, const AZ::Aabb& engineAabb)
+        {
+            if (!engineAabb.IsValid())
+            {
+                return AZ::Aabb::CreateNull();
+            }
+
+            const AZ::Vector3 lo = engineAabb.GetMin();
+            const AZ::Vector3 hi = engineAabb.GetMax();
+
+            AZ::Aabb out = AZ::Aabb::CreateNull();
+            for (int corner = 0; corner < 8; ++corner)
+            {
+                const AZ::Vector3 enginePoint(
+                    (corner & 1) ? hi.GetX() : lo.GetX(),
+                    (corner & 2) ? hi.GetY() : lo.GetY(),
+                    (corner & 4) ? hi.GetZ() : lo.GetZ());
+                out.AddPoint(PositionFromEngine(space, enginePoint));
+            }
+            return out;
         }
 
     private:

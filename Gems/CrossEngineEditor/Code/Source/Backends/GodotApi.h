@@ -25,6 +25,7 @@
 #include <AzCore/Math/Color.h>
 #include <AzCore/std/string/string.h>
 #include <AzCore/std/containers/vector.h>
+#include <AzCore/std/containers/unordered_map.h>
 
 #if defined(_MSC_VER)
 #    pragma warning(push, 0)
@@ -155,6 +156,21 @@ namespace CrossEngineEditor
             m_objectFromId = reinterpret_cast<GDExtensionInterfaceObjectGetInstanceFromId>(
                 getProc("object_get_instance_from_id"));
 
+            // Bulk overlay geometry (PROGRESS.md §13 fix 1): build PackedVector3Array/PackedColorArray
+            // + Array once per surface and fill them with raw pointer writes, matching Godot's own
+            // editor gizmo path (ArrayMesh::add_surface_from_arrays). These entry points are optional:
+            // if any is missing the backend falls back to the per-vertex ImmediateMesh path.
+            m_variantGetPtrCtor = reinterpret_cast<GDExtensionInterfaceVariantGetPtrConstructor>(
+                getProc("variant_get_ptr_constructor"));
+            m_variantSetIndexed = reinterpret_cast<GDExtensionInterfaceVariantSetIndexed>(
+                getProc("variant_set_indexed"));
+            m_packedV3Index = reinterpret_cast<GDExtensionInterfacePackedVector3ArrayOperatorIndex>(
+                getProc("packed_vector3_array_operator_index"));
+            m_packedColorIndex = reinterpret_cast<GDExtensionInterfacePackedColorArrayOperatorIndex>(
+                getProc("packed_color_array_operator_index"));
+            m_variantGetInternalGetter = reinterpret_cast<GDExtensionInterfaceVariantGetPtrInternalGetter>(
+                getProc("variant_get_ptr_internal_getter"));
+
             m_valid = m_stringNameNew && m_stringNew && m_stringToUtf8 && m_variantNewNil &&
                 m_variantDestroy && m_variantGetType && m_variantCall && m_variantGetNamed &&
                 m_variantSetNamed && m_fromType && m_toType && m_globalGetSingleton &&
@@ -164,12 +180,41 @@ namespace CrossEngineEditor
 
         bool IsValid() const { return m_valid; }
 
+        //! Release every cached StringName ref. StringName is ref-counted engine-side, so the
+        //! entries we hold for the API's lifetime must be destructed or the engine leaks. Called
+        //! from the backend before the GodotInstance is torn down (while the engine is still live).
+        void ReleaseCaches()
+        {
+            for (auto& kv : m_stringNameCache)
+            {
+                DestroyBuiltin(GDEXTENSION_VARIANT_TYPE_STRING_NAME, kv.second.m_bytes);
+            }
+            m_stringNameCache.clear();
+        }
+
         // ---- StringName / String -------------------------------------------------------------
 
         //! Build a StringName (single-pointer opaque) from utf8. Caller keeps it on the stack.
         void MakeStringName(const char* utf8, void* outStringName) const
         {
             m_stringNameNew(outStringName, utf8);
+        }
+
+        //! Return a pointer to a cached StringName built once from utf8. Method/property names are
+        //! constant string literals reused every frame, so caching removes the per-call StringName
+        //! construction (a heap-interning round-trip across the DLL boundary) that PROGRESS.md §13
+        //! measured as a hot spot inside GodotApi::Call. The returned buffer is owned by the cache
+        //! (released in ReleaseCaches); callers must NOT destruct it.
+        const void* CachedStringName(const char* utf8) const
+        {
+            auto it = m_stringNameCache.find(utf8);
+            if (it == m_stringNameCache.end())
+            {
+                StringNameBuf buf{};
+                m_stringNameNew(buf.m_bytes, utf8);
+                it = m_stringNameCache.emplace(AZStd::string(utf8), buf).first;
+            }
+            return it->second.m_bytes;
         }
 
         //! Read a Godot String Variant into an AZStd::string.
@@ -246,6 +291,16 @@ namespace CrossEngineEditor
             ToPrimitive(GDEXTENSION_VARIANT_TYPE_TRANSFORM3D, v, outRaw12);
         }
 
+        //! Godot AABB ABI is 6 floats: position (x,y,z) then size (x,y,z). Returns the min
+        //! corner in outPosition and the extents in outSize. Used for GeometryInstance3D::get_aabb.
+        void AsAabb(const GodotVariant& v, float outPosition[3], float outSize[3]) const
+        {
+            float raw[6] = {};
+            ToPrimitive(GDEXTENSION_VARIANT_TYPE_AABB, v, raw);
+            outPosition[0] = raw[0]; outPosition[1] = raw[1]; outPosition[2] = raw[2];
+            outSize[0] = raw[3]; outSize[1] = raw[4]; outSize[2] = raw[5];
+        }
+
         // ---- Variant readback to primitives --------------------------------------------------
 
         GDExtensionVariantType TypeOf(const GodotVariant& v) const { return m_variantGetType(v.Ptr()); }
@@ -319,8 +374,7 @@ namespace CrossEngineEditor
             const GodotVariant* args = nullptr, int argc = 0) const
         {
             GodotVariant self = MakeObject(obj);
-            uint8_t sn[sizeof(void*)] = {};
-            MakeStringName(method, sn);
+            const void* sn = CachedStringName(method);
 
             AZStd::vector<const void*> argPtrs;
             argPtrs.reserve(argc);
@@ -334,7 +388,6 @@ namespace CrossEngineEditor
             m_variantCall(self.Ptr(), sn,
                 reinterpret_cast<const GDExtensionConstVariantPtr*>(argPtrs.data()),
                 static_cast<GDExtensionInt>(argc), ret.Ptr(), &err);
-            DestroyBuiltin(GDEXTENSION_VARIANT_TYPE_STRING_NAME, sn);
             return ret;
         }
 
@@ -342,12 +395,10 @@ namespace CrossEngineEditor
         GodotVariant GetProperty(GDExtensionObjectPtr obj, const char* name) const
         {
             GodotVariant self = MakeObject(obj);
-            uint8_t sn[sizeof(void*)] = {};
-            MakeStringName(name, sn);
+            const void* sn = CachedStringName(name);
             GodotVariant ret = MakeNil();
             GDExtensionBool valid = false;
             m_variantGetNamed(self.Ptr(), sn, ret.Ptr(), &valid);
-            DestroyBuiltin(GDEXTENSION_VARIANT_TYPE_STRING_NAME, sn);
             return ret;
         }
 
@@ -355,11 +406,9 @@ namespace CrossEngineEditor
         void SetProperty(GDExtensionObjectPtr obj, const char* name, const GodotVariant& value) const
         {
             GodotVariant self = MakeObject(obj);
-            uint8_t sn[sizeof(void*)] = {};
-            MakeStringName(name, sn);
+            const void* sn = CachedStringName(name);
             GDExtensionBool valid = false;
             m_variantSetNamed(self.Ptr(), sn, value.Ptr(), &valid);
-            DestroyBuiltin(GDEXTENSION_VARIANT_TYPE_STRING_NAME, sn);
         }
 
         // ---- Builtin Variant containers (Array / Dictionary) ---------------------------------
@@ -407,8 +456,7 @@ namespace CrossEngineEditor
         GodotVariant CallVariant(const GodotVariant& self, const char* method,
             const GodotVariant* args = nullptr, int argc = 0) const
         {
-            uint8_t sn[sizeof(void*)] = {};
-            MakeStringName(method, sn);
+            const void* sn = CachedStringName(method);
 
             AZStd::vector<const void*> argPtrs;
             argPtrs.reserve(argc);
@@ -422,8 +470,111 @@ namespace CrossEngineEditor
             m_variantCall(const_cast<void*>(self.Ptr()), sn,
                 reinterpret_cast<const GDExtensionConstVariantPtr*>(argPtrs.data()),
                 static_cast<GDExtensionInt>(argc), ret.Ptr(), &err);
-            DestroyBuiltin(GDEXTENSION_VARIANT_TYPE_STRING_NAME, sn);
             return ret;
+        }
+
+        // ---- Bulk overlay geometry (ArrayMesh::add_surface_from_arrays path) ------------------
+        // Mirrors Godot's own editor gizmo builder (EditorNode3DGizmo::add_vertices):
+        // build a PackedVector3Array (ARRAY_VERTEX=0) + PackedColorArray (ARRAY_COLOR=3) inside an
+        // Array sized to ARRAY_MAX=13, filled by raw pointer writes (NOT per-vertex variant_call),
+        // then one add_surface_from_arrays call. Turns O(N) DLL-crossing calls per frame into O(1).
+
+        //! True if every entry point needed for the bulk path resolved. Otherwise callers fall back
+        //! to the per-vertex ImmediateMesh path (no functional regression, just slower).
+        bool BulkOverlayReady() const
+        {
+            return m_variantGetPtrCtor && m_variantSetIndexed && m_packedV3Index && m_packedColorIndex &&
+                m_variantGetInternalGetter && m_fromType && m_toType;
+        }
+
+        //! Godot Mesh array-slot layout (scene/resources/mesh.h): sized to ARRAY_MAX; vertices at
+        //! ARRAY_VERTEX, colors at ARRAY_COLOR. ARRAY_MAX is 13 on Godot 4.3+ (was 11 on 4.0-4.2);
+        //! oversizing on an older runtime only leaves unused slots, so 13 is safe for our target.
+        static constexpr int64_t k_arrayVertex = 0;
+        static constexpr int64_t k_arrayColor = 3;
+        static constexpr int64_t k_arrayMax = 13;
+
+        //! Build the ARRAY_MAX-sized Array{ [VERTEX]=positions, [COLOR]=colors } for one surface of
+        //! `count` vertices, filled from interleaved position(xyz)/color(rgba) float sources. The
+        //! caller supplies positions already in Godot space (xyz) and colors as rgba. Returns a
+        //! Variant(ARRAY) ready to pass as the single arg of add_surface_from_arrays.
+        GodotVariant BuildSurfaceArrays(
+            const float* positionsXyz, const float* colorsRgba, int64_t count) const
+        {
+            // 1) PackedVector3Array of `count` verts, raw-filled IN PLACE (internal-getter avoids the
+            //    copy-on-write divergence that to_type() would cause).
+            GodotVariant verts = MakePackedArray(GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR3_ARRAY, count);
+            if (void* internalV = InternalPtr(verts, GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR3_ARRAY))
+            {
+                if (auto* dst = static_cast<float*>(m_packedV3Index(internalV, 0)))
+                {
+                    std::memcpy(dst, positionsXyz, sizeof(float) * 3 * static_cast<size_t>(count));
+                }
+            }
+            // 2) PackedColorArray of `count` colors, raw-filled in place.
+            GodotVariant cols = MakePackedArray(GDEXTENSION_VARIANT_TYPE_PACKED_COLOR_ARRAY, count);
+            if (void* internalC = InternalPtr(cols, GDEXTENSION_VARIANT_TYPE_PACKED_COLOR_ARRAY))
+            {
+                if (auto* dst = static_cast<float*>(m_packedColorIndex(internalC, 0)))
+                {
+                    std::memcpy(dst, colorsRgba, sizeof(float) * 4 * static_cast<size_t>(count));
+                }
+            }
+            // 3) Untyped Array sized to ARRAY_MAX, slots VERTEX/COLOR set to the packed variants.
+            GodotVariant arr = MakeEmptyVariantOfType(GDEXTENSION_VARIANT_TYPE_ARRAY);
+            {
+                GodotVariant sizeArg = MakeInt(k_arrayMax);
+                CallVariant(arr, "resize", &sizeArg, 1); // Array.resize(ARRAY_MAX)
+            }
+            SetArrayElement(arr, k_arrayVertex, verts);
+            SetArrayElement(arr, k_arrayColor, cols);
+            return arr;
+        }
+
+    private:
+        //! Default-construct an empty builtin Variant of `type` (Array / packed arrays). Uses the
+        //! zero-arg builtin constructor and wraps the result in a Variant via from_type.
+        GodotVariant MakeEmptyVariantOfType(GDExtensionVariantType type) const
+        {
+            // A packed/Array builtin is (per ABI) reachable as a small opaque buffer; the max
+            // Variant payload bound (40) safely covers Array/packed CowData-pointer layouts.
+            alignas(8) uint8_t builtin[40] = {};
+            if (auto ctor = m_variantGetPtrCtor(type, 0)) // constructor #0 = default (empty)
+            {
+                ctor(builtin, nullptr);
+            }
+            GodotVariant v = FromPrimitive(type, builtin);
+            DestroyBuiltin(type, builtin); // Variant took its own copy; drop ours.
+            return v;
+        }
+
+        //! Empty packed array Variant then resize(count) via its builtin resize method.
+        GodotVariant MakePackedArray(GDExtensionVariantType type, int64_t count) const
+        {
+            GodotVariant v = MakeEmptyVariantOfType(type);
+            GodotVariant sizeArg = MakeInt(count);
+            CallVariant(v, "resize", &sizeArg, 1);
+            return v;
+        }
+
+        //! Pointer to a Variant's INTERNAL builtin value, for in-place mutation (no CoW copy). The
+        //! per-type getter is resolved once and returns e.g. the internal PackedVector3Array* whose
+        //! operator_index then yields the writable data buffer.
+        void* InternalPtr(const GodotVariant& v, GDExtensionVariantType type) const
+        {
+            if (auto getter = m_variantGetInternalGetter(type))
+            {
+                return getter(const_cast<void*>(v.Ptr()));
+            }
+            return nullptr;
+        }
+
+        //! array[index] = value, via variant_set_indexed (Variant-level, no builtin-method hash).
+        void SetArrayElement(GodotVariant& arr, int64_t index, const GodotVariant& value) const
+        {
+            GDExtensionBool valid = false;
+            GDExtensionBool oob = false;
+            m_variantSetIndexed(arr.Ptr(), static_cast<GDExtensionInt>(index), value.Ptr(), &valid, &oob);
         }
 
     private:
@@ -458,6 +609,12 @@ namespace CrossEngineEditor
             }
         }
 
+        //! A single-pointer StringName buffer (StringName ABI is one pointer). Cached per method/
+        //! property name so the ref-counted StringName is interned once, not rebuilt every Call.
+        struct StringNameBuf { alignas(8) uint8_t m_bytes[sizeof(void*)] = {}; };
+        //! name -> interned StringName. mutable: cache fill happens from const Call/GetProperty.
+        mutable AZStd::unordered_map<AZStd::string, StringNameBuf> m_stringNameCache;
+
         GDExtensionInterfaceGetProcAddress m_getProc = nullptr;
         GDExtensionInterfaceStringNameNewWithUtf8Chars m_stringNameNew = nullptr;
         GDExtensionInterfaceStringNewWithUtf8Chars m_stringNew = nullptr;
@@ -477,6 +634,14 @@ namespace CrossEngineEditor
         GDExtensionInterfaceClassdbConstructObject2 m_constructObject = nullptr;
         GDExtensionInterfaceObjectGetInstanceId m_objectGetInstanceId = nullptr;
         GDExtensionInterfaceObjectGetInstanceFromId m_objectFromId = nullptr;
+
+        // Optional bulk-geometry entry points (may be null on older ABIs -> per-vertex fallback).
+        GDExtensionInterfaceVariantGetPtrConstructor m_variantGetPtrCtor = nullptr;
+        GDExtensionInterfaceVariantSetIndexed m_variantSetIndexed = nullptr;
+        GDExtensionInterfacePackedVector3ArrayOperatorIndex m_packedV3Index = nullptr;
+        GDExtensionInterfacePackedColorArrayOperatorIndex m_packedColorIndex = nullptr;
+        GDExtensionInterfaceVariantGetPtrInternalGetter m_variantGetInternalGetter = nullptr;
+
         bool m_valid = false;
     };
 } // namespace CrossEngineEditor
