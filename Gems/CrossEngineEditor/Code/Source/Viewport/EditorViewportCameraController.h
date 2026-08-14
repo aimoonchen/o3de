@@ -39,7 +39,12 @@ namespace CrossEngineEditor
         //! consumed the event (so the viewport can skip forwarding it to manipulators).
         bool HandleMousePress(const QMouseEvent& event, const AzFramework::ScreenSize& viewportSize);
         bool HandleMouseRelease(const QMouseEvent& event, const AzFramework::ScreenSize& viewportSize);
-        bool HandleMouseMove(const QMouseEvent& event, const AzFramework::ScreenSize& viewportSize);
+        //! \p pixelRatio converts the event's logical cursor position to the physical pixels the
+        //! camera math runs in; without it the sensitivity would scale with the OS scale factor.
+        //! Callers must pass it explicitly (no default): a forgotten argument would silently
+        //! reintroduce scale-dependent navigation sensitivity.
+        bool HandleMouseMove(
+            const QMouseEvent& event, const AzFramework::ScreenSize& viewportSize, float pixelRatio);
         bool HandleWheel(const QWheelEvent& event, const AzFramework::ScreenSize& viewportSize);
         bool HandleKey(const QKeyEvent& event, bool pressed, const AzFramework::ScreenSize& viewportSize);
 

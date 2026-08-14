@@ -18,6 +18,7 @@
 namespace AzQtComponents
 {
     class StyleManager;
+    class WindowDecorationWrapper;
 }
 
 namespace CrossEngineEditor
@@ -75,7 +76,13 @@ namespace CrossEngineEditor
         void CreateNewLevel();
 
         AZStd::unique_ptr<AzQtComponents::StyleManager> m_styleManager;
-        AZStd::unique_ptr<EditorMainWindow> m_mainWindow;
+
+        //! Window-decoration wrapper that gives the main window the same custom dark title bar
+        //! as the native O3DE editor (CryEdit.cpp pattern). setGuest() reparents the guest into
+        //! the wrapper and the wrapper deletes it, so m_mainWindow must be a raw pointer.
+        AZStd::unique_ptr<AzQtComponents::WindowDecorationWrapper> m_mainWindowWrapper;
+        EditorMainWindow* m_mainWindow = nullptr;
+
         AZStd::unique_ptr<IEngineBackend> m_backend;
         AZStd::unique_ptr<EntityMirrorBridge> m_mirrorBridge;
 

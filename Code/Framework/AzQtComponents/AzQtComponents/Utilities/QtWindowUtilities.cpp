@@ -15,9 +15,11 @@
 #include <QPainter>
 #include <QDockWidget>
 #include <QCursor>
+#include <QGuiApplication>
 #include <QScreen>
 #include <QTimer>
 #include <QWindow>
+#include <QtGui/qpa/qplatformscreen.h>
 
 namespace AzQtComponents
 {
@@ -123,6 +125,22 @@ namespace AzQtComponents
     void SetCursorPos(int x, int y)
     {
         SetCursorPos(QPoint(x, y));
+    }
+
+    QPoint MapFromNativeGlobalPoint(const QPoint& nativeGlobalPoint, const QWindow* window)
+    {
+        const QScreen* screen = window ? window->screen() : QGuiApplication::primaryScreen();
+        if (!screen)
+        {
+            return nativeGlobalPoint;
+        }
+
+        // Same math as QHighDpi::fromNativePixels (private in Qt 6): the screen origin is the
+        // screen's NATIVE top-left, which differs from the logical top-left on any monitor to
+        // the right of / below the primary screen - a naive division by the DPR would drift.
+        const QPoint nativeOrigin = screen->handle()->geometry().topLeft();
+        const qreal dpr = window ? window->devicePixelRatio() : screen->devicePixelRatio();
+        return QPointF((nativeGlobalPoint - nativeOrigin) / dpr + nativeOrigin).toPoint();
     }
 
     void bringWindowToTop(QWidget* widget)

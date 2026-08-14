@@ -9,14 +9,16 @@
 #include <AzCore/Casting/numeric_cast.h>
 #include <AzQtComponents/Utilities/PixmapScaleUtilities.h>
 
-#include <QtGui/private/qhighdpiscaling_p.h>
-
 namespace AzQtComponents
 {
     QPixmap ScalePixmapForScreenDpi(
         QPixmap pixmap, QScreen* screen, QSize size, Qt::AspectRatioMode aspectRatioMode, Qt::TransformationMode transformationMode)
     {
-        qreal screenDpiFactor = QHighDpiScaling::factor(screen);
+        // Public-API equivalent of the private QHighDpiScaling::factor(screen). The private
+        // factor() tolerated a null screen; devicePixelRatio() dereferences it, so document the
+        // (current) caller contract that screen is always valid.
+        Q_ASSERT(screen);
+        qreal screenDpiFactor = screen->devicePixelRatio();
         pixmap.setDevicePixelRatio(screenDpiFactor);
 
         QPixmap scaledPixmap;
@@ -32,7 +34,8 @@ namespace AzQtComponents
     QPixmap CropPixmapForScreenDpi(
         QPixmap pixmap, QScreen* screen, QRect rect)
     {
-        qreal screenDpiFactor = QHighDpiScaling::factor(screen);
+        Q_ASSERT(screen);
+        qreal screenDpiFactor = screen->devicePixelRatio();
         pixmap.setDevicePixelRatio(screenDpiFactor);
 
         QRect cropRect(

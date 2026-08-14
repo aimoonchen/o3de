@@ -81,7 +81,6 @@ AZ_POP_DISABLE_WARNING
 
 // AzQtComponents
 #include <AzQtComponents/Components/StyleManager.h>
-#include <AzQtComponents/Utilities/HandleDpiAwareness.h>
 #include <AzQtComponents/Components/WindowDecorationWrapper.h>
 #include <AzQtComponents/Utilities/QtPluginPaths.h>
 
@@ -3452,7 +3451,8 @@ extern "C" int AZ_DLL_EXPORT CryEditMain(int argc, char* argv[])
 
     Editor::EditorQtApplication::InstallQtLogHandler();
 
-    AzQtComponents::Utilities::HandleDpiAwareness(AzQtComponents::Utilities::SystemDpiAware);
+    // DPI awareness: Qt 6 defaults to Per-Monitor V2 (the official recommendation); the legacy
+    // HandleDpiAwareness() call was removed with the HiDPI cleanup.
     Editor::EditorQtApplication* app = Editor::EditorQtApplication::newInstance(argc, argv);
 
     QStringList qArgs = app->arguments();

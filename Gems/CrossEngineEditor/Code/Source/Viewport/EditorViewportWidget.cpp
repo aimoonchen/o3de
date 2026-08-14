@@ -348,7 +348,7 @@ namespace CrossEngineEditor
         QMouseEvent moveEvent(
             QEvent::MouseMove, m_pendingMovePos, m_pendingMovePos, Qt::NoButton, m_pendingMoveButtons,
             m_pendingMoveModifiers);
-        m_cameraController.HandleMouseMove(moveEvent, ViewportSize());
+        m_cameraController.HandleMouseMove(moveEvent, ViewportSize(), DeviceScalingFactor());
         HandleMouseEvent(
             AzToolsFramework::ViewportInteraction::MouseEvent::Move, m_pendingMovePos.toPoint(), Qt::NoButton,
             m_pendingMoveButtons, m_pendingMoveModifiers, 0.0f);

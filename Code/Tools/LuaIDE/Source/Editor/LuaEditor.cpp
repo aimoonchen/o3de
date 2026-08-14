@@ -8,8 +8,6 @@
 
 #include <Source/LuaIDEApplication.h>
 
-#include <AzQtComponents/Utilities/HandleDpiAwareness.h>
-
 #include <QCoreApplication>
 
 #if defined(EXTERNAL_CRASH_REPORTING)
@@ -35,7 +33,8 @@ int main(int argc, char* argv[])
 
         QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
         QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
-        AzQtComponents::Utilities::HandleDpiAwareness(AzQtComponents::Utilities::PerScreenDpiAware);
+        // DPI awareness: Qt 6 defaults to Per-Monitor V2 (the official recommendation); the
+        // legacy HandleDpiAwareness() call was removed with the HiDPI cleanup.
 
         LUAEditor::Application app(argc, argv);
 

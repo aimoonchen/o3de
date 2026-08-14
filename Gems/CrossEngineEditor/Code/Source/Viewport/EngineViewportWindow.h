@@ -90,6 +90,7 @@ namespace CrossEngineEditor
 
         void* m_cachedHandle = nullptr;
         QSize m_lastPhysicalSize;
+        qreal m_lastPixelRatio = 0.0;
         bool m_firstExpose = true;
     };
 } // namespace CrossEngineEditor

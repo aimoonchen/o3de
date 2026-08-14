@@ -11,7 +11,6 @@
 #include <AzQtComponents/Components/WindowDecorationWrapper.h>
 #include <AzQtComponents/Components/O3DEStylesheet.h>
 #include <AzQtComponents/Utilities/QtPluginPaths.h>
-#include <AzQtComponents/Utilities/HandleDpiAwareness.h>
 
 #include <AzCore/Component/ComponentApplication.h>
 #include <AzCore/Component/EntityId.h>

@@ -39,6 +39,7 @@
 
 #include <AzQtComponents/Components/GlobalEventFilter.h>
 #include <AzQtComponents/Components/StyleManager.h>
+#include <AzQtComponents/Components/WindowDecorationWrapper.h>
 
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QTimer>
@@ -159,7 +160,22 @@ namespace CrossEngineEditor
         // (plan §6 阶段4 / C6). Connects to the standard transform/property buses.
         m_mirrorBridge = AZStd::make_unique<EntityMirrorBridge>();
 
-        m_mainWindow = AZStd::make_unique<EditorMainWindow>();
+        m_mainWindow = new EditorMainWindow();
+
+        // Wrap the main window like the native O3DE editor does (CryEdit.cpp:1537-1543). Without
+        // the wrapper the window keeps the native Windows title bar: its light-theme color clashes
+        // with the dark editor UI, and hovering the native maximize button opens the Win11 Snap
+        // Layouts flyout. The wrapper draws the themed AzQtComponents title bar (with its own
+        // min/max/close buttons) over the native one, and keeps native dragging and Aero Snap via
+        // its WM_NCHITTEST handler. setGuest() reparents the guest, so the wrapper owns it.
+#ifdef Q_OS_MACOS
+        m_mainWindowWrapper = AZStd::make_unique<AzQtComponents::WindowDecorationWrapper>(
+            AzQtComponents::WindowDecorationWrapper::OptionDisabled);
+#else
+        m_mainWindowWrapper = AZStd::make_unique<AzQtComponents::WindowDecorationWrapper>(
+            AzQtComponents::WindowDecorationWrapper::OptionAutoTitleBarButtons);
+#endif
+        m_mainWindowWrapper->setGuest(m_mainWindow);
         AzToolsFramework::EditorWindowRequestBus::Handler::BusConnect();
 
         // Install our viewport interaction handler. Unlike the engine default
@@ -193,7 +209,9 @@ namespace CrossEngineEditor
         {
             AzToolsFramework::EditorWindowRequestBus::Handler::BusDisconnect();
         }
-        m_mainWindow.reset();
+        // Reset the wrapper, not the guest: the wrapper deletes the guest.
+        m_mainWindowWrapper.reset();
+        m_mainWindow = nullptr;
 
         // The bridge holds bus connections keyed off the entity context; drop it before
         // the backend it forwards to is unregistered.
@@ -209,12 +227,14 @@ namespace CrossEngineEditor
 
     QWidget* CrossEngineEditorApplication::GetAppMainWindow()
     {
-        return m_mainWindow.get();
+        // Return the guest, not the wrapper - the native editor does the same
+        // (SandboxIntegrationManager::GetAppMainWindow returns MainWindow::instance()).
+        return m_mainWindow;
     }
 
     QWidget* CrossEngineEditorApplication::GetMainWindow()
     {
-        return m_mainWindow.get();
+        return m_mainWindow;
     }
 
     AZStd::unique_ptr<IEngineBackend> CrossEngineEditorApplication::CreateBackendFromCommandLine()

@@ -8,7 +8,6 @@
 
 #include <AzQtComponents/Components/O3DEStylesheet.h>
 #include <AzQtComponents/Components/WindowDecorationWrapper.h>
-#include <AzQtComponents/Utilities/HandleDpiAwareness.h>
 #include <AzQtComponents/Utilities/QtPluginPaths.h>
 #include <AzToolsFramework/Application/ToolsApplication.h>
 

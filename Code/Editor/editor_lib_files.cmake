@@ -9,7 +9,6 @@
 set(FILES
     Translations/editor_en-us.ts
     Translations/assetbrowser_en-us.ts
-    DPIAware.xml
     res/AVI_Recorder.bmp
     res/ConsoleToolbar.bmp
     res/CryEdit.ico

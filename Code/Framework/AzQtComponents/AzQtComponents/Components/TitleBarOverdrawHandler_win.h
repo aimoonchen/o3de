@@ -55,6 +55,8 @@ private:
     // compile executables on windows server for use on windows 10 clients, but also need to process assets themselves for the packaged build
     // The better answer will be to resolve this dependency between aztoolsframework and azqtcomponents.
     HMODULE m_user32Module;
+    typedef UINT(WINAPI * PFNGetDpiForSystem) ();
+    PFNGetDpiForSystem m_getDpiForSystemFn{ nullptr };
     typedef UINT(WINAPI * PFNGetDpiForWindow) (HWND hwnd);
     PFNGetDpiForWindow m_getDpiForWindowFn{ nullptr };
     typedef BOOL(WINAPI * PFNAdjustWindowRectExForDpi) (LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle, UINT dpi);

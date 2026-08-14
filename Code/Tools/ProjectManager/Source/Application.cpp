@@ -13,7 +13,6 @@
 #include <AzCore/Utils/Utils.h>
 #include <AzCore/Settings/SettingsRegistryMergeUtils.h>
 #include <AzFramework/Logging/LoggingComponent.h>
-#include <AzQtComponents/Utilities/HandleDpiAwareness.h>
 #include <AzQtComponents/Components/StyleManager.h>
 #include <AzQtComponents/Components/WindowDecorationWrapper.h>
 #include <ProjectManager_Traits_Platform.h>
@@ -66,7 +65,8 @@ namespace O3DE::ProjectManager
         QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
 
         QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
-        AzQtComponents::Utilities::HandleDpiAwareness(AzQtComponents::Utilities::SystemDpiAware);
+        // DPI awareness: Qt 6 defaults to Per-Monitor V2 (the official recommendation); the
+        // legacy HandleDpiAwareness() call was removed with the HiDPI cleanup.
 
         // Create the actual Qt Application - this needs to happen before using QMessageBox
         m_app.reset(new QApplication(*GetArgC(), *GetArgV()));

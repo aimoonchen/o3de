@@ -7,7 +7,6 @@
 #
 
 set(FILES
-    ../../../Platform/Common/Default/AzQtComponents/Utilities/HandleDpiAwareness_Default.cpp
     ../../Utilities/MouseHider_mac.mm
     ../../Utilities/QtWindowUtilities_mac.mm
     ../../Utilities/ScreenGrabber_mac.mm

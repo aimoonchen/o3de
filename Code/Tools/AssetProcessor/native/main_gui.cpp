@@ -7,7 +7,6 @@
  */
 
 #include "utilities/GUIApplicationManager.h"
-#include <AzQtComponents/Utilities/HandleDpiAwareness.h>
 
 
 int main(int argc, char* argv[])
@@ -15,7 +14,8 @@ int main(int argc, char* argv[])
     const AZ::Debug::Trace tracer;
     qputenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM", "1");
 
-    AzQtComponents::Utilities::HandleDpiAwareness(AzQtComponents::Utilities::PerScreenDpiAware);
+    // DPI awareness: Qt 6 defaults to Per-Monitor V2 (the official recommendation); the legacy
+    // HandleDpiAwareness() call was removed with the HiDPI cleanup.
     GUIApplicationManager applicationManager(&argc, &argv);
 
     ApplicationManager::BeforeRunStatus status = applicationManager.BeforeRun();

@@ -80,6 +80,7 @@ TitleBarOverdrawHandlerWindows::TitleBarOverdrawHandlerWindows(QApplication* app
     {
         // The below DPI related methods exist in the user32.dll only on Windows 10 version 1607 and beyond.  We attempt to locate these
         // methods at runtime through GetProcAddress so this module can still load correctly on older version of windows
+        m_getDpiForSystemFn = (PFNGetDpiForSystem) GetProcAddress(m_user32Module, "GetDpiForSystem");
         m_getDpiForWindowFn = (PFNGetDpiForWindow) GetProcAddress(m_user32Module, "GetDpiForWindow");
         m_adjustWindowRectExForDpiFn = (PFNAdjustWindowRectExForDpi) GetProcAddress(m_user32Module, "AdjustWindowRectExForDpi");
     }
@@ -134,7 +135,15 @@ void TitleBarOverdrawHandlerWindows::applyOverdrawMargins(QWindow* window)
         // We should not create a real window (HWND) yet, so get margins using presumed style
         const static unsigned style = WS_OVERLAPPEDWINDOW & ~WS_OVERLAPPED;
         const static unsigned exStyle = 0;
-        const auto margins = customTitlebarMargins(nullptr, style, exStyle, false, 96);
+        // Use the real system DPI for the creation-context margins: a Per-Monitor-V2 window is
+        // created at its birth monitor's DPI and the baked margins are never recomputed in Qt6
+        // (the runtime re-applies below are a no-op), so baking in 96-DPI margins leaves part of
+        // the native title bar uncovered on scaled displays. GetDpiForSystem() equals the birth
+        // monitor's DPI for windows born on the primary screen; a window born on a secondary
+        // monitor with a different DPI is a known uncovered edge (Qt rescales customMargins only
+        // on a subsequent WM_DPICHANGED).
+        const UINT dpi = m_getDpiForSystemFn ? m_getDpiForSystemFn() : 96;
+        const auto margins = customTitlebarMargins(nullptr, style, exStyle, false, static_cast<int>(dpi));
         // ... and apply them to the creation context for the future window
         window->setProperty("_q_windowsCustomMargins", QVariant::fromValue(margins));
     }
@@ -209,6 +218,12 @@ void TitleBarOverdrawHandlerWindows::applyOverdrawMargins(QPlatformWindow* windo
             const auto margins = customTitlebarMargins(monitor, static_cast<int>(style), static_cast<int>(exStyle), maximized, dpi);
             RECT rect;
             GetWindowRect(hWnd, &rect);
+            // Qt 6 has no runtime "WindowsCustomMargins" window property: the QPA base
+            // implementation of setWindowProperty is empty and the windows plugin never
+            // overrides it, so this re-apply chain (screenChanged / Show / WindowStateChange)
+            // is inert. The only effective path is the creation-context
+            // "_q_windowsCustomMargins" property; Qt itself rescales custom margins on
+            // WM_DPICHANGED, which keeps cross-monitor overdraw correct.
             pni->setWindowProperty(window, QStringLiteral("WindowsCustomMargins"), QVariant::fromValue(margins));
             const auto width = rect.right - rect.left;
             const auto height = rect.bottom - rect.top;

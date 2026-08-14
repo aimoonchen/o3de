@@ -25,10 +25,13 @@ namespace AzQtComponents
     }
 
     void AzQtApplication::InitializeDpiScaling()
-    {    
+    {
          QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
          QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
-         AzQtComponents::Utilities::HandleDpiAwareness(AzQtComponents::Utilities::SystemDpiAware);
+         // DPI awareness is NOT set here on purpose: Qt 6 defaults to Per-Monitor V2
+         // (dpiawareness=2), which is the official Qt 6 recommendation. The legacy
+         // HandleDpiAwareness() plumbing forced System DPI Aware (dpiawareness=1) via
+         // QT_QPA_PLATFORM and was removed - see the HiDPI review for details.
     }
 } // namespace AzQtComponents
 

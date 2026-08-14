@@ -7,9 +7,8 @@
 
 #pragma once
 
+#include <AzQtComponents/AzQtComponentsAPI.h>
 #include <QApplication>
-
-#include <AzQtComponents/Utilities/HandleDpiAwareness.h>
 
 namespace AzQtComponents
 {
@@ -17,12 +16,12 @@ namespace AzQtComponents
     class AZ_QT_COMPONENTS_API AzQtApplication
         : public QApplication
     {
-    public:       
+    public:
         AzQtApplication(int& argc, char** argv);
 
         //! Initializes Qt DPI scaling to handle displays with high display densities, such as Retina displays.
-            //! Currently, this uses Qt's system DPI awareness, in which a common device scaling factor will be
-            //! calculated across all attached screens.
+            //! Currently, this uses Qt's per-monitor DPI awareness (the Qt 6 default) together with a
+            //! PassThrough scale-factor rounding policy, so 150% stays exactly 1.5x.
             //! \warning This must be called before this AzQtApplication instance is initialized.
         static void InitializeDpiScaling();
     };

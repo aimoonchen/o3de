@@ -15,12 +15,12 @@
 #include <QLoggingCategory>
 #include <QTimer>
 
-#include <QtGui/private/qhighdpiscaling_p.h>
 #include <QtGui/qpa/qplatformnativeinterface.h>
 
 // AzQtComponents
 #include <AzQtComponents/Components/Titlebar.h>
 #include <AzQtComponents/Components/WindowDecorationWrapper.h>
+#include <AzQtComponents/Utilities/QtWindowUtilities.h>
 
 // AzFramework
 #include <AzFramework/Input/Buses/Notifications/RawInputNotificationBus_Platform.h>
@@ -66,7 +66,7 @@ namespace Editor
                         const short global_x = static_cast<short>(LOWORD(msg->lParam));
                         const short global_y = static_cast<short>(HIWORD(msg->lParam));
 
-                        const QPoint globalPos = QHighDpi::fromNativePixels(QPoint(global_x, global_y), widget->window()->windowHandle());
+                        const QPoint globalPos = AzQtComponents::MapFromNativeGlobalPoint(QPoint(global_x, global_y), widget->window()->windowHandle());
                         const QPoint local = titleBar->mapFromGlobal(globalPos);
                         if (titleBar->draggableRect().contains(local) && !titleBar->isTopResizeArea(globalPos))
                         {

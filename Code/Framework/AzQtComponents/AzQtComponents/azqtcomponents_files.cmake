@@ -286,8 +286,6 @@ set(FILES
     Utilities/Conversions.h
     Utilities/Conversions.cpp
     Utilities/DesktopUtilities.h
-    Utilities/HandleDpiAwareness.cpp
-    Utilities/HandleDpiAwareness.h
     Utilities/MouseHider.h
     Utilities/PixmapScaleUtilities.cpp
     Utilities/PixmapScaleUtilities.h

@@ -15,6 +15,7 @@
 class QWidget;
 class QMainWindow;
 class QPainter;
+class QWindow;
 
 namespace AzQtComponents
 {
@@ -38,6 +39,14 @@ namespace AzQtComponents
     };
 
     MappedPoint AZ_QT_COMPONENTS_API MappedCursorPosition();
+
+    //! Convert a NATIVE global point (e.g. coordinates handed to a WM_NCHITTEST handler) to
+    //! the LOGICAL global point Qt works in, for the screen the window is on. Public-API
+    //! equivalent of the private QHighDpi::fromNativePixels: native = (logical - origin) * dpr
+    //! + origin, where origin is the screen's native top-left (non-zero on secondary monitors)
+    //! and dpr is the window's device pixel ratio. The native origin is reached through
+    //! QScreen::handle() (a QPA header, read-only use) - acceptable for O3DE's pinned Qt build.
+    AZ_QT_COMPONENTS_API QPoint MapFromNativeGlobalPoint(const QPoint& nativeGlobalPoint, const QWindow* window);
 
     AZ_QT_COMPONENTS_API void bringWindowToTop(QWidget* widget);
 

@@ -178,10 +178,14 @@ namespace CrossEngineEditor
     }
 
     bool EditorViewportCameraController::HandleMouseMove(
-        const QMouseEvent& event, const AzFramework::ScreenSize& /*viewportSize*/)
+        const QMouseEvent& event, const AzFramework::ScreenSize& /*viewportSize*/, float pixelRatio)
     {
         CEE_PROFILE_FUNCTION();
-        const AzFramework::CursorEvent cursorEvent{ ScreenPointFromQt(event.pos()) };
+        // Qt delivers cursor positions in the window's logical pixels; the camera system derives
+        // rotation/pan deltas from them in physical pixels (the same convention the pick path
+        // uses via ToPhysicalScreenPoint). Scale here so sensitivity is independent of the OS
+        // scale factor - otherwise navigation feels 1.5x slower at 150% than at 100%.
+        const AzFramework::CursorEvent cursorEvent{ ScreenPointFromQt((event.position() * pixelRatio).toPoint()) };
         return m_cameraSystem.HandleEvents(AzFramework::InputState{ cursorEvent, m_modifierStates });
     }
 

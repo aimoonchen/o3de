@@ -111,6 +111,7 @@ namespace CrossEngineEditor
         {
             m_firstExpose = false;
             m_lastPhysicalSize = physicalSize();
+            m_lastPixelRatio = devicePixelRatio();
             Q_EMIT FirstExposed();
         }
     }
@@ -126,10 +127,15 @@ namespace CrossEngineEditor
 
     void EngineViewportWindow::MaybeEmitPhysicalResize()
     {
+        // Also track the DPR itself: a monitor hop can change the ratio while the physical
+        // size happens to stay equal (e.g. the new logical size compensates), and listeners
+        // cache the ratio - they must refresh it in that case too.
         const QSize physical = physicalSize();
-        if (physical != m_lastPhysicalSize)
+        const qreal dpr = devicePixelRatio();
+        if (physical != m_lastPhysicalSize || dpr != m_lastPixelRatio)
         {
             m_lastPhysicalSize = physical;
+            m_lastPixelRatio = dpr;
             Q_EMIT PhysicalResized(physical);
         }
     }
@@ -166,6 +172,17 @@ namespace CrossEngineEditor
                 }
                 break;
             }
+
+        case QEvent::DevicePixelRatioChange:
+            // Same-screen OS scale change (100% -> 150% in Display Settings): no screenChanged
+            // fires (the screen is unchanged) and Qt deduplicates the resize when the logical
+            // size stays equal, so this event is the only reliable DPR-change signal. Listener
+            // widgets cache the ratio - refresh them even if the physical size is unchanged.
+            if (!m_firstExpose)
+            {
+                MaybeEmitPhysicalResize();
+            }
+            break;
 
         case QEvent::MouseButtonPress:
         case QEvent::MouseButtonRelease:

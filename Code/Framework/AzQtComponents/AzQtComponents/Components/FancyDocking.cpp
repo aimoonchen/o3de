@@ -41,7 +41,6 @@
 #include <QStyleOptionToolButton>
 #include <QVBoxLayout>
 #include <QWindow>
-#include <QtGui/private/qhighdpiscaling_p.h>
 
 
 static void OptimizedSetParent(QWidget* widget, QWidget* parent)
@@ -629,29 +628,11 @@ namespace AzQtComponents
         return dockName.startsWith(m_floatingWindowIdentifierPrefix);
     }
 
-    /**
-     * Adjust mapFromGlobal to account for DPI scaling on multiple screens
-     */
+    // The pre-Qt6 implementation corrected mapFromGlobal across screens with different DPI
+    // scaling; Qt 6 does the cross-screen conversion itself, so the plain mapping is correct.
     QPoint FancyDocking::multiscreenMapFromGlobal(const QPoint& point) const
     {
-#if 0 //def AZ_PLATFORM_WINDOWS
-        int index = 0;
-        for (auto screen : QApplication::screens()) {
-            if (screen->geometry().contains(point)) {
-                qreal scaleFactor = QHighDpiScaling::factor(screen);
-                return (
-                    (m_perScreenFullScreenWidgets[index]->mapFromGlobal(point) * scaleFactor) +
-                    (m_perScreenFullScreenWidgets[index]->mapToGlobal({0, 0})) / scaleFactor);
-            }
-            ++index;
-        }
-
-        // If the point isn't contained in any screen, return the regular mapFromGlobal() result for now
-        // TODO - may need to do some shenanigan like the above based to the closest screen?
         return mapFromGlobal(point);
-#else
-        return mapFromGlobal(point);
-#endif
     }
 
     bool FancyDocking::WidgetContainsPoint(QWidget* widget, const QPoint& pos) const
@@ -2470,7 +2451,8 @@ namespace AzQtComponents
 
             if (fromScreen != toScreen)
             {
-                qreal factorRatio = QHighDpiScaling::factor(fromScreen) / QHighDpiScaling::factor(toScreen);
+                // Public-API equivalent of the private QHighDpiScaling::factor().
+                qreal factorRatio = fromScreen->devicePixelRatio() / toScreen->devicePixelRatio();
                 placeholderRect.setWidth(aznumeric_cast<int>(aznumeric_cast<qreal>(placeholderRect.width()) * factorRatio));
                 placeholderRect.setHeight(aznumeric_cast<int>(aznumeric_cast<qreal>(placeholderRect.height()) * factorRatio));
             }

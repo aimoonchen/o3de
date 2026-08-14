@@ -25,7 +25,6 @@
 #include <AzQtComponents/Components/GlobalEventFilter.h>
 #include <AzQtComponents/Components/StyledDockWidget.h>
 #include <AzQtComponents/Components/O3DEStylesheet.h>
-#include <AzQtComponents/Utilities/HandleDpiAwareness.h>
 #include <AzQtComponents/Components/WindowDecorationWrapper.h>
 #include "ComponentDemoWidget.h"
 
@@ -135,7 +134,8 @@ int main(int argc, char **argv)
 
     qInstallMessageHandler(LogToDebug);
 
-    AzQtComponents::Utilities::HandleDpiAwareness(AzQtComponents::Utilities::PerScreenDpiAware);
+    // DPI awareness: Qt 6 defaults to Per-Monitor V2 (the official recommendation); the legacy
+    // HandleDpiAwareness() call was removed with the HiDPI cleanup.
     QApplication app(argc, argv);
 
     auto globalEventFilter = new AzQtComponents::GlobalEventFilter(&app);
