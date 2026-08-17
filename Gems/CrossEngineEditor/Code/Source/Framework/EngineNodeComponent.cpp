@@ -28,12 +28,12 @@ namespace CrossEngineEditor
                 ->Version(2)
                 ->Field("className", &EngineNodeComponent::m_className)
                 ->Field("properties", &EngineNodeComponent::m_properties)
-                // The engine-side node handle IS reflected so it survives the in-memory prefab
-                // clone the editor entity context performs when the level takes ownership of a
-                // mirror entity (without this the clone's handle resets to 0 and the backend can
-                // no longer resolve the node for bounds / picking / write-back). It is never
-                // persisted to disk because the engine's native scene is the source of truth and
-                // the mirror prefab is not saved (plan §3.7).
+                // The engine-side node handle IS reflected so serialized state capture keeps it:
+                // undo/redo restore and the level's root-instance overlay takeover re-construct
+                // the component from serialized state, and without the field the handle would
+                // reset to 0 and the backend could no longer resolve the node for bounds /
+                // picking / write-back. It is never persisted to disk because the engine's native
+                // scene is the source of truth and the mirror prefab is not saved (Plan §B4).
                 ->Field("nodeHandle", &EngineNodeComponent::m_nodeHandle);
 
             if (AZ::EditContext* editContext = serialize->GetEditContext())
@@ -207,7 +207,7 @@ namespace CrossEngineEditor
         // Transform-invalidated cache: return the memoised world AABB unless a transform change has
         // marked it dirty. During camera orbit over a static selection this hits every frame, so the
         // per-frame selection-outline + pick queries stop crossing the GDExtension boundary to
-        // recompute an unchanged box (PROGRESS.md §13 fix 3; consistent with plan D1 - nothing stale
+        // recompute an unchanged box (Progress.md 修复13 fix 3; consistent with Plan §B5b - nothing stale
         // is held because only a transform change alters a world AABB, and that invalidates here).
         if (m_boundsCacheValid)
         {
@@ -281,7 +281,7 @@ namespace CrossEngineEditor
             return false;
         }
 
-        // Precise (triangle-level) test through the backend seam (pick_final_plan §8). This fixes
+        // Precise (triangle-level) test through the backend seam (Plan §B5b). This fixes
         // the rotated-mesh problem: a large model's world-axis-aligned AABB inflates to cover empty
         // space and wins the ray test over smaller objects behind it (rbfx "Geometry 100", a
         // scale-100 rotated teapot). When the backend supports a precise test, the triangle result

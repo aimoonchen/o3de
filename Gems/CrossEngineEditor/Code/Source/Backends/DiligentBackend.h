@@ -6,14 +6,14 @@
 
 #pragma once
 
-//! Diligent/D3D12 engine backend (plan §3, D3,阶段3).
+//! Diligent/D3D12 engine backend (Plan §B1).
 //!
 //! Owns a single Diligent IRenderDevice + immediate IDeviceContext and one ISwapChain bound to
 //! the editor viewport's native window surface (HWND on Windows). Each editor frame it clears the
 //! back buffer to the Blender-grey viewport color and draws the overlay geometry (gizmos / grid /
 //! selection) produced by GenericDebugDisplay through DiligentDebugRenderer, then presents.
 //!
-//! Threading (see new_editor_plan §3 + O3DE AuxGeom double-buffer precedent):
+//! Threading (see Plan §B8 B1 + O3DE AuxGeom double-buffer precedent):
 //!   This first iteration presents on the Qt main thread (the idle-tick that also generates the
 //!   overlay), so there is no cross-thread synchronization to get wrong while D3D12-direct-present
 //!   is brought up. The ISceneRenderer surface contract (OnSurfaceCreated/Resized/AboutToBeDestroyed
@@ -106,7 +106,7 @@ namespace CrossEngineEditor
             DiligentDebugRenderer m_debugRenderer;
 
             //! Pending physical size packed as (w<<32)|h; 0 = none. Atomic so a future render
-            //! thread can consume it lock-free (plan §4). Written by the main thread on resize.
+            //! thread can consume it lock-free (Plan §B8 B1). Written by the main thread on resize.
             std::atomic<uint64_t> m_pendingResize{ 0 };
 
             bool m_frameOpen = false;

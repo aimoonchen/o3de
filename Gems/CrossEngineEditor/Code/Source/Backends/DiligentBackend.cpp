@@ -35,7 +35,7 @@ namespace CrossEngineEditor
 
     std::expected<void, BackendError> DiligentBackend::Initialize(const BackendInitParams& params)
     {
-        // Device + swapchain are created lazily on first surface expose (plan §2.5); the entity /
+        // Device + swapchain are created lazily on first surface expose (Plan §B2); the entity /
         // asset delegates just need their own init.
         return m_null.Initialize(params);
     }
@@ -96,7 +96,7 @@ namespace CrossEngineEditor
         scDesc.Height = AZStd::max(1u, height);
         scDesc.ColorBufferFormat = k_colorFormat;
         scDesc.DepthBufferFormat = k_depthFormat;
-        scDesc.BufferCount = 3; // FLIP_DISCARD triple buffering (plan §2.3)
+        scDesc.BufferCount = 3; // FLIP_DISCARD triple buffering (Plan §B2)
 
 #if defined(_WIN32)
         auto* factory = GetEngineFactoryD3D12();
@@ -188,7 +188,7 @@ namespace CrossEngineEditor
     void DiligentBackend::DiligentSceneRenderer::OnSurfaceResized(uint32_t width, uint32_t height)
     {
         // Non-blocking: stash the packed size; ApplyPendingResize consumes it on the next frame
-        // (this is exactly the hand-off point a dedicated render thread would use, plan §4).
+        // (this is exactly the hand-off point a dedicated render thread would use, Plan §B8 B1).
         m_pendingResize.store(PackViewportSize(width, height), std::memory_order_release);
     }
 
@@ -223,7 +223,7 @@ namespace CrossEngineEditor
     void DiligentBackend::DiligentSceneRenderer::OnSurfaceAboutToBeDestroyed()
     {
         // Called on the Qt main thread via DirectConnection: release the swapchain synchronously
-        // before the native surface is gone so D3D12 raises no validation error (plan §2.8).
+        // before the native surface is gone so D3D12 raises no validation error (Plan §B2).
         if (m_debugRenderer.IsInitialized())
         {
             m_debugRenderer.Shutdown();

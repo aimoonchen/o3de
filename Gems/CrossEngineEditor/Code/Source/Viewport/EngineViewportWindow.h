@@ -8,7 +8,7 @@
 
 //! High-performance native render surface for the cross-engine editor viewport.
 //!
-//! Design: qt6_viewport_design.md §1-2. A QWindow subclass owns a real GPU render
+//! Design: Plan §B2. A QWindow subclass owns a real GPU render
 //! surface (Vulkan/Direct3D/Metal). Because setSurfaceType() declares a GPU surface,
 //! Qt allocates NO QBackingStore and creates NO OpenGL context - the backend RHI
 //! presents its swapchain straight to this window's native handle. It is embedded in
@@ -49,30 +49,30 @@ namespace CrossEngineEditor
         [[nodiscard]] void* platformHandle();
 
         //! Client-area size in PHYSICAL pixels (logical size * devicePixelRatio, rounded).
-        //! The swapchain MUST use this, not size(), or HiDPI displays render blurry (§2.6).
+        //! The swapchain MUST use this, not size(), or HiDPI displays render blurry (Plan §B2).
         [[nodiscard]] QSize physicalSize() const noexcept;
 
     Q_SIGNALS:
-        //! First expose with a valid surface: the backend creates its swapchain now (§2.5).
+        //! First expose with a valid surface: the backend creates its swapchain now (Plan §B2).
         void FirstExposed();
 
         //! Physical client size changed (resize OR devicePixelRatio change): the render
-        //! thread recreates its swapchain on the next frame (§2.3).
+        //! thread recreates its swapchain on the next frame (Plan §B2).
         void PhysicalResized(QSize physicalPx);
 
         //! The native surface is about to be destroyed: the backend must waitIdle and
-        //! release its swapchain synchronously before we return (§2.8).
+        //! release its swapchain synchronously before we return (Plan §B2).
         void AboutToClose();
 
         //! Raw input (mouse/keyboard/wheel/enter/leave) forwarded to the engine dispatcher.
         void InputEvent(QEvent* event);
 
         //! Surface visibility changed (dock tab switch / auto-hide). The controller pauses the
-        //! frame loop while hidden so it stops presenting to an invisible surface (§2.14).
+        //! frame loop while hidden so it stops presenting to an invisible surface (Plan §B3).
         void VisibilityChanged(bool visible);
 
-        //! Viewport focus gained/lost. The engine starts/stops camera input on this (§2.12);
-        //! the O3DE ActionManager integration also keys off it (see plan §Shortcut bridge).
+        //! Viewport focus gained/lost. The engine starts/stops camera input on this (Plan §B2);
+        //! the O3DE ActionManager integration also keys off it (see Plan §B8 B2).
         void FocusChanged(bool hasFocus);
 
     protected:

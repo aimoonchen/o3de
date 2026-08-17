@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! The single self-authored mirror component (final plan section 3.1).
+//! The single self-authored mirror component (Plan §B4).
 //!
 //! One engine node is mirrored as one AZ::Entity carrying exactly two components:
 //!   * the standard O3DE TransformComponent (Outliner parent lookup / Gizmo / Undo), and
@@ -78,7 +78,7 @@ namespace CrossEngineEditor
         void Deactivate() override;
 
         // AzToolsFramework::EditorComponentSelectionRequestsBus::Handler...
-        //! World-space AABB for viewport picking + selection outline (plan pick §5.1). Sourced
+        //! World-space AABB for viewport picking + selection outline (Plan §B5b). Sourced
         //! from the raw backend visual bounds; a non-visual node returns null (not ray-pickable)
         //! and stays selectable via its editor icon / the Outliner.
         AZ::Aabb GetEditorSelectionBoundsViewport(const AzFramework::ViewportInfo& viewportInfo) override;
@@ -120,9 +120,10 @@ namespace CrossEngineEditor
         //! Invalidate the cached world bounds when THIS entity's transform changes (gizmo drag,
         //! parent move, engine sync). Camera orbit does NOT fire this, so while a static object is
         //! selected the cache stays valid and the per-frame selection-outline / pick queries no
-        //! longer cross the GDExtension boundary to recompute an unchanged box (PROGRESS.md §13
+        //! longer cross the GDExtension boundary to recompute an unchanged box (Progress.md 修复13
         //! fix 3). This is a transform-invalidated cache, not the always-live component AABB the
-        //! plan's D1 rejected: it holds nothing stale because the only thing that changes a world
+        //! plan rejected (Plan §B5b: 按需现算 + transform 失效): it holds nothing stale because
+        //! the only thing that changes a world
         //! AABB (short of geometry edits, which re-sync) is the transform we listen to here.
         void OnTransformChanged(const AZ::Transform& local, const AZ::Transform& world) override;
 

@@ -23,7 +23,7 @@ namespace CrossEngineEditor
 {
     //! A single vertex submitted to the backend immediate-mode debug renderer.
     //! GenericDebugDisplay tessellates every DebugDisplayRequests draw call down
-    //! to batches of these (see plan §3.1 "70 -> 3" decomposition).
+    //! to batches of these (see Plan §A3 "63 -> 3" decomposition).
     struct DebugVertex
     {
         AZ::Vector3 m_position;

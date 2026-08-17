@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Diligent implementation of the 3 IDebugRenderDevice primitives (plan §3).
+//! Diligent implementation of the 3 ISceneRenderer overlay primitives (Plan §A3).
 //!
 //! Owns two graphics PSOs (line-list + triangle-list) that share one MVP vertex shader, a
 //! single dynamic vertex buffer, and a dynamic constant buffer holding the world->clip matrix.

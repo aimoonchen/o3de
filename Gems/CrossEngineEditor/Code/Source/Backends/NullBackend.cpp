@@ -13,9 +13,6 @@
 #include <AzCore/std/algorithm.h>
 #include <AzCore/std/sort.h>
 
-#include <QFileIconProvider>
-#include <QFileInfo>
-
 namespace CrossEngineEditor
 {
     std::expected<void, BackendError> NullBackend::Initialize(const BackendInitParams& /*params*/)
@@ -81,11 +78,15 @@ namespace CrossEngineEditor
     {
     }
 
+    void NullBackend::NullEntityMirror::EnumerateObjectTypes(AZStd::vector<ObjectTypeInfo>& /*out*/)
+    {
+    }
+
     void NullBackend::NullEntityMirror::OnEditorTransformChanged(AZ::EntityId /*entityId*/, const AZ::Transform& /*worldTm*/)
     {
     }
 
-    void NullBackend::NullEntityMirror::OnEditorPropertyChanged(AZ::EntityId /*entityId*/, const PropertyChange& /*change*/)
+    void NullBackend::NullEntityMirror::OnEditorPropertyChanged(AZ::EntityId /*entityId*/)
     {
     }
 
@@ -96,6 +97,66 @@ namespace CrossEngineEditor
 
     void NullBackend::NullEntityMirror::DestroyObject(AZ::EntityId /*entityId*/)
     {
+    }
+
+    // --- migration 批次 1 stubs (rbfx-first; Null backend has no engine scene to operate on) ---
+
+    bool NullBackend::NullEntityMirror::RaycastScene(
+        const AZ::Vector3& /*rayOrigin*/,
+        const AZ::Vector3& /*rayDirection*/,
+        AZ::Vector3& /*outHitPoint*/,
+        AZ::Vector3& /*outHitNormal*/) const
+    {
+        return false;
+    }
+
+    bool NullBackend::NullEntityMirror::CreatePrefabFromNodes(
+        const AZStd::vector<AZ::EntityId>& /*entityIds*/,
+        const AZStd::string& /*path*/)
+    {
+        return false;
+    }
+
+    bool NullBackend::NullEntityMirror::AssignMaterial(
+        AZ::EntityId /*entityId*/, const AZStd::string& /*assetPath*/, int /*slot*/)
+    {
+        return false;
+    }
+
+    bool NullBackend::NullEntityMirror::AssignAnimation(
+        AZ::EntityId /*entityId*/, const AZStd::string& /*assetPath*/)
+    {
+        return false;
+    }
+
+    AZStd::vector<AZ::u8> NullBackend::NullEntityMirror::SerializeNodes(
+        const AZStd::vector<AZ::EntityId>& /*entityIds*/)
+    {
+        return {};
+    }
+
+    bool NullBackend::NullEntityMirror::PasteNodes(
+        const AZStd::vector<AZ::u8>& /*data*/, AZ::EntityId /*parentId*/)
+    {
+        return false;
+    }
+
+    bool NullBackend::NullEntityMirror::SaveResource(
+        const AZStd::string& /*type*/, const AZStd::string& /*path*/)
+    {
+        return false;
+    }
+
+    bool NullBackend::NullEntityMirror::ReadResourceProperties(
+        const AZStd::string& /*type*/, const AZStd::string& /*path*/, PropertyBag& /*out*/)
+    {
+        return false;
+    }
+
+    bool NullBackend::NullEntityMirror::WriteResourceProperties(
+        const AZStd::string& /*type*/, const AZStd::string& /*path*/, const PropertyBag& /*bag*/)
+    {
+        return false;
     }
 
     // --- NullAssetSource ---
@@ -135,10 +196,6 @@ namespace CrossEngineEditor
                     entry.m_path = childPath.String();
                     entry.m_displayName = name;
                     entry.m_isFolder = !isFile;
-                    if (isFile)
-                    {
-                        entry.m_extension = childPath.Extension().String();
-                    }
                     out.push_back(AZStd::move(entry));
                     return true;
                 });
@@ -173,16 +230,5 @@ namespace CrossEngineEditor
             return;
         }
         EnumerateFolder(parent.m_path, out);
-    }
-
-    QIcon NullBackend::NullAssetSource::GetThumbnail(const AssetEntryInfo& entry)
-    {
-        // File-type icons from the platform (KISS); rendered previews are a real-backend job.
-        QFileIconProvider provider;
-        if (entry.m_isFolder)
-        {
-            return provider.icon(QFileIconProvider::Folder);
-        }
-        return provider.icon(QFileInfo(QString::fromUtf8(entry.m_path.c_str())));
     }
 } // namespace CrossEngineEditor

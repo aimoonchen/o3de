@@ -116,7 +116,7 @@ namespace CrossEngineEditor
     void CrossEngineEditorApplication::CreateReflectionManager()
     {
         ToolsApplication::CreateReflectionManager();
-        // EditContext drives the reflection-based Inspector (plan §2, Unity SerializedObject equivalent).
+        // EditContext drives the reflection-based Inspector (Plan §B4, Unity SerializedObject equivalent).
         GetSerializeContext()->CreateEditContext();
     }
 
@@ -125,7 +125,7 @@ namespace CrossEngineEditor
         ToolsApplication::StartCommon(systemEntity);
 
         // Register the mirror component descriptor so it can be added to mirror entities and
-        // shown in the Inspector (plan section 3.1). The descriptor drives reflection (its
+        // shown in the Inspector (Plan §B4). The descriptor drives reflection (its
         // Reflect() runs via the standard descriptor path, not a manual call).
         RegisterComponentDescriptor(EngineNodeComponent::CreateDescriptor());
 
@@ -135,13 +135,13 @@ namespace CrossEngineEditor
 
         // Register the engine backend first so the main window can wire the viewport to its
         // scene renderer while building panels. The backend is chosen by --backend on the
-        // command line (plan section 6.1): rbfx | godot | diligent | null. Unavailable choices
+        // command line (Plan §B1): rbfx | godot | diligent | null. Unavailable choices
         // (submodule not built) fall back to the best compiled-in option. --project <path>
         // selects the engine project to edit and is forwarded via BackendInitParams.
         m_backend = CreateBackendFromCommandLine();
         AZ::Interface<IEngineBackend>::Register(m_backend.get());
 
-        // Bring the engine runtime up for the selected project (plan section 6.1). Surface
+        // Bring the engine runtime up for the selected project (Plan §B1). Surface
         // creation still flows through ISceneRenderer signals; this readies the entity mirror
         // and asset source. A failure is non-fatal - the shell keeps running on the empty
         // contracts so the editor UI still comes up.
@@ -157,10 +157,10 @@ namespace CrossEngineEditor
         }
 
         // Bridge editor edits back to the engine object model and pull engine objects in
-        // (plan §6 阶段4 / C6). Connects to the standard transform/property buses.
+        // (Plan §B4 / A6 C6). Connects to the standard transform/property buses.
         m_mirrorBridge = AZStd::make_unique<EntityMirrorBridge>();
 
-        m_mainWindow = new EditorMainWindow();
+        m_mainWindow = new EditorMainWindow(m_mirrorBridge.get());
 
         // Wrap the main window like the native O3DE editor does (CryEdit.cpp:1537-1543). Without
         // the wrapper the window keeps the native Windows title bar: its light-theme color clashes
@@ -181,7 +181,7 @@ namespace CrossEngineEditor
         // Install our viewport interaction handler. Unlike the engine default
         // (EditorDefaultSelection + EditorTransformComponentSelection), this keeps entity
         // picking but replaces the transform gizmos with our self-drawn themed gizmos (route B,
-        // plan §9). Selecting an entity now produces our gizmos, not the engine's.
+        // Plan §B7). Selecting an entity now produces our gizmos, not the engine's.
         AzToolsFramework::EditorInteractionSystemViewportSelectionRequestBus::Event(
             AzToolsFramework::GetEntityContextId(),
             &AzToolsFramework::EditorInteractionSystemViewportSelectionRequestBus::Events::SetHandler,
@@ -277,7 +277,12 @@ namespace CrossEngineEditor
 
     void CrossEngineEditorApplication::BrowseForAssets(AzToolsFramework::AssetBrowser::AssetSelectionModel& /*selection*/)
     {
-        // Asset picking arrives with the asset source contract (plan §6 阶段4 / C8).
+        // v1 opens the Asset Browser dock without consuming the selection model
+        // (no asset picking pipeline yet, rbfx_migration.md §2.8).
+        if (m_mainWindow)
+        {
+            m_mainWindow->ShowAssetBrowser();
+        }
     }
 
     void CrossEngineEditorApplication::CreateNewLevel()
@@ -338,7 +343,7 @@ namespace CrossEngineEditor
         // input (incl. WM_MOUSEMOVE) is drained by Qt's own dispatcher below - matching the native
         // O3DE editor, which does zero PeekMessage/DispatchMessage in OnIdle. A former hand-written
         // Win32 pump here double-pumped the queue and spun hundreds of moves/frame during orbit; the
-        // real per-move fix is EditorViewportWidget::ApplyPendingMouseMove. See frame_review.md.
+        // real per-move fix is EditorViewportWidget::ApplyPendingMouseMove (Progress.md 修复13).
         {
             CEE_PROFILE_SCOPE("Idle::TickSystem");
             TickSystem();
@@ -351,7 +356,7 @@ namespace CrossEngineEditor
         // Single main loop (Unreal/Godot/rbfx all render as one step of one loop, presenting once per
         // frame). The idle loop spins fast (~1 ms) to keep O3DE SystemTick / Qt input responsive; the
         // render frame is gated to ~60 fps by this SINGLE throttle - the sole cadence (not redundant
-        // with vsync: Godot presents on this thread with vsync OFF, PROGRESS §11/§12). Order matters:
+        // with vsync: Godot presents on this thread with vsync OFF, Progress.md 修复11/修复12). Order matters:
         // TickRender FIRST (camera + overlay; rbfx presents in EndOverlayFrame), THEN backend->Tick
         // (Godot's iteration() presents with the just-submitted overlay). One present per backend/frame.
         constexpr float k_frameIntervalSeconds = 1.0f / 60.0f;

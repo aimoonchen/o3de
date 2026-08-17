@@ -7,13 +7,13 @@
 #pragma once
 
 //! Coordinate-system conversion between the O3DE editor space and a target engine
-//! space (final plan section 5). One place, pure math, engine-agnostic.
+//! space (Plan §B6). One place, pure math, engine-agnostic.
 //!
 //! The BackendAPI boundary is ALWAYS O3DE convention: Z-up, right-handed, metres.
 //! Each backend converts at its own edge using the functions below, so the shell and
 //! the manipulators never see engine-specific axes.
 //!
-//! Basis mapping (plan section 5, verified against I:\rbfx / I:\godot checkouts):
+//! Basis mapping (Plan §B6, verified against I:\rbfx / I:\godot checkouts):
 //!
 //!   O3DE (Z-up, RH, +Y forward)  ->  rbfx  (Y-up, LH, +Z forward):   pos [x, z,  y]
 //!   O3DE (Z-up, RH, +Y forward)  ->  Godot (Y-up, RH, -Z forward):   pos [x, z, -y]
@@ -82,7 +82,7 @@ namespace CrossEngineEditor
         }
 
         //! Whole O3DE transform (rotation + translation) -> engine transform. Scale is
-        //! 1:1 (plan section 5) and left to the caller's uniform-scale handling.
+        //! 1:1 (Plan §B6) and left to the caller's uniform-scale handling.
         static void TransformToEngine(
             EngineSpace space, const AZ::Transform& o3de, AZ::Vector3& outPos, AZ::Quaternion& outRot)
         {
@@ -100,7 +100,7 @@ namespace CrossEngineEditor
 
         //! O3DE transform -> engine "raw 12" layout (basis 3x3 as three row-major rows, then the
         //! origin x,y,z), i.e. the exact byte layout of a Godot Transform3D. This is the single
-        //! home for that conversion (plan §5, "one place, pure math"); backends fill the engine's
+        //! home for that conversion (Plan §B6, "one place, pure math"); backends fill the engine's
         //! transform Variant from out12 without reimplementing the basis change.
         //!
         //! Done as one 3x3 similarity of the rotation basis (C * R * C^T) plus C applied to the
@@ -140,7 +140,7 @@ namespace CrossEngineEditor
         //! Engine world AABB -> O3DE world AABB. An axis-aligned box is no longer axis-aligned
         //! after the basis change (the +/-90 deg rotation about X tilts it), so we transform all
         //! eight corners and rebuild the enclosing box. Pure static math, exercised by the two
-        //! engines' end-to-end picking acceptance (plan §5, no separate test target).
+        //! engines' end-to-end picking acceptance (Plan §B6, no separate test target).
         static AZ::Aabb ConvertAabb(EngineSpace space, const AZ::Aabb& engineAabb)
         {
             if (!engineAabb.IsValid())

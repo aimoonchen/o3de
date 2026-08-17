@@ -24,7 +24,7 @@ namespace CrossEngineEditor
         : QWindow(parent)
     {
         // Declaring the surface type is the crux of the design: Qt does NOT allocate a
-        // QBackingStore and does NOT create an OpenGL context for a GPU surface (§2.1).
+        // QBackingStore and does NOT create an OpenGL context for a GPU surface (Plan §B2).
         setSurfaceType(type);
 
         // IMPROVEMENT: a devicePixelRatio change (dragging the window between a HiDPI and an SDR
@@ -42,7 +42,7 @@ namespace CrossEngineEditor
             });
 
         // Pause the frame loop while the surface is hidden (dock tab switch / auto-hide) so we
-        // stop presenting 60Hz to an invisible surface and wasting GPU (§2.14).
+        // stop presenting 60Hz to an invisible surface and wasting GPU (Plan §B3).
         connect(this, &QWindow::visibleChanged, this,
             [this](bool visible)
             {
@@ -143,7 +143,7 @@ namespace CrossEngineEditor
     void EngineViewportWindow::focusInEvent(QFocusEvent* event)
     {
         QWindow::focusInEvent(event);
-        Q_EMIT FocusChanged(true); // engine: resume camera input (§2.12).
+        Q_EMIT FocusChanged(true); // engine: resume camera input (Plan §B2).
     }
 
     void EngineViewportWindow::focusOutEvent(QFocusEvent* event)
@@ -162,7 +162,7 @@ namespace CrossEngineEditor
                 const auto* surfaceEvent = static_cast<QPlatformSurfaceEvent*>(event);
                 if (surfaceEvent->surfaceEventType() == QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
                 {
-                    // Fires for reparent/close/hide - more reliable than closeEvent (§2.8).
+                    // Fires for reparent/close/hide - more reliable than closeEvent (Plan §B2).
                     // Handlers connected DirectConnection release the swapchain before the
                     // native surface is gone. Also drop the cached handle - the next expose
                     // re-derives a fresh one.
@@ -198,7 +198,7 @@ namespace CrossEngineEditor
 
         // Drag & drop lands on the top-most native QWindow, not the container underneath, so the
         // container's setAcceptDrops is shadowed. Forward these so assets dropped into the viewport
-        // reach the controller (§2.15). The controller accepts the QDragMoveEvent to allow the drop.
+        // reach the controller (Plan §B2). The controller accepts the QDragMoveEvent to allow the drop.
         case QEvent::DragEnter:
         case QEvent::DragMove:
         case QEvent::DragLeave:

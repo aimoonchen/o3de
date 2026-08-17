@@ -6,16 +6,16 @@
 
 #pragma once
 
-//! C5 + C4-device: scene rendering surface and immediate-mode overlay primitives.
+//! Scene rendering surface and immediate-mode overlay primitives (Plan §A6 C4 渲染面 / §B2).
 //!
-//! Rendering/compositing model (plan §3.2, revised for the QWindow native-surface
+//! Rendering/compositing model (Plan §B2, revised for the QWindow native-surface
 //! design): the backend owns a swapchain bound to the viewport's native window surface
 //! (HWND / NSView+CAMetalLayer / xcb / wl_surface) and presents straight to it. In the
 //! same frame it draws the overlay line/triangle batches produced by GenericDebugDisplay.
 //! This keeps gizmo rendering fully engine-agnostic while the per-engine cost stays at
 //! ~3 primitives instead of the full ~70 DebugDisplayRequests methods.
 //!
-//! Threading (see new_editor_plan §3 + O3DE AuxGeom double-buffer precedent):
+//! Threading (see Plan §B8 B1 + O3DE AuxGeom double-buffer precedent):
 //!   * Overlay geometry MUST be produced on the Qt main thread (AzToolsFramework EBus /
 //!     manipulators are not thread-safe). The main thread pushes the geometry through the
 //!     Submit* primitives inside a BeginOverlayFrame()/EndOverlayFrame() bracket.
@@ -37,7 +37,7 @@ namespace CrossEngineEditor
 {
     //! Pack a physical-pixel viewport size into a single 64-bit word: (w << 32) | h.
     //! The reference design uses this so a cross-thread resize needs only a lock-free
-    //! std::atomic<uint64_t> (std::atomic<QSize> is not guaranteed lock-free). See plan §4.
+    //! std::atomic<uint64_t> (std::atomic<QSize> is not guaranteed lock-free). See Plan §B2.
     [[nodiscard]] constexpr uint64_t PackViewportSize(uint32_t width, uint32_t height) noexcept
     {
         return (static_cast<uint64_t>(width) << 32) | static_cast<uint64_t>(height);
@@ -58,20 +58,20 @@ namespace CrossEngineEditor
     public:
         virtual ~ISceneRenderer() = default;
 
-        // --- Native surface lifecycle (driven by EngineViewport signals, plan §2/§3) ---
+        // --- Native surface lifecycle (driven by EngineViewport signals, Plan §B2) ---
 
-        //! The native window surface was first exposed (plan §2.5). The backend creates its
+        //! The native window surface was first exposed (Plan §B2). The backend creates its
         //! swapchain bound to nativeWindowHandle at the given physical-pixel size and, if it
         //! renders on its own thread, starts that thread now.
         //!   nativeWindowHandle: HWND / NSView* / xcb_window_t / wl_surface* (see EngineViewport).
         virtual void OnSurfaceCreated(void* nativeWindowHandle, uint32_t width, uint32_t height) = 0;
 
         //! The native client area's physical size changed (resize OR devicePixelRatio hop,
-        //! plan §2.6). Cheap + non-blocking: a threaded backend stores the packed size and
+        //! Plan §B2). Cheap + non-blocking: a threaded backend stores the packed size and
         //! recreates the swapchain on its next frame; an inline backend may resize now.
         virtual void OnSurfaceResized(uint32_t width, uint32_t height) = 0;
 
-        //! The native surface is about to be destroyed (plan §2.8). Called on the Qt main
+        //! The native surface is about to be destroyed (Plan §B2). Called on the Qt main
         //! thread via a DirectConnection: the backend MUST synchronously stop its render
         //! thread, waitIdle and release the swapchain before returning.
         virtual void OnSurfaceAboutToBeDestroyed() = 0;

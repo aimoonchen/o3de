@@ -29,6 +29,10 @@ namespace CrossEngineEditor
         EnginePropertyString::Reflect(context);
         EnginePropertyVector3::Reflect(context);
         EnginePropertyColor::Reflect(context);
+        EnginePropertyQuaternion::Reflect(context);
+        EnginePropertyResourceRef::Reflect(context);
+        EnginePropertyResourceRefList::Reflect(context);
+        EnginePropertyVariant::Reflect(context);
     }
 
     void EnginePropertyBool::Reflect(AZ::ReflectContext* context)
@@ -83,6 +87,46 @@ namespace CrossEngineEditor
         {
             serialize->Class<EnginePropertyColor, EngineProperty>()->Version(1)->Field(
                 "value", &EnginePropertyColor::m_value);
+        }
+    }
+
+    void EnginePropertyQuaternion::Reflect(AZ::ReflectContext* context)
+    {
+        if (auto* serialize = azrtti_cast<AZ::SerializeContext*>(context))
+        {
+            serialize->Class<EnginePropertyQuaternion, EngineProperty>()->Version(1)->Field(
+                "value", &EnginePropertyQuaternion::m_value);
+        }
+    }
+
+    void EnginePropertyResourceRef::Reflect(AZ::ReflectContext* context)
+    {
+        if (auto* serialize = azrtti_cast<AZ::SerializeContext*>(context))
+        {
+            serialize->Class<EnginePropertyResourceRef, EngineProperty>()
+                ->Version(1)
+                ->Field("value", &EnginePropertyResourceRef::m_value)
+                ->Field("refType", &EnginePropertyResourceRef::m_refType);
+        }
+    }
+
+    void EnginePropertyResourceRefList::Reflect(AZ::ReflectContext* context)
+    {
+        if (auto* serialize = azrtti_cast<AZ::SerializeContext*>(context))
+        {
+            serialize->Class<EnginePropertyResourceRefList, EngineProperty>()
+                ->Version(1)
+                ->Field("value", &EnginePropertyResourceRefList::m_value)
+                ->Field("refType", &EnginePropertyResourceRefList::m_refType);
+        }
+    }
+
+    void EnginePropertyVariant::Reflect(AZ::ReflectContext* context)
+    {
+        if (auto* serialize = azrtti_cast<AZ::SerializeContext*>(context))
+        {
+            serialize->Class<EnginePropertyVariant, EngineProperty>()->Version(1)->Field(
+                "value", &EnginePropertyVariant::m_value);
         }
     }
 

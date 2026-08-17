@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Typed property container for the object mirror (final plan section 3.2).
+//! Typed property container for the object mirror (Plan §B4).
 //!
 //! An engine node's reflected properties are mirrored into a PropertyBag of concrete,
 //! typed EngineProperty objects. Each subclass holds ONE primitive that O3DE's property
@@ -24,6 +24,7 @@
 //! Godot get_property_list) and writes edited values back (rbfx SetAttribute / Godot set).
 
 #include <AzCore/Math/Color.h>
+#include <AzCore/Math/Quaternion.h>
 #include <AzCore/Math/Vector3.h>
 #include <AzCore/Memory/SystemAllocator.h>
 #include <AzCore/RTTI/RTTI.h>
@@ -132,6 +133,64 @@ namespace CrossEngineEditor
         AZ::Crc32 GetUIHandler() const override { return AZ::Edit::UIHandlers::Color; }
         const void* GetValueAddress() const override { return &m_value; }
         AZ::Color m_value = AZ::Color::CreateOne();
+    };
+
+    //! Quaternion property (rbfx VAR_QUATERNION / engine rotations). Edited through the stock
+    //! Quaternion handler, whose VectorInput widget shows and edits euler degrees while the
+    //! reflected value stays an AZ::Quaternion (QuaternionPropertyHandler, PropertyVectorCtrl).
+    class EnginePropertyQuaternion final : public EngineProperty
+    {
+    public:
+        AZ_RTTI(EnginePropertyQuaternion, "{A1B2C3D4-0007-4E5F-9A0B-1C2D3E4F5067}", EngineProperty);
+        AZ_CLASS_ALLOCATOR(EnginePropertyQuaternion, AZ::SystemAllocator);
+        static void Reflect(AZ::ReflectContext* context);
+        AZ::Crc32 GetUIHandler() const override { return AZ::Edit::UIHandlers::Quaternion; }
+        const void* GetValueAddress() const override { return &m_value; }
+        AZ::Quaternion m_value = AZ::Quaternion::CreateIdentity();
+    };
+
+    //! Resource reference property (rbfx VAR_RESOURCEREF / Godot Object(Resource) hints):
+    //! a path-like asset name. LineEdit keeps it plain-text; the batch-1 asset-drop/assign
+    //! flows are what fill it from the browser, so no custom handler is needed.
+    class EnginePropertyResourceRef final : public EngineProperty
+    {
+    public:
+        AZ_RTTI(EnginePropertyResourceRef, "{A1B2C3D4-0008-4E5F-9A0B-1C2D3E4F5068}", EngineProperty);
+        AZ_CLASS_ALLOCATOR(EnginePropertyResourceRef, AZ::SystemAllocator);
+        static void Reflect(AZ::ReflectContext* context);
+        AZ::Crc32 GetUIHandler() const override { return AZ::Edit::UIHandlers::LineEdit; }
+        const void* GetValueAddress() const override { return &m_value; }
+        AZStd::string m_value;  //!< Asset name as shown in the inspector.
+        AZStd::string m_refType; //!< Engine resource type (rbfx ResourceRef::type_ as string hash name).
+    };
+
+    //! Resource reference list property (rbfx VAR_RESOURCEREFLIST): one resource type plus a
+    //! list of asset names. Plain-text editing keeps the one-type list consistent (editing a
+    //! per-element mixed-type list needs a custom handler - not worth it for v1).
+    class EnginePropertyResourceRefList final : public EngineProperty
+    {
+    public:
+        AZ_RTTI(EnginePropertyResourceRefList, "{A1B2C3D4-0009-4E5F-9A0B-1C2D3E4F5069}", EngineProperty);
+        AZ_CLASS_ALLOCATOR(EnginePropertyResourceRefList, AZ::SystemAllocator);
+        static void Reflect(AZ::ReflectContext* context);
+        AZ::Crc32 GetUIHandler() const override { return AZ::Edit::UIHandlers::Default; }
+        const void* GetValueAddress() const override { return &m_value; }
+        AZStd::vector<AZStd::string> m_value;
+        AZStd::string m_refType; //!< Engine resource type shared by all entries.
+    };
+
+    //! Variant / opaque value property (rbfx VAR_VARIANTVECTOR/VAR_VARIANTMAP): shown as a
+    //! read-only human-readable summary. Editing engine-native nested types is out of scope
+    //! for v1 (KISS); this keeps them visible instead of silently dropped.
+    class EnginePropertyVariant final : public EngineProperty
+    {
+    public:
+        AZ_RTTI(EnginePropertyVariant, "{A1B2C3D4-000A-4E5F-9A0B-1C2D3E4F506A}", EngineProperty);
+        AZ_CLASS_ALLOCATOR(EnginePropertyVariant, AZ::SystemAllocator);
+        static void Reflect(AZ::ReflectContext* context);
+        AZ::Crc32 GetUIHandler() const override { return AZ::Edit::UIHandlers::Default; }
+        const void* GetValueAddress() const override { return &m_value; }
+        AZStd::string m_value; //!< Read-only summary (Variant::ToString).
     };
 
     //! The full set of mirrored properties for one engine node (one EngineNodeComponent).

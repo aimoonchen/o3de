@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Self-drawn transform gizmo manager (plan: route B, §9). Owns the low-level O3DE
+//! Self-drawn transform gizmo manager (Plan §B7, route B). Owns the low-level O3DE
 //! manipulators (Linear / Planar / Angular) but dresses them with our themed views
 //! (ArrowGizmoView / BoxGizmoView / PlaneGizmoView / DialGizmoView) so the look is 100%
 //! ours (Blender / Unreal) while picking / hover / drag stay in the reused framework.

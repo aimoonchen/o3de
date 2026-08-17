@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! rbfx (Urho3D fork) engine backend (final plan phase R1).
+//! rbfx (Urho3D fork) engine backend (rbfx_migration.md §3).
 //!
 //! Unified render model A: the editor owns the native window (HWND) and rbfx attaches to
 //! it. On OnSurfaceCreated the backend brings the engine up with the engine parameter
@@ -48,6 +48,7 @@
 AZ_PUSH_DISABLE_WARNING(4251 4244 4245 4267 4100 4263 4264 4265 4266, "-Wunknown-warning-option")
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/Engine/Engine.h>
+#include <Urho3D/Resource/Resource.h>
 #include <Urho3D/Scene/Scene.h>
 AZ_POP_DISABLE_WARNING
 #if defined(_MSC_VER)
@@ -139,8 +140,9 @@ namespace CrossEngineEditor
 
             void SyncToEditor(AZStd::vector<AZ::Entity*>& outEntities) override;
             void FinishSync() override;
+            void EnumerateObjectTypes(AZStd::vector<ObjectTypeInfo>& out) override;
             void OnEditorTransformChanged(AZ::EntityId entityId, const AZ::Transform& worldTm) override;
-            void OnEditorPropertyChanged(AZ::EntityId entityId, const PropertyChange& change) override;
+            void OnEditorPropertyChanged(AZ::EntityId entityId) override;
             AZ::EntityId CreateObject(const ObjectSpec& spec) override;
             void DestroyObject(AZ::EntityId entityId) override;
             bool SaveScene(const AZStd::string& path) override;
@@ -151,6 +153,26 @@ namespace CrossEngineEditor
                 const AZ::Vector3& rayDirection,
                 bool& outHit,
                 float& outDistance) const override;
+            bool RaycastScene(
+                const AZ::Vector3& rayOrigin,
+                const AZ::Vector3& rayDirection,
+                AZ::Vector3& outHitPoint,
+                AZ::Vector3& outHitNormal) const override;
+            bool CreatePrefabFromNodes(
+                const AZStd::vector<AZ::EntityId>& entityIds,
+                const AZStd::string& path) override;
+            bool AssignMaterial(AZ::EntityId entityId, const AZStd::string& assetPath, int slot) override;
+            bool AssignAnimation(AZ::EntityId entityId, const AZStd::string& assetPath) override;
+            AZStd::vector<AZ::u8> SerializeNodes(const AZStd::vector<AZ::EntityId>& entityIds) override;
+            bool PasteNodes(const AZStd::vector<AZ::u8>& data, AZ::EntityId parentId) override;
+
+            // Migration 批次 2 精简 (rbfx_migration.md §3.1).
+            bool SaveResource(
+                const AZStd::string& type, const AZStd::string& path) override;
+            bool ReadResourceProperties(
+                const AZStd::string& type, const AZStd::string& path, PropertyBag& out) override;
+            bool WriteResourceProperties(
+                const AZStd::string& type, const AZStd::string& path, const PropertyBag& bag) override;
 
         private:
             //! Build (or reuse) a mirror entity for one rbfx node and recurse its children.
@@ -169,6 +191,12 @@ namespace CrossEngineEditor
             //! handle survives that re-home. One truth source, no silent no-ops.
             Urho3D::Node* ResolveNode(AZ::EntityId entityId) const;
 
+            //! Resolve an engine resource by StringHash type name + resource name through the
+            //! cache (shared by the 批次 2 resource operations), or nullptr. path resolves via
+            //! ToResourceName (project-root strip), so AssetBrowser paths and resource names
+            //! both work.
+            Urho3D::Resource* ResolveResource(const AZStd::string& type, const AZStd::string& path) const;
+
             EngineState& m_state;
 
             //! Mirror entity id -> rbfx node id, populated during SyncToEditor and consumed only by
@@ -181,7 +209,7 @@ namespace CrossEngineEditor
             AZStd::unordered_map<AZ::EntityId, AZ::EntityId> m_pendingParent;
         };
 
-        //! Enumerates the rbfx project resource tree for the AssetBrowser (R1.6).
+        //! Enumerates the rbfx project resource tree for the AssetBrowser (rbfx_migration.md §2.5).
         class RbfxAssetSource final : public IAssetSource
         {
         public:
@@ -192,7 +220,6 @@ namespace CrossEngineEditor
 
             void EnumerateRoot(AZStd::vector<AssetEntryInfo>& out) override;
             void EnumerateChildren(const AssetEntryInfo& parent, AZStd::vector<AssetEntryInfo>& out) override;
-            QIcon GetThumbnail(const AssetEntryInfo& entry) override;
 
         private:
             //! List one directory's immediate children as asset entries (folders first).

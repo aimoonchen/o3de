@@ -6,6 +6,9 @@
 
 #include <Viewport/EditorViewportWidget.h>
 #include <Viewport/EngineViewport.h>
+#include <Application/EntityMirrorBridge.h>
+#include <BackendAPI/IEngineBackend.h>
+#include <BackendAPI/IEntityMirror.h>
 #include <BackendAPI/ISceneRenderer.h>
 
 #include <AzCore/Interface/Interface.h>
@@ -41,6 +44,26 @@ AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QVBoxLayout>
 #include <QWheelEvent>
 AZ_POP_DISABLE_WARNING
+
+namespace
+{
+    // Asset-drop whitelist (migration P0/P1, Plan §B8): only extensions the engine can actually
+    // use. .mdl = rbfx Model, .xml = scene/prefab XML (CreateObject tries Model first, then
+    // XMLFile); .mat/.ani assign to the current selection instead of spawning (migration L1).
+    // Everything else is ignored at DragEnter so the drop cursor stays honest.
+    bool IsWhitelistedAssetPath(const QString& path)
+    {
+        return path.endsWith(QStringLiteral(".mdl"), Qt::CaseInsensitive)
+            || path.endsWith(QStringLiteral(".xml"), Qt::CaseInsensitive)
+            || path.endsWith(QStringLiteral(".mat"), Qt::CaseInsensitive)
+            || path.endsWith(QStringLiteral(".material"), Qt::CaseInsensitive)
+            || path.endsWith(QStringLiteral(".ani"), Qt::CaseInsensitive);
+    }
+
+    //! Spawn distance when the drop ray hits nothing (empty sky): a fixed distance along the
+    //! ray from the camera, so the asset still lands somewhere sensible in view.
+    constexpr float k_spawnFallbackDistance = 10.0f;
+} // namespace
 
 namespace CrossEngineEditor
 {
@@ -167,9 +190,11 @@ namespace CrossEngineEditor
 #endif
     } // namespace
 
-    EditorViewportWidget::EditorViewportWidget(AzFramework::ViewportId viewportId, QWidget* parent)
+    EditorViewportWidget::EditorViewportWidget(
+        AzFramework::ViewportId viewportId, EntityMirrorBridge* mirrorBridge, QWidget* parent)
         : QWidget(parent)
         , m_viewportId(viewportId)
+        , m_mirrorBridge(mirrorBridge)
     {
         setObjectName(QStringLiteral("EditorViewport"));
         setFocusPolicy(Qt::StrongFocus);
@@ -195,7 +220,7 @@ namespace CrossEngineEditor
         m_labelOverlay->raise();
 
         // Surface lifecycle: create/resize/destroy the backend swapchain in lockstep with the
-        // native window (plan §2.5/§2.6/§2.8). AboutToClose is a synchronous DirectConnection so
+        // native window (Plan §B2). AboutToClose is a synchronous DirectConnection so
         // the swapchain is released before the surface is gone.
         connect(m_engineViewport, &EngineViewport::NativeReady, this, &EditorViewportWidget::OnNativeReady);
         connect(m_engineViewport, &EngineViewport::Resized, this, &EditorViewportWidget::OnSurfaceResized);
@@ -207,7 +232,7 @@ namespace CrossEngineEditor
                 HandleNativeInput(event);
             });
         // Track surface visibility so TickRender can skip presenting to a hidden surface (dock
-        // tab / auto-hide, §2.14). The single loop keeps calling TickRender either way; we just
+        // tab / auto-hide, Plan §B3). The single loop keeps calling TickRender either way; we just
         // gate the actual draw+present. Replaces the old QTimer start/stop.
         connect(m_engineViewport, &EngineViewport::VisibilityChanged, this,
             [this](bool visible)
@@ -499,12 +524,17 @@ namespace CrossEngineEditor
                 m_cameraController.HandleKey(*ke, /*pressed=*/false, ViewportSize());
                 break;
             }
-        // Drag & drop is forwarded from the native QWindow (EngineViewportWindow::event, §2.15).
-        // Accept the drag phases so Qt permits a drop over the surface, then dispatch the drop.
+        // Drag & drop is forwarded from the native QWindow (EngineViewportWindow::event, Plan §B2).
+        // DragEnter runs the spawn whitelist (Plan §B8): only a local-file drag with a loadable
+        // extension is accepted, so Qt never offers the drop for anything else. Both the
+        // AssetBrowser drag and Explorer's text/uri-list pack local-file URLs (verified
+        // AssetBrowserEntryUtils::ToMimeData, G:\o3de\Code\...\Entries\AssetBrowserEntryUtils.cpp:71).
         case QEvent::DragEnter:
             {
                 auto* de = static_cast<QDragEnterEvent*>(event);
-                if (de->mimeData() != nullptr)
+                const QMimeData* mime = de->mimeData();
+                if (mime != nullptr && !mime->urls().isEmpty()
+                    && IsWhitelistedAssetPath(mime->urls().first().toLocalFile()))
                 {
                     de->acceptProposedAction();
                 }
@@ -529,16 +559,62 @@ namespace CrossEngineEditor
 
     void EditorViewportWidget::HandleAssetDrop(QDropEvent* dropEvent)
     {
-        // v1: the asset instantiation pipeline is not wired yet, so translate the drop point to a
-        // world-space ray (the natural spawn location) and hand it out for backends to consume.
-        // Keeping the mechanics correct here means the drop lands instead of being silently
-        // swallowed by the native QWindow; wiring an actual spawn is a follow-up.
-        const AzFramework::ScreenPoint screenPoint = ToPhysicalScreenPoint(dropEvent->position());
-        const AZ::Vector3 worldPosition = AzFramework::ScreenToWorld(screenPoint, m_cameraState);
-        if (m_sceneRenderer != nullptr && dropEvent->mimeData() != nullptr)
+        // Migration P0: spawn the dropped asset as an engine object (plan §B9). The first local
+        // file URL is the single extraction path (see the DragEnter whitelist comment); the
+        // extension re-check here is defense in depth for drops routed past DragEnter.
+        if (dropEvent->mimeData() == nullptr || dropEvent->mimeData()->urls().isEmpty())
         {
-            // Placeholder hook: backends that support asset spawning can observe this later.
-            AZ_UNUSED(worldPosition);
+            return;
+        }
+
+        const QString assetPath = dropEvent->mimeData()->urls().first().toLocalFile();
+        if (!IsWhitelistedAssetPath(assetPath))
+        {
+            return;
+        }
+
+        // Material / animation drops assign to the first selected mirror entity (the rbfx
+        // editor's drop-onto-selection flow, migration L1). No engine object is created, so
+        // no mirror re-sync is needed.
+        if (m_mirrorBridge
+            && (assetPath.endsWith(QStringLiteral(".mat"), Qt::CaseInsensitive)
+                || assetPath.endsWith(QStringLiteral(".material"), Qt::CaseInsensitive)
+                || assetPath.endsWith(QStringLiteral(".ani"), Qt::CaseInsensitive)))
+        {
+            if (!m_mirrorBridge->AssignAssetToSelection(assetPath.toUtf8().constData()))
+            {
+                AZ_Warning("CrossEngineEditor", false,
+                    "Asset drop: nothing assigned from %s (no selected mirror entity or backend failure).",
+                    assetPath.toUtf8().constData());
+            }
+            return;
+        }
+
+        IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
+        if (!backend)
+        {
+            return;
+        }
+
+        // Ground placement: scene-wide precise raycast for the drop point; a miss (empty sky)
+        // falls back to a fixed distance along the ray so the drop still lands in view.
+        const AzFramework::ScreenPoint screenPoint = ToPhysicalScreenPoint(dropEvent->position());
+        const AzToolsFramework::ViewportInteraction::ProjectedViewportRay ray =
+            ViewportScreenToWorldRay(screenPoint);
+        AZ::Vector3 hitPoint = ray.m_origin + ray.m_direction * k_spawnFallbackDistance;
+        AZ::Vector3 hitNormal = AZ::Vector3::CreateAxisZ(); // unused for placement (identity rotation)
+        backend->GetEntityMirror().RaycastScene(ray.m_origin, ray.m_direction, hitPoint, hitNormal);
+
+        ObjectSpec spec;
+        spec.m_assetPath = assetPath.toUtf8().constData();
+        spec.m_transform = AZ::Transform::CreateTranslation(hitPoint);
+        backend->GetEntityMirror().CreateObject(spec);
+
+        // The mirror entity for the new object is built on the next full re-sync (rbfx
+        // CreateObject deliberately returns an invalid id).
+        if (m_mirrorBridge)
+        {
+            m_mirrorBridge->RefreshFromEngine();
         }
     }
 

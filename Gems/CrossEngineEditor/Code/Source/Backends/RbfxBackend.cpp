@@ -17,6 +17,7 @@
 #include <AzCore/Math/Transform.h>
 #include <AzCore/Math/Vector3.h>
 #include <AzCore/Math/MathUtils.h>
+#include <AzCore/std/sort.h>
 
 #include <cmath>
 #include <limits>
@@ -34,19 +35,29 @@ AZ_POP_DISABLE_WARNING
 AZ_PUSH_DISABLE_WARNING(4251 4244 4245 4267 4100 4263 4264 4265 4266, "-Wunknown-warning-option")
 #include <Urho3D/Core/Variant.h>
 #include <Urho3D/Core/Attribute.h>
+#include <Urho3D/Core/ObjectReflection.h>
 #include <Urho3D/Engine/EngineDefs.h>
+#include <Urho3D/Graphics/AnimationController.h>
 #include <Urho3D/Graphics/Camera.h>
 #include <Urho3D/Graphics/DebugRenderer.h>
 #include <Urho3D/Graphics/Drawable.h>
+#include <Urho3D/Graphics/Material.h>
+#include <Urho3D/Graphics/Model.h>
 #include <Urho3D/Graphics/Octree.h>
 #include <Urho3D/Graphics/OctreeQuery.h>
 #include <Urho3D/Graphics/Renderer.h>
+#include <Urho3D/Graphics/Skybox.h>
+#include <Urho3D/Graphics/StaticModel.h>
 #include <Urho3D/Graphics/Viewport.h>
 #include <Urho3D/IO/File.h>
+#include <Urho3D/IO/VectorBuffer.h>
 #include <Urho3D/Math/Color.h>
 #include <Urho3D/Math/Quaternion.h>
 #include <Urho3D/Math/Ray.h>
+#include <Urho3D/Math/StringHash.h>
 #include <Urho3D/Math/Vector3.h>
+#include <Urho3D/Resource/ResourceCache.h>
+#include <Urho3D/Resource/XMLFile.h>
 #include <Urho3D/Scene/Node.h>
 #include <Urho3D/Scene/Serializable.h>
 AZ_POP_DISABLE_WARNING
@@ -79,10 +90,28 @@ namespace CrossEngineEditor
             return Urho3D::Color(c.GetR(), c.GetG(), c.GetB(), c.GetA());
         }
 
+        //! Normalize an absolute editor-side asset path to an rbfx resource name (relative to
+        //! the resource dirs). If the path sits under the project root, strip that prefix so the
+        //! engine resolves it through the resource cache; otherwise pass it through unchanged.
+        //! Used by the batch-1 assign/spawn paths.
+        AZStd::string ToResourceName(const AZStd::string& assetPath, const AZStd::string& projectRoot)
+        {
+            if (!projectRoot.empty() && assetPath.compare(0, projectRoot.size(), projectRoot) == 0)
+            {
+                AZStd::string name = assetPath.substr(projectRoot.size());
+                while (!name.empty() && (name.front() == '/' || name.front() == '\\'))
+                {
+                    name.erase(name.begin());
+                }
+                return name;
+            }
+            return assetPath;
+        }
+
         //! Attributes that duplicate what the editor already owns via the standard
         //! TransformComponent (world transform) or the AZ::Entity name, or the enabled flag the
         //! Outliner manages. Mirroring them into the property bag would create a second, unsynced
-        //! editing path that fights the gizmo/Outliner, so they are skipped (plan §3.2: the
+        //! editing path that fights the gizmo/Outliner, so they are skipped (Plan §B4: the
         //! transform is edited via the gizmo and must not be duplicated).
         bool IsShadowedByEditor(const ea::string& attrName)
         {
@@ -90,12 +119,12 @@ namespace CrossEngineEditor
                 attrName == "Name" || attrName == "Is Enabled";
         }
 
-        //! Map an rbfx attribute value to a typed EngineProperty (plan section 3.2).
+        //! Map an rbfx attribute value to a typed EngineProperty (Plan §B4).
         //! Returns nullptr for types the editor grid has no stock control for (skipped).
         EngineProperty* MakeProperty(const Urho3D::AttributeInfo& info, const Urho3D::Variant& value)
         {
             const AZStd::string name(info.name_.c_str());
-            // AM_READONLY / AM_NOEDIT attributes are shown but not editable (plan §3.2 m_readOnly),
+            // AM_READONLY / AM_NOEDIT attributes are shown but not editable (Plan §B4 m_readOnly),
             // matching the Godot backend which honours PROPERTY_USAGE_READ_ONLY.
             const bool readOnly = (info.mode_ & Urho3D::AM_READONLY) || (info.mode_ & Urho3D::AM_NOEDIT);
 
@@ -167,62 +196,133 @@ namespace CrossEngineEditor
                     result = p;
                     break;
                 }
+            case Urho3D::VAR_QUATERNION:
+                {
+                    auto* p = aznew EnginePropertyQuaternion();
+                    const Urho3D::Quaternion& q = value.GetQuaternion();
+                    p->m_value = AZ::Quaternion(q.x_, q.y_, q.z_, q.w_);
+                    result = p;
+                    break;
+                }
+            case Urho3D::VAR_RESOURCEREF:
+                {
+                    auto* p = aznew EnginePropertyResourceRef();
+                    const Urho3D::ResourceRef& ref = value.GetResourceRef();
+                    p->m_value = AZStd::string(ref.name_.c_str());
+                    p->m_refType = AZStd::string(ref.type_.ToString().c_str());
+                    result = p;
+                    break;
+                }
+            case Urho3D::VAR_RESOURCEREFLIST:
+                {
+                    auto* p = aznew EnginePropertyResourceRefList();
+                    const Urho3D::ResourceRefList& refs = value.GetResourceRefList();
+                    for (const ea::string& resName : refs.names_)
+                    {
+                        p->m_value.emplace_back(resName.c_str());
+                    }
+                    p->m_refType = AZStd::string(refs.type_.ToString().c_str());
+                    result = p;
+                    break;
+                }
+            case Urho3D::VAR_VARIANTVECTOR:
+            case Urho3D::VAR_VARIANTMAP:
+                {
+                    // Nested engine-native types have no stock grid control; show a read-only
+                    // summary so the data stays visible instead of silently dropped (KISS: no
+                    // custom handler for v1).
+                    auto* p = aznew EnginePropertyVariant();
+                    p->m_value = AZStd::string(value.ToString().c_str());
+                    p->m_readOnly = true;
+                    result = p;
+                    break;
+                }
             default:
                 return nullptr; // Type without a stock grid control; skipped in v1.
             }
 
             result->m_name = name;
-            result->m_readOnly = readOnly;
+            // The Variant cases force read-only themselves; a normal attribute-mode read-only
+            // must not undo that.
+            result->m_readOnly = readOnly || result->m_readOnly;
             return result;
         }
 
-        //! Push an edited EngineProperty value back into an rbfx attribute by index, preserving the
-        //! engine's declared Variant type. The attribute's declared type (not the O3DE grid's
-        //! widened type) drives the constructed Variant so 64-bit ints / doubles are not truncated
-        //! to int / float on write-back.
-        void WriteProperty(
-            Urho3D::Serializable* node, unsigned index, const Urho3D::AttributeInfo& info, const EngineProperty* prop)
+        //! Convert an edited EngineProperty back to an rbfx Variant, preserving the engine's
+        //! declared Variant type. The declared type (not the O3DE grid's widened type) drives the
+        //! constructed Variant so 64-bit ints / doubles are not truncated to int / float on
+        //! write-back. Returns Variant::EMPTY for read-only summary properties (nothing to write).
+        Urho3D::Variant EnginePropertyToVariant(
+            const Urho3D::VariantType declaredType, const EngineProperty* prop)
         {
             if (auto* b = azrtti_cast<const EnginePropertyBool*>(prop))
             {
-                node->SetAttribute(index, Urho3D::Variant(b->m_value));
+                return Urho3D::Variant(b->m_value);
             }
             else if (auto* i = azrtti_cast<const EnginePropertyInt*>(prop))
             {
                 // VAR_INT is 32-bit in rbfx; VAR_INT64 keeps full width.
-                if (info.type_ == Urho3D::VAR_INT64)
+                if (declaredType == Urho3D::VAR_INT64)
                 {
-                    node->SetAttribute(index, Urho3D::Variant(static_cast<long long>(i->m_value)));
+                    return Urho3D::Variant(static_cast<long long>(i->m_value));
                 }
-                else
-                {
-                    node->SetAttribute(index, Urho3D::Variant(static_cast<int>(i->m_value)));
-                }
+                return Urho3D::Variant(static_cast<int>(i->m_value));
             }
             else if (auto* d = azrtti_cast<const EnginePropertyDouble*>(prop))
             {
-                if (info.type_ == Urho3D::VAR_DOUBLE)
+                if (declaredType == Urho3D::VAR_DOUBLE)
                 {
-                    node->SetAttribute(index, Urho3D::Variant(d->m_value));
+                    return Urho3D::Variant(d->m_value);
                 }
-                else
-                {
-                    node->SetAttribute(index, Urho3D::Variant(static_cast<float>(d->m_value)));
-                }
+                return Urho3D::Variant(static_cast<float>(d->m_value));
             }
             else if (auto* s = azrtti_cast<const EnginePropertyString*>(prop))
             {
-                node->SetAttribute(index, Urho3D::Variant(ea::string(s->m_value.c_str())));
+                return Urho3D::Variant(ea::string(s->m_value.c_str()));
             }
             else if (auto* v = azrtti_cast<const EnginePropertyVector3*>(prop))
             {
-                node->SetAttribute(
-                    index, Urho3D::Variant(Urho3D::Vector3(v->m_value.GetX(), v->m_value.GetY(), v->m_value.GetZ())));
+                return Urho3D::Variant(
+                    Urho3D::Vector3(v->m_value.GetX(), v->m_value.GetY(), v->m_value.GetZ()));
             }
             else if (auto* c = azrtti_cast<const EnginePropertyColor*>(prop))
             {
-                node->SetAttribute(index, Urho3D::Variant(ToRbfxColor(c->m_value)));
+                return Urho3D::Variant(ToRbfxColor(c->m_value));
             }
+            else if (auto* q = azrtti_cast<const EnginePropertyQuaternion*>(prop))
+            {
+                return Urho3D::Variant(
+                    Urho3D::Quaternion(
+                        q->m_value.GetX(), q->m_value.GetY(), q->m_value.GetZ(), q->m_value.GetW()));
+            }
+            else if (auto* r = azrtti_cast<const EnginePropertyResourceRef*>(prop))
+            {
+                Urho3D::ResourceRef ref;
+                ref.type_ = Urho3D::StringHash(ea::string(r->m_refType.c_str()));
+                ref.name_ = ea::string(r->m_value.c_str());
+                return Urho3D::Variant(ref);
+            }
+            else if (auto* rl = azrtti_cast<const EnginePropertyResourceRefList*>(prop))
+            {
+                // ResourceRefList is one type + a list of names (rbfx Variant.h), so the edited
+                // names keep the type the engine declared (type-preserving write-back).
+                Urho3D::StringVector names;
+                for (const AZStd::string& resName : rl->m_value)
+                {
+                    names.push_back(ea::string(resName.c_str()));
+                }
+                return Urho3D::Variant(
+                    Urho3D::ResourceRefList(Urho3D::StringHash(ea::string(rl->m_refType.c_str())), names));
+            }
+            // EnginePropertyVariant is read-only; nothing to write back.
+            return Urho3D::Variant::EMPTY;
+        }
+
+        //! Push an edited EngineProperty value back into an rbfx attribute by index.
+        void WriteProperty(
+            Urho3D::Serializable* node, unsigned index, const Urho3D::AttributeInfo& info, const EngineProperty* prop)
+        {
+            node->SetAttribute(index, EnginePropertyToVariant(info.type_, prop));
         }
     } // namespace
 
@@ -303,8 +403,10 @@ namespace CrossEngineEditor
         m_state.m_scene = Urho3D::MakeShared<Urho3D::Scene>(m_state.m_context);
         m_state.m_scene->CreateComponent<Urho3D::Octree>();
         m_state.m_debug = m_state.m_scene->CreateComponent<Urho3D::DebugRenderer>();
+        m_state.m_debug->SetTemporary(true); // Editor-owned: never saved into user scenes.
 
         m_state.m_cameraNode = m_state.m_scene->CreateChild("__EditorCamera");
+        m_state.m_cameraNode->SetTemporary(true); // Editor-owned: SaveXML skips it (and its subtree).
         m_state.m_camera = m_state.m_cameraNode->CreateComponent<Urho3D::Camera>();
 
         if (auto* renderer = m_state.m_context->GetSubsystem<Urho3D::Renderer>())
@@ -314,7 +416,7 @@ namespace CrossEngineEditor
             renderer->SetViewport(0, viewport);
         }
 
-        // Open the requested scene (plan section 3.2). LoadFile takes a resource-relative name
+        // Open the requested scene (rbfx_migration.md §4). LoadFile takes a resource-relative name
         // (e.g. "Scenes/RenderingShowcase_0.xml") resolved through EP_RESOURCE_PREFIX_PATHS +
         // the default "CoreData;Cache;Data" resource paths, and handles both .xml and .scene.
         // The editor camera child is recreated afterwards because LoadFile clears the scene.
@@ -330,8 +432,10 @@ namespace CrossEngineEditor
                 m_state.m_scene->CreateComponent<Urho3D::Octree>();
             }
             m_state.m_debug = m_state.m_scene->GetOrCreateComponent<Urho3D::DebugRenderer>();
+            m_state.m_debug->SetTemporary(true); // Editor-owned: never saved into user scenes.
 
             m_state.m_cameraNode = m_state.m_scene->CreateChild("__EditorCamera");
+            m_state.m_cameraNode->SetTemporary(true); // Editor-owned: SaveXML skips it (and its subtree).
             m_state.m_camera = m_state.m_cameraNode->CreateComponent<Urho3D::Camera>();
             if (auto* renderer = m_state.m_context->GetSubsystem<Urho3D::Renderer>())
             {
@@ -369,7 +473,7 @@ namespace CrossEngineEditor
         m_frameOpen = m_state.m_initialized && m_state.m_debug != nullptr;
         m_depthTest = true;
 
-        // Drive the rbfx editor camera from the editor's view matrix (plan section 2.4). The
+        // Drive the rbfx editor camera from the editor's view matrix (Plan §B2). The
         // camera world transform is the inverse of world->view; convert it to rbfx space and
         // set the camera node so rbfx renders the scene through the editor camera. The
         // projection (FOV/near/far) is taken from view->clip.
@@ -540,7 +644,7 @@ namespace CrossEngineEditor
         bool& outHit,
         float& outDistance) const
     {
-        // Precise triangle-level pick for THIS node only (pick_final_plan §8 seam). Fixes the
+        // Precise triangle-level pick for THIS node only (Plan §B5b seam). Fixes the
         // rotated-mesh problem where a big model's world-axis-aligned AABB inflates to cover empty
         // space and steals clicks from smaller objects behind it (e.g. "Geometry 100", a scale-100
         // rotated teapot). We test the ray against the node's own drawables' triangles instead of
@@ -622,7 +726,7 @@ namespace CrossEngineEditor
         {
             const Urho3D::AttributeInfo& info = attrs->at(i);
             // Skip attributes the editor already owns (world transform via the gizmo, entity name),
-            // so there is no second, unsynced editing path (plan §3.2).
+            // so there is no second, unsynced editing path (Plan §B4).
             if (IsShadowedByEditor(info.name_))
             {
                 continue;
@@ -643,7 +747,7 @@ namespace CrossEngineEditor
             return;
         }
 
-        // One rbfx node = one AZ::Entity carrying an EngineNodeComponent (plan section 3.1).
+        // One rbfx node = one AZ::Entity carrying an EngineNodeComponent (Plan §B4).
         // The required editor components (incl. TransformComponent) are added by the shell.
         AZ::Entity* entity = aznew AZ::Entity(node->GetName().empty() ? "Node" : node->GetName().c_str());
 
@@ -728,7 +832,7 @@ namespace CrossEngineEditor
         {
             return;
         }
-        // Editor edits arrive in O3DE space; convert to rbfx at the edge (plan section 5).
+        // Editor edits arrive in O3DE space; convert to rbfx at the edge (Plan §B6).
         AZ::Vector3 pos;
         AZ::Quaternion rot;
         EngineTransformConverter::TransformToEngine(k_space, worldTm, pos, rot);
@@ -736,7 +840,7 @@ namespace CrossEngineEditor
         node->SetWorldRotation(Urho3D::Quaternion(rot.GetW(), rot.GetX(), rot.GetY(), rot.GetZ()));
     }
 
-    void RbfxBackend::RbfxEntityMirror::OnEditorPropertyChanged(AZ::EntityId entityId, const PropertyChange& /*change*/)
+    void RbfxBackend::RbfxEntityMirror::OnEditorPropertyChanged(AZ::EntityId entityId)
     {
         Urho3D::Node* node = ResolveNode(entityId);
         if (!node)
@@ -744,8 +848,8 @@ namespace CrossEngineEditor
             return;
         }
 
-        // Empty path (the property bus only identifies the component): re-push every mirrored
-        // property to its rbfx attribute by matching name (plan section 3.4).
+        // The property bus only identifies the component: re-push every mirrored property to
+        // its rbfx attribute by matching name (Plan §B4).
         AZ::Entity* entity = nullptr;
         AZ::ComponentApplicationBus::BroadcastResult(entity, &AZ::ComponentApplicationBus::Events::FindEntity, entityId);
         if (!entity)
@@ -789,8 +893,54 @@ namespace CrossEngineEditor
             return AZ::EntityId();
         }
 
+        // A typeId names an engine object type (ObjectReflection category member, see
+        // EnumerateObjectTypes): create the node and give it a component of that type.
+        // Empty typeId = plain node.
         Urho3D::Node* node = m_state.m_scene->CreateChild(
             spec.m_typeId.empty() ? "Node" : ea::string(spec.m_typeId.c_str()));
+        if (!spec.m_typeId.empty() && m_state.m_context)
+        {
+            node->CreateComponent(Urho3D::StringHash(ea::string(spec.m_typeId.c_str())));
+        }
+
+        // An asset path (asset drop / prefab spawn) loads the source onto the node: a Model via
+        // StaticModel, or a scene/prefab XML instanced under the node (the node stays as a
+        // predictable wrapper). Failure only warns - the node itself is still created.
+        if (!spec.m_assetPath.empty() && m_state.m_context)
+        {
+            auto* cache = m_state.m_context->GetSubsystem<Urho3D::ResourceCache>();
+            if (cache)
+            {
+                const AZStd::string resourceName = ToResourceName(spec.m_assetPath, m_state.m_projectPath);
+                // GetResource returns cache-owned raw pointers in this rbfx build (not SharedPtr).
+                Urho3D::Model* model =
+                    cache->GetResource<Urho3D::Model>(ea::string(resourceName.c_str()), false);
+                if (model)
+                {
+                    auto* staticModel = node->CreateComponent<Urho3D::StaticModel>();
+                    staticModel->SetModel(model);
+                }
+                else
+                {
+                    Urho3D::XMLFile* prefab =
+                        cache->GetResource<Urho3D::XMLFile>(ea::string(resourceName.c_str()), false);
+                    if (prefab && prefab->GetRoot().NotNull())
+                    {
+                        Urho3D::Node* content = m_state.m_scene->InstantiateXML(
+                            prefab->GetRoot(), node->GetWorldPosition(), Urho3D::Quaternion::IDENTITY);
+                        if (content)
+                        {
+                            content->SetParent(node);
+                        }
+                    }
+                    else
+                    {
+                        AZ_Warning("CrossEngineEditor", false,
+                            "rbfx CreateObject: could not load model/prefab %s.", spec.m_assetPath.c_str());
+                    }
+                }
+            }
+        }
 
         // Place it using the requested O3DE transform, converted to rbfx.
         AZ::Vector3 pos;
@@ -801,9 +951,9 @@ namespace CrossEngineEditor
 
         // The engine node now exists; its mirror AZ::Entity is created on the next full
         // SyncToEditor (v1 re-mirrors the whole scene rather than incrementally adding one
-        // entity). NOTE: the shell does not yet trigger that re-sync from a create/delete (the
-        // create/delete UI is not wired in v1); returning an invalid id reflects that. A targeted
-        // single-entity add can be layered on later without changing the contract.
+        // entity). The shell triggers that re-sync from the create/delete UI (migration P0);
+        // returning an invalid id reflects that. A targeted single-entity add can be layered on
+        // later without changing the contract.
         return AZ::EntityId();
     }
 
@@ -818,7 +968,7 @@ namespace CrossEngineEditor
 
     bool RbfxBackend::RbfxEntityMirror::SaveScene(const AZStd::string& path)
     {
-        // Plan §3.7 + G1.5 parity: the rbfx native scene is the single source of truth. Save it
+        // Plan §B4: the rbfx native scene is the single source of truth. Save it
         // as XML to an absolute file (Scene::SaveXML(Serializer&) via a FILE_WRITE File). The
         // target is the caller path, else <projectPath>/<scenePath> (the file it was loaded from).
         if (!m_state.m_scene || !m_state.m_context)
@@ -857,11 +1007,487 @@ namespace CrossEngineEditor
         return ok;
     }
 
+    // ------------------------------------------------- migration 批次 1 (rbfx_migration.md §3.1)
+
+    void RbfxBackend::RbfxEntityMirror::EnumerateObjectTypes(AZStd::vector<ObjectTypeInfo>& out)
+    {
+        // rbfx's Context IS an ObjectReflectionRegistry (Context inherits it), and it groups
+        // the registered Serializable object types by category (Node, Light, Drawable,
+        // LogicComponent, ...); the Create menu shows one entry per type. Built-in types come
+        // pre-registered by the engine context.
+        if (!m_state.m_context)
+        {
+            return;
+        }
+
+        for (const auto& [category, types] : m_state.m_context->GetObjectCategories())
+        {
+            for (const Urho3D::StringHash typeId : types)
+            {
+                // Only types with an object factory can actually be created (CreateComponent
+                // resolves through the factory) - skip factory-less registrations so the menu
+                // never produces component-less nodes (same filter as the original editor's
+                // CreateComponentMenu).
+                const Urho3D::ObjectReflection* reflection = m_state.m_context->GetReflection(typeId);
+                if (!reflection || !reflection->HasObjectFactory())
+                {
+                    continue;
+                }
+                // StringHash::ToString() is the hex hash code, not a type name - resolve the
+                // registered name so CreateObject's StringHash(name) round-trips.
+                const AZStd::string typeName = m_state.m_context->GetTypeName(typeId).c_str();
+                ObjectTypeInfo info;
+                info.m_category = AZStd::string(category.c_str());
+                info.m_typeId = typeName;
+                info.m_displayName = typeName;
+                out.push_back(AZStd::move(info));
+            }
+        }
+        // Deterministic menu order (the engine-side map is unordered).
+        AZStd::sort(
+            out.begin(), out.end(), [](const ObjectTypeInfo& a, const ObjectTypeInfo& b)
+            {
+                if (a.m_category != b.m_category)
+                {
+                    return a.m_category < b.m_category;
+                }
+                return a.m_typeId < b.m_typeId;
+            });
+    }
+
+    bool RbfxBackend::RbfxEntityMirror::RaycastScene(
+        const AZ::Vector3& rayOrigin,
+        const AZ::Vector3& rayDirection,
+        AZ::Vector3& outHitPoint,
+        AZ::Vector3& outHitNormal) const
+    {
+        if (!m_state.m_scene)
+        {
+            return false;
+        }
+        auto* octree = m_state.m_scene->GetComponent<Urho3D::Octree>();
+        if (!octree)
+        {
+            return false;
+        }
+
+        Urho3D::Vector3 direction = ToRbfx(rayDirection);
+        if (direction.LengthSquared() < Urho3D::M_EPSILON)
+        {
+            return false; // Degenerate ray (caller bug guard).
+        }
+        direction.Normalize();
+
+        // All-results raycast so skybox hits can be skipped (a drop into empty sky must miss,
+        // not land on the sky dome). DRAWABLE_GEOMETRY already excludes lights and zones; the
+        // editor's grid/gizmo overlay is drawn by DebugRenderer straight through the render
+        // pipeline and never enters the octree, so it needs no exclusion here.
+        Urho3D::RayOctreeQuery query(
+            Urho3D::Ray(ToRbfx(rayOrigin), direction),
+            Urho3D::RAY_TRIANGLE,
+            Urho3D::M_INFINITY,
+            Urho3D::DRAWABLE_GEOMETRY,
+            Urho3D::DEFAULT_VIEWMASK);
+        octree->Raycast(query);
+
+        for (const Urho3D::RayQueryResult& result : query.result_)
+        {
+            if (!result.drawable_ || result.drawable_->IsInstanceOf<Urho3D::Skybox>())
+            {
+                continue;
+            }
+            outHitPoint = FromRbfx(result.position_);
+            outHitNormal = FromRbfx(result.normal_);
+            return true;
+        }
+        return false;
+    }
+
+    bool RbfxBackend::RbfxEntityMirror::CreatePrefabFromNodes(
+        const AZStd::vector<AZ::EntityId>& entityIds,
+        const AZStd::string& path)
+    {
+        // v1 (简): export the first selected node's subtree as an engine-native prefab (XML),
+        // matching the rbfx editor's single-node export.
+        if (entityIds.empty() || path.empty())
+        {
+            return false;
+        }
+        Urho3D::Node* node = ResolveNode(entityIds.front());
+        if (!node || !m_state.m_context)
+        {
+            return false;
+        }
+
+        Urho3D::File file(m_state.m_context, ea::string(path.c_str()), Urho3D::FILE_WRITE);
+        if (!file.IsOpen())
+        {
+            AZ_Warning("CrossEngineEditor", false,
+                "rbfx CreatePrefabFromNodes: could not open %s for write.", path.c_str());
+            return false;
+        }
+        const bool ok = node->SaveXML(file);
+        AZ_Warning("CrossEngineEditor", ok, "rbfx CreatePrefabFromNodes: SaveXML failed for %s.", path.c_str());
+        if (ok)
+        {
+            AZ_Printf("CrossEngineEditor", "rbfx CreatePrefabFromNodes: wrote %s\n", path.c_str());
+        }
+        return ok;
+    }
+
+    bool RbfxBackend::RbfxEntityMirror::AssignMaterial(
+        AZ::EntityId entityId, const AZStd::string& assetPath, int slot)
+    {
+        Urho3D::Node* node = ResolveNode(entityId);
+        if (!node || !m_state.m_context)
+        {
+            return false;
+        }
+
+        auto* cache = m_state.m_context->GetSubsystem<Urho3D::ResourceCache>();
+        if (!cache)
+        {
+            return false;
+        }
+        const AZStd::string resourceName = ToResourceName(assetPath, m_state.m_projectPath);
+        // GetResource returns a cache-owned raw pointer in this rbfx build (not SharedPtr).
+        Urho3D::Material* material =
+            cache->GetResource<Urho3D::Material>(ea::string(resourceName.c_str()));
+        if (!material)
+        {
+            AZ_Warning("CrossEngineEditor", false, "rbfx AssignMaterial: could not load %s.", assetPath.c_str());
+            return false;
+        }
+
+        // The model component is created on demand (the assign flow is what introduces
+        // materials onto plain nodes).
+        auto* model = node->GetComponent<Urho3D::StaticModel>();
+        if (!model)
+        {
+            model = node->CreateComponent<Urho3D::StaticModel>();
+        }
+        return model->SetMaterial(slot < 0 ? 0u : static_cast<unsigned>(slot), material);
+    }
+
+    bool RbfxBackend::RbfxEntityMirror::AssignAnimation(
+        AZ::EntityId entityId, const AZStd::string& assetPath)
+    {
+        Urho3D::Node* node = ResolveNode(entityId);
+        if (!node || !m_state.m_context)
+        {
+            return false;
+        }
+
+        // AnimationParameters resolves the animation through the resource cache by name; a
+        // failed load leaves GetAnimation() null.
+        const AZStd::string resourceName = ToResourceName(assetPath, m_state.m_projectPath);
+        Urho3D::AnimationParameters params(m_state.m_context.Get(), ea::string(resourceName.c_str()));
+        if (!params.GetAnimation())
+        {
+            AZ_Warning("CrossEngineEditor", false, "rbfx AssignAnimation: could not load %s.", assetPath.c_str());
+            return false;
+        }
+
+        auto* controller = node->GetComponent<Urho3D::AnimationController>();
+        if (!controller)
+        {
+            controller = node->CreateComponent<Urho3D::AnimationController>();
+        }
+        // Assign only - never auto-play in the editor. Playing would invalidate the bounds
+        // cache per animation frame while editing (plan §B5b). AddAnimation registers the
+        // state without starting it (PlayNew* = AddAnimation + play), and replacing the
+        // existing assignment keeps the scene serialization to one animation.
+        for (unsigned i = controller->GetNumAnimations(); i > 0; --i)
+        {
+            controller->RemoveAnimation(i - 1u);
+        }
+        params.Looped(true).Layer(0);
+        controller->AddAnimation(params);
+        return true;
+    }
+
+    AZStd::vector<AZ::u8> RbfxBackend::RbfxEntityMirror::SerializeNodes(
+        const AZStd::vector<AZ::EntityId>& entityIds)
+    {
+        // v1 (简): serialize the first selected node's subtree to XML bytes, matching the rbfx
+        // editor's own single-node clipboard.
+        if (entityIds.empty())
+        {
+            return {};
+        }
+        Urho3D::Node* node = ResolveNode(entityIds.front());
+        if (!node)
+        {
+            return {};
+        }
+
+        Urho3D::VectorBuffer buffer;
+        if (!node->SaveXML(buffer))
+        {
+            AZ_Warning("CrossEngineEditor", false, "rbfx SerializeNodes: SaveXML failed.");
+            return {};
+        }
+        const unsigned char* data = buffer.GetData();
+        const unsigned size = buffer.GetSize();
+        if (!data || size == 0)
+        {
+            return {};
+        }
+        return AZStd::vector<AZ::u8>(data, data + size);
+    }
+
+    bool RbfxBackend::RbfxEntityMirror::PasteNodes(
+        const AZStd::vector<AZ::u8>& data, AZ::EntityId parentId)
+    {
+        if (data.empty() || !m_state.m_scene || !m_state.m_context)
+        {
+            return false;
+        }
+
+        // Parse the clipboard XML into a standalone XMLFile, then let the scene instantiate the
+        // node subtree at the parent's world position; SetParent afterwards re-parents WITHOUT
+        // changing the world transform (Node::SetParent retains the world transform), so the
+        // pasted content keeps the drop placement. An invalid parentId (scene root) passes
+        // through without the ResolveNode warning.
+        Urho3D::XMLFile xml(m_state.m_context.Get());
+        if (!xml.FromString(ea::string(reinterpret_cast<const char*>(data.data()), data.size())) ||
+            !xml.GetRoot().NotNull())
+        {
+            AZ_Warning("CrossEngineEditor", false, "rbfx PasteNodes: clipboard XML did not parse.");
+            return false;
+        }
+
+        Urho3D::Node* parent = nullptr;
+        if (parentId.IsValid())
+        {
+            parent = ResolveNode(parentId);
+        }
+        Urho3D::Vector3 parentPos = parent ? parent->GetWorldPosition() : Urho3D::Vector3::ZERO;
+
+        Urho3D::Node* pasted =
+            m_state.m_scene->InstantiateXML(xml.GetRoot(), parentPos, Urho3D::Quaternion::IDENTITY);
+        if (!pasted)
+        {
+            AZ_Warning("CrossEngineEditor", false, "rbfx PasteNodes: InstantiateXML failed.");
+            return false;
+        }
+        if (parent)
+        {
+            pasted->SetParent(parent);
+        }
+        return true;
+    }
+
+    bool RbfxBackend::RbfxEntityMirror::SaveResource(
+        const AZStd::string& type, const AZStd::string& path)
+    {
+        // Persist the edited resource to its source file (rbfx_migration.md §3.3).
+        // WriteResourceProperties already pushed the panel's edits into the cached resource,
+        // so serializing the cached object writes them (Material::Save emits the XML
+        // "material" root). Path resolution mirrors SaveScene: an absolute path or one already
+        // under the project root passes through; anything else is a project-relative resource
+        // name and gets the root prefixed.
+        Urho3D::Resource* resource = ResolveResource(type, path);
+        if (!resource)
+        {
+            AZ_Warning("CrossEngineEditor", false, "rbfx SaveResource: %s not found.", path.c_str());
+            return false;
+        }
+
+        AZStd::string targetPath = path;
+        if (!m_state.m_projectPath.empty()
+            && path.compare(0, m_state.m_projectPath.size(), m_state.m_projectPath) != 0
+            && (path.size() < 2 || path[1] != ':'))
+        {
+            targetPath = m_state.m_projectPath;
+            if (targetPath.back() != '/' && targetPath.back() != '\\')
+            {
+                targetPath += '/';
+            }
+            targetPath += path;
+        }
+
+        Urho3D::File file(m_state.m_context, ea::string(targetPath.c_str()), Urho3D::FILE_WRITE);
+        if (!file.IsOpen())
+        {
+            AZ_Warning("CrossEngineEditor", false, "rbfx SaveResource: could not open %s for write.", path.c_str());
+            return false;
+        }
+        if (!resource->Save(file))
+        {
+            AZ_Warning("CrossEngineEditor", false, "rbfx SaveResource: %s failed to serialize.", path.c_str());
+            return false;
+        }
+        AZ_Printf("CrossEngineEditor", "rbfx SaveResource: wrote %s\n", targetPath.c_str());
+        return true;
+    }
+
+    Urho3D::Resource* RbfxBackend::RbfxEntityMirror::ResolveResource(
+        const AZStd::string& type, const AZStd::string& path) const
+    {
+        // Shared resolution for the 批次 2 resource operations: resolve through the cache by
+        // StringHash type name + resource name, which reuses an already-loaded resource and
+        // keeps it alive. path works both as an AssetBrowser absolute path (project-root prefix
+        // stripped by ToResourceName) and as a bare resource name.
+        if (!m_state.m_context)
+        {
+            return nullptr;
+        }
+        auto* cache = m_state.m_context->GetSubsystem<Urho3D::ResourceCache>();
+        if (!cache)
+        {
+            return nullptr;
+        }
+        const AZStd::string resourceName = ToResourceName(path, m_state.m_projectPath);
+        return cache->GetResource(
+            Urho3D::StringHash(ea::string(type.c_str())), ea::string(resourceName.c_str()), false);
+    }
+
+    bool RbfxBackend::RbfxEntityMirror::ReadResourceProperties(
+        const AZStd::string& type, const AZStd::string& path, PropertyBag& out)
+    {
+        // Migration 批次 2 L1 (rbfx_migration.md §3.3): reflect a resource's editable values into a PropertyBag.
+        // Verified in source: rbfx Resource is NOT Serializable (no GetAttributes), so the
+        // Serializable branch only fires for engine types that mix it in; the one live editable
+        // surface is Material's shader parameters (what the original MaterialEditor edits).
+        // Other types warn and open the panel empty.
+        Urho3D::Resource* resource = ResolveResource(type, path);
+        if (!resource)
+        {
+            AZ_Warning("CrossEngineEditor", false, "rbfx ReadResourceProperties: %s not found.", path.c_str());
+            return false;
+        }
+
+        if (auto* serializable = resource->Cast<Urho3D::Serializable>())
+        {
+            if (const ea::vector<Urho3D::AttributeInfo>* attributes = serializable->GetAttributes())
+            {
+                for (unsigned i = 0; i < attributes->size(); ++i)
+                {
+                    if (EngineProperty* prop = MakeProperty((*attributes)[i], serializable->GetAttribute(i)))
+                    {
+                        out.m_items.push_back(prop);
+                    }
+                }
+            }
+        }
+        else if (auto* material = resource->Cast<Urho3D::Material>())
+        {
+            for (const auto& entry : material->GetShaderParameters())
+            {
+                // Fabricate the AttributeInfo MakeProperty expects; the grid only reads
+                // name_/type_/mode_ (and enumNames_ for enums), so the rest stays default.
+                const Urho3D::MaterialShaderParameter& param = entry.second;
+                Urho3D::AttributeInfo info;
+                info.name_ = param.name_;
+                info.type_ = param.value_.GetType();
+                info.mode_ = Urho3D::AM_DEFAULT;
+                if (EngineProperty* prop = MakeProperty(info, param.value_))
+                {
+                    prop->m_category = "Shader Parameters";
+                    out.m_items.push_back(prop);
+                }
+            }
+        }
+        else
+        {
+            AZ_Warning(
+                "CrossEngineEditor", false,
+                "rbfx ReadResourceProperties: %s has no editable surface (v1 covers Serializable types and Material).",
+                path.c_str());
+            return false;
+        }
+        return !out.m_items.empty();
+    }
+
+    bool RbfxBackend::RbfxEntityMirror::WriteResourceProperties(
+        const AZStd::string& type, const AZStd::string& path, const PropertyBag& bag)
+    {
+        // Push the generic panel's edited values back by name (rbfx_migration.md §3.3). Only
+        // values present in the bag are written; read-only entries (summaries) and unknown
+        // names are skipped, matching the node path (WriteNodeAttributes).
+        Urho3D::Resource* resource = ResolveResource(type, path);
+        if (!resource)
+        {
+            AZ_Warning("CrossEngineEditor", false, "rbfx WriteResourceProperties: %s not found.", path.c_str());
+            return false;
+        }
+
+        bool wroteAny = false;
+        if (auto* serializable = resource->Cast<Urho3D::Serializable>())
+        {
+            const ea::vector<Urho3D::AttributeInfo>* attributes = serializable->GetAttributes();
+            if (!attributes)
+            {
+                return false;
+            }
+            for (const EngineProperty* prop : bag.m_items)
+            {
+                if (prop->m_readOnly)
+                {
+                    continue; // never push read-only properties back to the engine.
+                }
+                for (unsigned i = 0; i < attributes->size(); ++i)
+                {
+                    if ((*attributes)[i].name_ == prop->m_name.c_str())
+                    {
+                        WriteProperty(serializable, i, (*attributes)[i], prop);
+                        wroteAny = true;
+                        break;
+                    }
+                }
+            }
+        }
+        else if (auto* material = resource->Cast<Urho3D::Material>())
+        {
+            const auto& params = material->GetShaderParameters();
+            for (const EngineProperty* prop : bag.m_items)
+            {
+                if (prop->m_readOnly)
+                {
+                    continue; // never push read-only properties back to the engine.
+                }
+                const Urho3D::Variant& current = material->GetShaderParameter(prop->m_name.c_str());
+                if (current.IsEmpty())
+                {
+                    continue; // Unknown name - ignore (bag may carry extra entries).
+                }
+                Urho3D::Variant value = EnginePropertyToVariant(current.GetType(), prop);
+                if (value.IsEmpty())
+                {
+                    AZ_Warning("CrossEngineEditor", false,
+                        "rbfx WriteResourceProperties: no conversion for %s.", prop->m_name.c_str());
+                    continue;
+                }
+                // Preserve the existing parameter's isCustom flag (SetShaderParameter defaults it
+                // to false, which would silently re-classify a custom parameter as a material
+                // define override).
+                bool isCustom = false;
+                const auto it = params.find(Urho3D::StringHash(ea::string(prop->m_name.c_str())));
+                if (it != params.end())
+                {
+                    isCustom = it->second.isCustom_;
+                }
+                material->SetShaderParameter(ea::string(prop->m_name.c_str()), value, isCustom);
+                wroteAny = true;
+            }
+        }
+        else
+        {
+            AZ_Warning(
+                "CrossEngineEditor", false,
+                "rbfx WriteResourceProperties: %s has no editable surface (v1 covers Serializable types and Material).",
+                path.c_str());
+            return false;
+        }
+        return wroteAny;
+    }
+
     // ------------------------------------------------------------- RbfxAssetSource
 
     void RbfxBackend::RbfxAssetSource::EnumerateRoot(AZStd::vector<AssetEntryInfo>& out)
     {
-        // Enumerate the top level of the rbfx project directory (plan section 4). The project
+        // Enumerate the top level of the rbfx project directory (Plan §B9). The project
         // path is the resource root; each engine scene / material / resource is an asset.
         EnumerateDirectory(m_state.m_projectPath, out);
     }
@@ -897,17 +1523,7 @@ namespace CrossEngineEditor
             entry.m_path = info.absoluteFilePath().toUtf8().constData();
             entry.m_displayName = info.fileName().toUtf8().constData();
             entry.m_isFolder = info.isDir();
-            if (!entry.m_isFolder)
-            {
-                entry.m_extension = info.suffix().toUtf8().constData();
-            }
             out.push_back(AZStd::move(entry));
         }
-    }
-
-    QIcon RbfxBackend::RbfxAssetSource::GetThumbnail(const AssetEntryInfo& /*entry*/)
-    {
-        // v1: extension icons are supplied by the AssetBrowser panel's QFileIconProvider.
-        return QIcon();
     }
 } // namespace CrossEngineEditor

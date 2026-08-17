@@ -46,7 +46,7 @@ ly_add_target(
             AZ::AzToolsFramework
 )
 
-# HARD CONSTRAINT (see plan §0): all first-party code compiles as C++23.
+# HARD CONSTRAINT (see Plan §A0): all first-party code compiles as C++23.
 set_target_properties(CrossEngineEditor PROPERTIES
     CXX_STANDARD 23
     CXX_STANDARD_REQUIRED ON

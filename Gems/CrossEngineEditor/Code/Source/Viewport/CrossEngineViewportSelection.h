@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Cross-engine viewport selection handler (plan: route B, §9). Replaces the engine-native
+//! Cross-engine viewport selection handler (Plan §B7, route B). Replaces the engine-native
 //! EditorDefaultSelection so that ONLY our self-drawn transform gizmos are shown.
 //!
 //! It keeps the reused framework pieces that are engine-agnostic:

@@ -6,12 +6,12 @@
 
 #pragma once
 
-//! Do-nothing engine backend (plan §6 阶段1).
+//! Do-nothing engine backend (Plan §B1).
 //!
 //! Lets the editor shell run end-to-end with no engine attached: every contract is
 //! satisfied with an empty implementation. It is also the reference every real backend
-//! (Godot / in-house) is measured against - if the editor works on NullBackend, the
-//! decoupling holds.
+//! (rbfx / Godot / in-house) is measured against - if the editor works on NullBackend, the
+//! decoupling holds (Plan §A6 C2 可移除性验收).
 
 #include <BackendAPI/IAssetSource.h>
 #include <BackendAPI/IEngineBackend.h>
@@ -38,8 +38,10 @@ namespace CrossEngineEditor
         {
         public:
             // Native surface lifecycle. The Null backend has no RHI/swapchain, so it never
-            // becomes "surface ready" and draws nothing - it is the fall-back used only when
-            // the Diligent backend is not built. The editor logic (camera/picking) still runs.
+            // becomes "surface ready" and draws nothing. Two uses: the fall-back when the
+            // Diligent backend is not built (CrossEngineEditorApplication::CreateBackendFromCommandLine),
+            // and the entity-mirror/asset-source delegate embedded in DiligentBackend (no engine
+            // scene yet). The editor logic (camera/picking) still runs.
             void OnSurfaceCreated(void* nativeWindowHandle, uint32_t width, uint32_t height) override;
             void OnSurfaceResized(uint32_t width, uint32_t height) override;
             void OnSurfaceAboutToBeDestroyed() override;
@@ -60,10 +62,31 @@ namespace CrossEngineEditor
         {
         public:
             void SyncToEditor(AZStd::vector<AZ::Entity*>& outEntities) override;
+            void EnumerateObjectTypes(AZStd::vector<ObjectTypeInfo>& out) override;
             void OnEditorTransformChanged(AZ::EntityId entityId, const AZ::Transform& worldTm) override;
-            void OnEditorPropertyChanged(AZ::EntityId entityId, const PropertyChange& change) override;
+            void OnEditorPropertyChanged(AZ::EntityId entityId) override;
             AZ::EntityId CreateObject(const ObjectSpec& spec) override;
             void DestroyObject(AZ::EntityId entityId) override;
+            bool RaycastScene(
+                const AZ::Vector3& rayOrigin,
+                const AZ::Vector3& rayDirection,
+                AZ::Vector3& outHitPoint,
+                AZ::Vector3& outHitNormal) const override;
+            bool CreatePrefabFromNodes(
+                const AZStd::vector<AZ::EntityId>& entityIds,
+                const AZStd::string& path) override;
+            bool AssignMaterial(AZ::EntityId entityId, const AZStd::string& assetPath, int slot) override;
+            bool AssignAnimation(AZ::EntityId entityId, const AZStd::string& assetPath) override;
+            AZStd::vector<AZ::u8> SerializeNodes(const AZStd::vector<AZ::EntityId>& entityIds) override;
+            bool PasteNodes(const AZStd::vector<AZ::u8>& data, AZ::EntityId parentId) override;
+
+            // Migration 批次 2 精简 (rbfx_migration.md §3.1).
+            bool SaveResource(
+                const AZStd::string& type, const AZStd::string& path) override;
+            bool ReadResourceProperties(
+                const AZStd::string& type, const AZStd::string& path, PropertyBag& out) override;
+            bool WriteResourceProperties(
+                const AZStd::string& type, const AZStd::string& path, const PropertyBag& bag) override;
         };
 
         class NullAssetSource final : public IAssetSource
@@ -71,7 +94,6 @@ namespace CrossEngineEditor
         public:
             void EnumerateRoot(AZStd::vector<AssetEntryInfo>& out) override;
             void EnumerateChildren(const AssetEntryInfo& parent, AZStd::vector<AssetEntryInfo>& out) override;
-            QIcon GetThumbnail(const AssetEntryInfo& entry) override;
         };
 
         NullSceneRenderer m_sceneRenderer;

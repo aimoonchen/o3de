@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Engine-agnostic implementation of AzFramework::DebugDisplayRequests (plan §3.1).
+//! Engine-agnostic implementation of AzFramework::DebugDisplayRequests (Plan §A3).
 //!
 //! Every high-level draw call (~70 methods used by manipulators/component modes) is
 //! tessellated here, on the CPU, into two immediate-mode vertex batches: a line-list
@@ -42,7 +42,7 @@ namespace CrossEngineEditor
 {
     class ISceneRenderer;
 
-    //! A world-space text label queued during a frame. The GL renderer only draws lines and
+    //! A world-space text label queued during a frame. The debug display only tessellates lines and
     //! triangles, so text is collected here and painted by the Qt viewport (QPainter) after the
     //! geometry flush - both Blender and Unreal show numeric drag readouts as 2D overlay text.
     struct DebugTextLabel

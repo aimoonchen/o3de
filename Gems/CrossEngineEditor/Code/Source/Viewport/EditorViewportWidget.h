@@ -32,14 +32,15 @@ namespace CrossEngineEditor
     class ISceneRenderer;
     class EngineViewport;
     class ViewportOverlayLabels;
+    class EntityMirrorBridge;
 
-    //! Engine-agnostic editor viewport controller (plan §2 阶段2, revised).
+    //! Engine-agnostic editor viewport controller (Plan §B2, revised).
     //!
     //! Post-refactor this is a plain QWidget that HOSTS a native GPU surface rather than
     //! owning an OpenGL context: it embeds an EngineViewport (QWindow + createWindowContainer,
     //! see EngineViewport.h) into which the active backend's swapchain presents directly.
     //! No initializeGL/paintGL/resizeGL, no GL context - the reference design lists
-    //! "QOpenGLWidget wrapping the engine" as an explicit anti-pattern (qt6_viewport_design §6).
+    //! "QOpenGLWidget wrapping the engine" as an explicit anti-pattern (Plan §B2).
     //!
     //! It still owns the editor-side logic that must run on the Qt main thread:
     //!   * the viewport id + the picking/camera contract (ViewportInteractionRequestBus),
@@ -58,7 +59,10 @@ namespace CrossEngineEditor
     {
         Q_OBJECT
     public:
-        explicit EditorViewportWidget(AzFramework::ViewportId viewportId, QWidget* parent = nullptr);
+        //! The mirror bridge triggers the full engine -> editor re-sync after an asset drop
+        //! spawns an engine object (not owned; owned by the application, which outlives us).
+        explicit EditorViewportWidget(
+            AzFramework::ViewportId viewportId, EntityMirrorBridge* mirrorBridge, QWidget* parent = nullptr);
         ~EditorViewportWidget() override;
 
         AzFramework::ViewportId GetViewportId() const { return m_viewportId; }
@@ -68,7 +72,7 @@ namespace CrossEngineEditor
         // exactly one frame. Skips presenting while the surface is hidden.
         void TickRender(float deltaSeconds) override;
 
-        //! Route overlay rendering through the given backend scene renderer (set in 阶段2/4).
+        //! Route overlay rendering through the given backend scene renderer (set per Plan §B2).
         //! Passing nullptr detaches and the viewport renders nothing.
         void SetSceneRenderer(ISceneRenderer* renderer) { m_sceneRenderer = renderer; }
 
@@ -107,7 +111,8 @@ namespace CrossEngineEditor
         void HandleNativeInput(QEvent* event);
 
         //! Handle an asset dropped onto the viewport surface (forwarded from the native window,
-        //! §2.15). v1 resolves the drop point to a world position; actual spawning is a follow-up.
+        //! rbfx_migration.md §3.4). Migration P0: whitelisted assets spawn an engine object at the
+        //! drop point (fixed-distance fallback on a miss), then trigger a full mirror re-sync.
         void HandleAssetDrop(QDropEvent* dropEvent);
 
         //! Current viewport size as an engine-neutral screen size in physical pixels (min 1x1).
@@ -142,6 +147,8 @@ namespace CrossEngineEditor
 
         GenericDebugDisplay m_debugDisplay;
         ISceneRenderer* m_sceneRenderer = nullptr;
+        //! Engine <-> editor object sync; the asset-drop spawn calls RefreshFromEngine through it.
+        EntityMirrorBridge* m_mirrorBridge = nullptr;
 
         //! Native GPU render surface embedded in this widget (owns the QWindow).
         EngineViewport* m_engineViewport = nullptr;

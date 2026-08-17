@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! VSCode/Blender-style command palette (plan §5.2 / 阶段3.3).
+//! VSCode/Blender-style command palette (Plan §B5).
 //!
 //! A lightweight modal popup that fuzzy-filters a flat list of QActions (the editor's
 //! commands) and triggers the chosen one. The data source is simply the actions already

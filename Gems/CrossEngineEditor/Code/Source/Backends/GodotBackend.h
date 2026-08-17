@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Godot (libgodot) engine backend — final plan phase G1 (implemented).
+//! Godot (libgodot) engine backend — godot_migration.md §2 (implemented).
 //!
 //! Render model: the editor owns the native window (HWND); Godot is created with
 //! "--wid <hwnd-decimal>" (which sets the editor HWND as the Win32 *owner*) and then its real
@@ -19,17 +19,17 @@
 //!                                                        GDExtensionInitializationFunction init);
 //!   void                 libgodot_destroy_godot_instance(GDExtensionObjectPtr instance);
 //!
-//! Per-frame we pump GodotInstance::iteration() (plan §2.4).
+//! Per-frame we pump GodotInstance::iteration() (godot_migration.md §2).
 //!
 //! IMPORTANT (build vs. runtime): libgodot is built OUT OF TREE with scons into a shared
 //! library (godot.<cfg>.dll). This backend loads that DLL at RUNTIME via LoadLibrary +
 //! GetProcAddress, so it does NOT link Godot at build time and needs no generated Godot
-//! headers to compile. The object-mirror / property / asset work (G1.3–G1.6) is driven through
+//! headers to compile. The object-mirror / property / asset work (godot_migration.md §2) is driven through
 //! the GDExtension interface obtained from the created instance (all implemented below).
 //!
 //! Coordinates cross the BackendAPI boundary in O3DE convention (Z-up / right-handed / metres)
 //! and are converted at the edge by EngineTransformConverter (Godot = Y-up / right-handed /
-//! -Z forward), i.e. O3DE [x,y,z] -> Godot [x, z, -y] (plan §5).
+//! -Z forward), i.e. O3DE [x,y,z] -> Godot [x, z, -y] (Plan §B6).
 //!
 //! Compiled only when the Godot checkout is available (CEE_HAVE_GODOT).
 
@@ -88,7 +88,7 @@ namespace CrossEngineEditor
             bool m_reparented = false;             //!< Guards one-shot Win32 reparent of Godot's window.
             bool m_vsyncDisabled = false;          //!< Guards one-shot vsync-off (avoids present blocking Tick).
 
-            // ---- GDExtension access (resolved in the init callback, plan §3.2) ----
+            // ---- GDExtension access (resolved in the init callback, godot_migration.md §2) ----
             GodotApi m_api;                        //!< Thin GDExtension C-API facade.
             GDExtensionObjectPtr m_sceneTree = nullptr; //!< SceneTree MainLoop (Engine.get_main_loop).
             GDExtensionObjectPtr m_editorCamera = nullptr; //!< Camera3D we own to view the scene.
@@ -147,18 +147,39 @@ namespace CrossEngineEditor
 
             void SyncToEditor(AZStd::vector<AZ::Entity*>& outEntities) override;
             void FinishSync() override;
+            void EnumerateObjectTypes(AZStd::vector<ObjectTypeInfo>& out) override;
             void OnEditorTransformChanged(AZ::EntityId entityId, const AZ::Transform& worldTm) override;
-            void OnEditorPropertyChanged(AZ::EntityId entityId, const PropertyChange& change) override;
+            void OnEditorPropertyChanged(AZ::EntityId entityId) override;
             AZ::EntityId CreateObject(const ObjectSpec& spec) override;
             void DestroyObject(AZ::EntityId entityId) override;
             bool SaveScene(const AZStd::string& path) override;
             AZ::Aabb GetWorldBounds(AZ::EntityId entityId) const override;
+            bool RaycastScene(
+                const AZ::Vector3& rayOrigin,
+                const AZ::Vector3& rayDirection,
+                AZ::Vector3& outHitPoint,
+                AZ::Vector3& outHitNormal) const override;
+            bool CreatePrefabFromNodes(
+                const AZStd::vector<AZ::EntityId>& entityIds,
+                const AZStd::string& path) override;
+            bool AssignMaterial(AZ::EntityId entityId, const AZStd::string& assetPath, int slot) override;
+            bool AssignAnimation(AZ::EntityId entityId, const AZStd::string& assetPath) override;
+            AZStd::vector<AZ::u8> SerializeNodes(const AZStd::vector<AZ::EntityId>& entityIds) override;
+            bool PasteNodes(const AZStd::vector<AZ::u8>& data, AZ::EntityId parentId) override;
+
+            // Migration 批次 2 精简 (rbfx_migration.md §3.1).
+            bool SaveResource(
+                const AZStd::string& type, const AZStd::string& path) override;
+            bool ReadResourceProperties(
+                const AZStd::string& type, const AZStd::string& path, PropertyBag& out) override;
+            bool WriteResourceProperties(
+                const AZStd::string& type, const AZStd::string& path, const PropertyBag& bag) override;
 
         private:
             //! Mirror one Godot Node into an AZ::Entity and recurse over its children.
             void MirrorNodeRecursive(
                 GDExtensionObjectPtr node, AZ::EntityId parentId, AZStd::vector<AZ::Entity*>& outEntities);
-            //! Read a node's editable properties into a typed PropertyBag (plan §3.2).
+            //! Read a node's editable properties into a typed PropertyBag (Plan §B4).
             void ReadProperties(GDExtensionObjectPtr node, PropertyBag& outBag) const;
             //! Resolve the Godot Node for a mirror entity via the live EngineNodeComponent's
             //! reflected ObjectID handle, or null (warns on miss). Single resolution path for every
@@ -183,7 +204,6 @@ namespace CrossEngineEditor
 
             void EnumerateRoot(AZStd::vector<AssetEntryInfo>& out) override;
             void EnumerateChildren(const AssetEntryInfo& parent, AZStd::vector<AssetEntryInfo>& out) override;
-            QIcon GetThumbnail(const AssetEntryInfo& entry) override;
 
         private:
             EngineState& m_state;

@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Engine-agnostic viewport camera navigation (plan §5.3).
+//! Engine-agnostic viewport camera navigation (Plan §B2).
 //!
 //! Wraps AzFramework's CameraSystem and the standard set of camera inputs (rotate / pan /
 //! translate / dolly / orbit) so the cross-engine viewport gets the same orbit/pan/dolly/fly

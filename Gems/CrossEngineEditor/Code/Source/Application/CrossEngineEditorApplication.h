@@ -27,7 +27,7 @@ namespace CrossEngineEditor
     class EntityMirrorBridge;
     class IEngineBackend;
 
-    //! Cross-engine editor application (plan §3 / §4).
+    //! Cross-engine editor application (Plan §B1-§B4).
     //!
     //! Combines the Qt application (AzQtApplication) with the AZ tools application
     //! (ToolsApplication) so that the editor gets the EditorEntityContext, Prefab
@@ -45,7 +45,7 @@ namespace CrossEngineEditor
         CrossEngineEditorApplication(int* argc, char*** argv);
         ~CrossEngineEditorApplication() override;
 
-        //! Enter the Qt event loop, driving the AZ system tick from idle (plan §7).
+        //! Enter the Qt event loop, driving the AZ system tick from idle (Plan §B3).
         void RunMainLoop();
 
         // AzFramework::Application / ToolsApplication overrides...
@@ -67,12 +67,12 @@ namespace CrossEngineEditor
     private:
         void OnIdle();
 
-        //! Build the engine backend selected by --backend on the command line (plan 6.1),
+        //! Build the engine backend selected by --backend on the command line (Plan §B1),
         //! falling back to the best compiled-in option when the choice is unavailable.
         AZStd::unique_ptr<IEngineBackend> CreateBackendFromCommandLine();
 
         //! Create an empty in-memory level prefab and focus it so the Outliner has a
-        //! root container and entity creation works (plan §2 modern EC/Prefab workflow).
+        //! root container and entity creation works (Plan §A2 modern EC/Prefab workflow).
         void CreateNewLevel();
 
         AZStd::unique_ptr<AzQtComponents::StyleManager> m_styleManager;

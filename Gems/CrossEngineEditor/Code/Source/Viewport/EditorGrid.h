@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Editor world grid overlay (plan §5.3).
+//! Editor world grid overlay (Plan §B2).
 //!
 //! A grid is an editor overlay - not a manipulator and not part of any engine scene - so
 //! it is owned by the shell and drawn every frame straight into a DebugDisplayRequests

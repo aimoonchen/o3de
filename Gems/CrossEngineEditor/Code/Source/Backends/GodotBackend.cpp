@@ -58,14 +58,14 @@ namespace CrossEngineEditor
         //! The GDExtension init callback libgodot invokes during create. It hands us the
         //! GDExtensionInterfaceGetProcAddress we need to talk to the engine. We stash the resolved
         //! api into the EngineState being initialised. libgodot allows only one instance at a time,
-        //! so a single pending pointer is safe (plan §3.2).
+        //! so a single pending pointer is safe (godot_migration.md §2).
         GodotBackend::EngineState* g_initTarget = nullptr;
 
 #if defined(AZ_PLATFORM_WINDOWS)
         // Godot 4.8's "--wid <HWND>" does NOT truly embed into the host client area: it only sets
         // the host as the Win32 *owner* of a still-independent top-level, borderless window (no
-        // WS_CHILD) - so the editor viewport stays blank (see PROGRESS.md "Godot 视口嵌入待修").
-        // The fix is to reparent Godot's real main window into our viewport HWND once it exists.
+        // WS_CHILD) - so the editor viewport would stay blank. The fix (below) is to reparent
+        // Godot's real main window into our viewport HWND once it exists.
         //
         // Returns the Godot main-window HWND, or null if the DisplayServer/native handle is not
         // yet available (caller retries next frame).
@@ -143,8 +143,8 @@ namespace CrossEngineEditor
             return 1;
         }
 
-        // ---- Coordinate conversion (O3DE Z-up <-> Godot Y-up, plan §5) ---------------------
-        // All coordinate math lives in EngineTransformConverter (plan §5, one place). These thin
+        // ---- Coordinate conversion (O3DE Z-up <-> Godot Y-up, Plan §B6) ---------------------
+        // All coordinate math lives in EngineTransformConverter (Plan §B6, one place). These thin
         // wrappers just bind the Godot EngineSpace so the call sites read cleanly.
         AZ::Vector3 GodotPosFromO3de(const AZ::Vector3& v)
         {
@@ -167,7 +167,7 @@ namespace CrossEngineEditor
             return EngineTransformConverter::TransformFromEngineRaw12(k_space, in12);
         }
 
-        //! Godot project asset extensions surfaced in the browser (plan §4).
+        //! Godot project asset extensions surfaced in the browser (Plan §B9).
         bool IsGodotAsset(const QString& suffix)
         {
             static const QStringList kExts = {
@@ -205,10 +205,6 @@ namespace CrossEngineEditor
                 entry.m_path = info.absoluteFilePath().toUtf8().constData();
                 entry.m_displayName = info.fileName().toUtf8().constData();
                 entry.m_isFolder = info.isDir();
-                if (!entry.m_isFolder)
-                {
-                    entry.m_extension = info.suffix().toUtf8().constData();
-                }
                 out.push_back(AZStd::move(entry));
             }
         }
@@ -325,7 +321,7 @@ namespace CrossEngineEditor
 
         // One-shot start() after creation: brings the main loop up and loads the project's main
         // scene (or the requested --scene). Done here (not in OnSurfaceCreated) so the first
-        // iteration follows immediately (plan §2.4/§C7).
+        // iteration follows immediately (Plan §B3 单循环).
         if (!m_state.m_started)
         {
             m_state.m_api.Call(m_state.m_instance, "start");
@@ -351,7 +347,7 @@ namespace CrossEngineEditor
         // also applies the deferred scene change, after which get_current_scene resolves and the
         // surface is reported ready so the shell mirrors the scene into the Outliner (one-shot).
         // NOTE: iteration() runs Godot's whole frame incl. present, the prime suspect for the
-        // camera-roam / post-selection stutter (PROGRESS §11/§13) - keep it in its own zone.
+        // camera-roam / post-selection stutter (Progress.md 修复11/修复13) - keep it in its own zone.
         GodotVariant quit;
         {
             CEE_PROFILE_SCOPE("Godot.iteration(present)");
@@ -399,7 +395,7 @@ namespace CrossEngineEditor
     }
 
     // =====================================================================================
-    // GodotSceneRenderer  (G1.1 render bring-up + G1.2 overlay)
+    // GodotSceneRenderer  (godot_migration.md §2: 视口嵌入 + ArrayMesh overlay)
     // =====================================================================================
     void GodotBackend::GodotSceneRenderer::OnSurfaceCreated(void* nativeWindowHandle, uint32_t width, uint32_t height)
     {
@@ -422,9 +418,10 @@ namespace CrossEngineEditor
             return;
         }
 
-        // "--wid <hwnd>" reparents Godot's window to the editor HWND at creation (plan §3.1);
-        // "--path <project>" opens the project. We drive editor camera/overlay ourselves, so we
-        // do NOT pass --editor (which would bring up Godot's own editor UI).
+        // "--wid <hwnd>" sets the editor HWND as Godot's Win32 owner at creation (the real embed
+        // is EmbedGodotWindow's SetParent reparent, Plan §B2); "--path <project>" opens the
+        // project. We drive editor camera/overlay ourselves, so we do NOT pass --editor (which
+        // would bring up Godot's own editor UI).
         const auto hwndValue = reinterpret_cast<uintptr_t>(nativeWindowHandle);
         AZStd::string widArg = AZStd::string::format("%llu", static_cast<unsigned long long>(hwndValue));
 
@@ -499,7 +496,7 @@ namespace CrossEngineEditor
             }
 
             // Editor camera: a Camera3D we drive from the editor view and make current so Godot
-            // renders the scene through it (plan §2.4).
+            // renders the scene through it (godot_migration.md §2).
             m_state.m_editorCamera = api.ConstructObject("Camera3D");
             if (m_state.m_editorCamera)
             {
@@ -512,7 +509,7 @@ namespace CrossEngineEditor
             // gizmo/grid primitives. ArrayMesh + add_surface_from_arrays is Godot's own editor
             // gizmo path (EditorNode3DGizmo::add_vertices) and lets us submit each surface in a
             // single GDExtension call instead of the per-vertex ImmediateMesh churn that
-            // PROGRESS.md §13 measured as the pick-then-orbit stall (plan-aligned fix 1).
+            // Progress.md 修复13 measured as the pick-then-orbit stall (plan-aligned fix 1).
             m_state.m_overlayMesh = api.ConstructObject("MeshInstance3D");
             m_state.m_overlayArrayMesh = api.ConstructObject("ArrayMesh");
             if (m_state.m_overlayMesh && m_state.m_overlayArrayMesh)
@@ -577,7 +574,7 @@ namespace CrossEngineEditor
 
         EnsureOverlayNodes();
 
-        // Drive the editor camera from the editor's view matrix (plan §2.4): camera world = inverse
+        // Drive the editor camera from the editor's view matrix (godot_migration.md §2): camera world = inverse
         // of world->view, converted O3DE -> Godot, applied as the Camera3D global transform.
         if (m_state.m_editorCamera)
         {
@@ -712,7 +709,7 @@ namespace CrossEngineEditor
     {
         m_depthTest = enabled;
         // v1: overlay uses the ArrayMesh's default material. A depth-test-disabled material
-        // for the SetDepthTest(false) pass is a later polish item (plan §2.3); the visual result
+        // for the SetDepthTest(false) pass is a later polish item (Plan §B2); the visual result
         // matches rbfx's depth-tested overlay for the common case.
     }
 
@@ -723,7 +720,7 @@ namespace CrossEngineEditor
     }
 
     // =====================================================================================
-    // GodotEntityMirror  (G1.3 tree mirror / G1.4 properties / G1.5 create-delete)
+    // GodotEntityMirror  (godot_migration.md §2: 镜像 / 属性 / 创建删除)
     // =====================================================================================
     GDExtensionObjectPtr GodotBackend::GodotEntityMirror::ResolveNode(AZ::EntityId entityId) const
     {
@@ -786,7 +783,7 @@ namespace CrossEngineEditor
         }
 
         // get_aabb only exists on GeometryInstance3D; pre-guard with is_class so non-visual nodes
-        // skip the call (a missing method silently returns nil in Godot 4.8, plan §5.3).
+        // skip the call (a missing method silently returns nil in Godot 4.8, godot_migration.md §2).
         const GodotVariant classArg = api.MakeString("GeometryInstance3D");
         const GodotVariant isGeom = api.Call(root, "is_class", &classArg, 1);
         const bool isGeometryInstance =
@@ -844,7 +841,7 @@ namespace CrossEngineEditor
         nameProp->m_value = api.VariantStringToAz(nameV);
         outBag.m_items.push_back(nameProp);
 
-        // Full property reflection (plan §3.2/§3.4): walk get_property_list() which returns a
+        // Full property reflection (Plan §B4): walk get_property_list() which returns a
         // TypedArray<Dictionary> (name/class_name/type/hint/hint_string/usage). We surface only
         // properties that are both editor-visible and storable, and only the primitive Variant
         // types O3DE has stock property-grid editors for (bool/int/float/String/Vector3/Color).
@@ -1092,7 +1089,7 @@ namespace CrossEngineEditor
         api.Call(node, "set_global_transform", &tm, 1);
     }
 
-    void GodotBackend::GodotEntityMirror::OnEditorPropertyChanged(AZ::EntityId entityId, const PropertyChange& /*change*/)
+    void GodotBackend::GodotEntityMirror::OnEditorPropertyChanged(AZ::EntityId entityId)
     {
         GodotApi& api = m_state.m_api;
         GDExtensionObjectPtr node = ResolveNode(entityId);
@@ -1114,7 +1111,7 @@ namespace CrossEngineEditor
         }
 
         // Empty path (the property bus only identifies the component): re-push every mirrored
-        // property to its Godot object by name (plan §3.4). "name" is special (set_name); all
+        // property to its Godot object by name (Plan §B4). "name" is special (set_name); all
         // other typed values go through the generic set(name, Variant). Read-only props are
         // skipped (the engine would reject them / they can't be edited in the grid anyway).
         for (EngineProperty* prop : nodeComponent->GetProperties().m_items)
@@ -1202,9 +1199,9 @@ namespace CrossEngineEditor
         GodotVariant tm = api.MakeTransform3D(raw);
         api.Call(node, "set_global_transform", &tm, 1);
 
-        // The engine node now exists; its mirror AZ::Entity appears on the next full SyncToEditor
-        // (v1 re-mirrors the whole scene). NOTE: the shell does not yet trigger that re-sync from a
-        // create/delete (the create/delete UI is not wired in v1), matching the rbfx backend.
+        // The engine node now exists; its mirror AZ::Entity appears on the next SyncToEditor
+        // (the shell calls RefreshFromEngine right after create/delete, and v1 re-mirrors the
+        // whole scene).
         return AZ::EntityId();
     }
 
@@ -1216,13 +1213,24 @@ namespace CrossEngineEditor
         {
             return;
         }
-        api.Call(node, "queue_free");
+
+        // Synchronous delete: detach from the parent, then free immediately. queue_free defers
+        // to end-of-frame, so the follow-up RefreshFromEngine would re-mirror the condemned node
+        // as a ghost entity before it dies. Editor UI actions run outside Main::iteration, so
+        // sync free is safe here (the Godot editor itself memdeletes scene-tree nodes).
+        GodotVariant nodeV = api.MakeObject(node);
+        GDExtensionObjectPtr parent = api.AsObject(api.Call(node, "get_parent"));
+        if (parent)
+        {
+            api.Call(parent, "remove_child", &nodeV, 1);
+        }
+        api.Call(node, "free");
         m_entityToNode.erase(entityId);
     }
 
     bool GodotBackend::GodotEntityMirror::SaveScene(const AZStd::string& path)
     {
-        // Plan §3.7 + G1.5: the Godot native scene is the single source of truth. Persist it by
+        // Plan §B4 + godot_migration.md §2: the Godot native scene is the single source of truth. Persist it by
         // packing the current scene root into a PackedScene and writing it via ResourceSaver.
         //   PackedScene.pack(node) -> Error(0=OK); ResourceSaver.save(res, path, flags) -> Error.
         // (Both APIs grep-confirmed in the Godot checkout.)
@@ -1291,8 +1299,86 @@ namespace CrossEngineEditor
         return true;
     }
 
+    // ------------------------------------------------- migration 批次 1 stubs (rbfx-first)
+    // Contract rule C4: every contract change stubs ALL backends in the same change. These are
+    // pure virtual on IEntityMirror so they must exist to compile; they return "unsupported"
+    // until the Godot backend gets its own migration pass (rbfx_migration.md §3.1).
+
+    void GodotBackend::GodotEntityMirror::EnumerateObjectTypes(AZStd::vector<ObjectTypeInfo>& /*out*/)
+    {
+        // TODO 批次 1 stub: rbfx-first. Godot side would walk the ClassDB for Node types.
+    }
+
+    bool GodotBackend::GodotEntityMirror::RaycastScene(
+        const AZ::Vector3& /*rayOrigin*/,
+        const AZ::Vector3& /*rayDirection*/,
+        AZ::Vector3& /*outHitPoint*/,
+        AZ::Vector3& /*outHitNormal*/) const
+    {
+        // TODO 批次 1 stub: rbfx-first. Godot side would use PhysicsDirectSpaceState3D::intersect_ray.
+        return false;
+    }
+
+    bool GodotBackend::GodotEntityMirror::CreatePrefabFromNodes(
+        const AZStd::vector<AZ::EntityId>& /*entityIds*/,
+        const AZStd::string& /*path*/)
+    {
+        // TODO 批次 1 stub: rbfx-first. Godot side would pack a PackedScene like SaveScene.
+        return false;
+    }
+
+    bool GodotBackend::GodotEntityMirror::AssignMaterial(
+        AZ::EntityId /*entityId*/, const AZStd::string& /*assetPath*/, int /*slot*/)
+    {
+        // TODO 批次 1 stub: rbfx-first. Godot side would set surface_material_override on the MeshInstance3D.
+        return false;
+    }
+
+    bool GodotBackend::GodotEntityMirror::AssignAnimation(
+        AZ::EntityId /*entityId*/, const AZStd::string& /*assetPath*/)
+    {
+        // TODO 批次 1 stub: rbfx-first. Godot side would add an AnimationPlayer and assign the
+        // library (no auto-play - same contract rule as rbfx).
+        return false;
+    }
+
+    AZStd::vector<AZ::u8> GodotBackend::GodotEntityMirror::SerializeNodes(
+        const AZStd::vector<AZ::EntityId>& /*entityIds*/)
+    {
+        // TODO 批次 1 stub: rbfx-first. Godot side would duplicate() nodes in memory instead of bytes.
+        return {};
+    }
+
+    bool GodotBackend::GodotEntityMirror::PasteNodes(
+        const AZStd::vector<AZ::u8>& /*data*/, AZ::EntityId /*parentId*/)
+    {
+        // TODO 批次 1 stub: rbfx-first.
+        return false;
+    }
+
+    bool GodotBackend::GodotEntityMirror::SaveResource(
+        const AZStd::string& /*type*/, const AZStd::string& /*path*/)
+    {
+        // TODO 批次 2 stub: rbfx-first.
+        return false;
+    }
+
+    bool GodotBackend::GodotEntityMirror::ReadResourceProperties(
+        const AZStd::string& /*type*/, const AZStd::string& /*path*/, PropertyBag& /*out*/)
+    {
+        // TODO 批次 2 stub: rbfx-first.
+        return false;
+    }
+
+    bool GodotBackend::GodotEntityMirror::WriteResourceProperties(
+        const AZStd::string& /*type*/, const AZStd::string& /*path*/, const PropertyBag& /*bag*/)
+    {
+        // TODO 批次 2 stub: rbfx-first.
+        return false;
+    }
+
     // =====================================================================================
-    // GodotAssetSource  (G1.6)
+    // GodotAssetSource  (godot_migration.md §2)
     // =====================================================================================
     void GodotBackend::GodotAssetSource::EnumerateRoot(AZStd::vector<AssetEntryInfo>& out)
     {
@@ -1306,10 +1392,5 @@ namespace CrossEngineEditor
         {
             EnumerateGodotDirectory(parent.m_path, out);
         }
-    }
-
-    QIcon GodotBackend::GodotAssetSource::GetThumbnail(const AssetEntryInfo& /*entry*/)
-    {
-        return QIcon();
     }
 } // namespace CrossEngineEditor

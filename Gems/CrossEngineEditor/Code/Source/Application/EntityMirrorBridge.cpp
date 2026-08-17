@@ -7,12 +7,17 @@
 #include <Application/EntityMirrorBridge.h>
 #include <BackendAPI/IEngineBackend.h>
 #include <BackendAPI/IEntityMirror.h>
+#include <Framework/EngineNodeComponent.h>
 
+#include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzCore/Component/Entity.h>
 #include <AzCore/Component/TransformBus.h>
+#include <AzCore/IO/Path/Path.h>
 #include <AzCore/Interface/Interface.h>
+#include <AzCore/Math/Transform.h>
 
 #include <AzToolsFramework/Entity/EditorEntityContextBus.h>
+#include <AzToolsFramework/ToolsComponents/TransformComponent.h>
 
 namespace CrossEngineEditor
 {
@@ -36,7 +41,7 @@ namespace CrossEngineEditor
 
     void EntityMirrorBridge::SyncFromEngine()
     {
-        // Engine -> editor (plan section 3.5). The backend hands us fully-built mirror
+        // Engine -> editor (Plan §B4). The backend hands us fully-built mirror
         // entities (each already carrying an EngineNodeComponent and, for a real backend,
         // its parent EntityId on the TransformComponent so the Outliner tree forms). Here we
         // run the standard editor-entity intake so the Outliner / Inspector pick them up.
@@ -46,6 +51,9 @@ namespace CrossEngineEditor
             return;
         }
 
+        // Guard the whole sync: intake + FinishSync fire the property bus per entity, and
+        // echoing those writes back to the engine is pure feedback (plus SetDirty pollution).
+        m_syncing = true;
         AZStd::vector<AZ::Entity*> mirrored;
         backend->GetEntityMirror().SyncToEditor(mirrored);
 
@@ -77,6 +85,127 @@ namespace CrossEngineEditor
         // All mirror entities are now added and activated; let the backend wire the
         // parent-child links (TransformBus::SetParent) so the Outliner tree forms.
         backend->GetEntityMirror().FinishSync();
+        m_syncing = false;
+    }
+
+    void EntityMirrorBridge::RefreshFromEngine()
+    {
+        // Drop every mirror entity currently in the editor context. Mirror entities are
+        // root-instance overlay entities (AddEditorEntity in SyncFromEngine routes them into
+        // the focused root prefab instance; GetLooseEditorEntities now means "direct
+        // children of the root instance"), each carrying an EngineNodeComponent;
+        // DestroyEditorEntity is the
+        // exact inverse of that intake. Then re-pull the whole engine scene, because
+        // SyncToEditor always builds fresh entities instead of reusing the existing ones.
+        using AzToolsFramework::EditorEntityContextRequestBus;
+        AzToolsFramework::EntityList loose;
+        EditorEntityContextRequestBus::Broadcast(
+            &EditorEntityContextRequestBus::Events::GetLooseEditorEntities, loose);
+        for (const AZ::Entity* entity : loose)
+        {
+            if (entity && entity->FindComponent<EngineNodeComponent>())
+            {
+                EditorEntityContextRequestBus::Broadcast(
+                    &EditorEntityContextRequestBus::Events::DestroyEditorEntity, entity->GetId());
+            }
+        }
+
+        SyncFromEngine();
+    }
+
+    AZ::EntityId EntityMirrorBridge::FirstSelectedMirrorId() const
+    {
+        AzToolsFramework::EntityIdList selection;
+        AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
+            selection, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
+        for (const AZ::EntityId entityId : selection)
+        {
+            AZ::Entity* entity = nullptr;
+            AZ::ComponentApplicationBus::BroadcastResult(
+                entity, &AZ::ComponentApplicationBus::Events::FindEntity, entityId);
+            if (entity && entity->FindComponent<EngineNodeComponent>())
+            {
+                return entityId;
+            }
+        }
+        return AZ::EntityId();
+    }
+
+    bool EntityMirrorBridge::AssignAssetToSelection(const AZStd::string& assetPath)
+    {
+        // Extension -> assignment action (migration L1, §B9): the rbfx editor's
+        // drop-onto-selection flow for materials and animations. Spawnable scene assets
+        // (.mdl/.xml) need a world position, so the callers place those themselves.
+        const AZStd::string extension = AZ::IO::PathView(assetPath).Extension().Native();
+
+        auto* backend = GetBackend();
+        const AZ::EntityId target = FirstSelectedMirrorId();
+        if (!backend || !target.IsValid())
+        {
+            return false;
+        }
+
+        IEntityMirror& mirror = backend->GetEntityMirror();
+        if (azstricmp(extension.c_str(), ".mat") == 0
+            || azstricmp(extension.c_str(), ".material") == 0)
+        {
+            return mirror.AssignMaterial(target, assetPath, 0);
+        }
+        if (azstricmp(extension.c_str(), ".ani") == 0)
+        {
+            return mirror.AssignAnimation(target, assetPath);
+        }
+        return false;
+    }
+
+    void EntityMirrorBridge::SpawnAssetAtOrigin(const AZStd::string& assetPath)
+    {
+        auto* backend = GetBackend();
+        if (!backend)
+        {
+            return;
+        }
+
+        ObjectSpec spec;
+        spec.m_assetPath = assetPath;
+        spec.m_transform = AZ::Transform::CreateIdentity();
+        backend->GetEntityMirror().CreateObject(spec);
+
+        // The mirror entity is built on the next full re-sync (rbfx CreateObject deliberately
+        // returns an invalid id - see RbfxBackend::CreateObject).
+        RefreshFromEngine();
+    }
+
+    bool EntityMirrorBridge::ReadResourceProperties(
+        const AZStd::string& type, const AZStd::string& path, PropertyBag& out)
+    {
+        auto* backend = GetBackend();
+        if (!backend)
+        {
+            return false;
+        }
+        return backend->GetEntityMirror().ReadResourceProperties(type, path, out);
+    }
+
+    bool EntityMirrorBridge::WriteResourceProperties(
+        const AZStd::string& type, const AZStd::string& path, const PropertyBag& bag)
+    {
+        auto* backend = GetBackend();
+        if (!backend)
+        {
+            return false;
+        }
+        return backend->GetEntityMirror().WriteResourceProperties(type, path, bag);
+    }
+
+    bool EntityMirrorBridge::SaveResource(const AZStd::string& type, const AZStd::string& path)
+    {
+        auto* backend = GetBackend();
+        if (!backend)
+        {
+            return false;
+        }
+        return backend->GetEntityMirror().SaveResource(type, path);
     }
 
     void EntityMirrorBridge::OnEntityTransformChanged(const AzToolsFramework::EntityIdList& entityIds)
@@ -96,8 +225,13 @@ namespace CrossEngineEditor
         }
     }
 
-    void EntityMirrorBridge::OnEntityComponentPropertyChanged(AZ::ComponentId /*componentId*/)
+    void EntityMirrorBridge::OnEntityComponentPropertyChanged(AZ::ComponentId componentId)
     {
+        if (m_syncing)
+        {
+            return;
+        }
+
         auto* backend = GetBackend();
         if (!backend)
         {
@@ -105,7 +239,21 @@ namespace CrossEngineEditor
         }
 
         const AZ::EntityId entityId = *AzToolsFramework::PropertyEditorEntityChangeNotificationBus::GetCurrentBusId();
-        backend->GetEntityMirror().OnEditorPropertyChanged(entityId, PropertyChange{});
+
+        // TransformComponent fires this bus once per gizmo-drag frame (OnTransformChanged
+        // broadcasts without delta filtering). Re-pushing the whole PropertyBag per frame is
+        // wasted echo - route transform changes through the transform-only path instead.
+        AZ::Entity* entity = nullptr;
+        AZ::ComponentApplicationBus::BroadcastResult(entity, &AZ::ComponentApplicationBus::Events::FindEntity, entityId);
+        const AZ::Component* component = entity ? entity->FindComponent(componentId) : nullptr;
+        if (component
+            && component->RTTI_GetType() == azrtti_typeid<AzToolsFramework::Components::TransformComponent>())
+        {
+            OnEntityTransformChanged({ entityId });
+            return;
+        }
+
+        backend->GetEntityMirror().OnEditorPropertyChanged(entityId);
     }
 
     void EntityMirrorBridge::AfterEntitySelectionChanged(

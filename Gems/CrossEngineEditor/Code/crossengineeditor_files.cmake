@@ -18,8 +18,10 @@ set(FILES
     Source/Framework/EngineNodeComponent.cpp
     Source/Window/EditorMainWindow.h
     Source/Window/EditorMainWindow.cpp
-    Source/Window/AssetBrowserPanel.h
-    Source/Window/AssetBrowserPanel.cpp
+    Source/Window/CeeAssetBrowserPanel.h
+    Source/Window/CeeAssetBrowserPanel.cpp
+    Source/Window/ResourcePropertiesPanel.h
+    Source/Window/ResourcePropertiesPanel.cpp
     Source/Window/CommandPalette.h
     Source/Window/CommandPalette.cpp
     Source/Viewport/EditorViewportWidget.h
@@ -54,8 +56,10 @@ set(FILES
 
 # QFileIconProvider/QFileInfo pull in the legacy <winsock.h>, which clashes with the
 # <WinSock2.h> other translation units include when merged into a unity chunk. Compile
-# the asset-facing files on their own so the socket headers never collide.
+# the asset-facing files on their own so the socket headers never collide. The
+# CeeAssetBrowserPanel is kept out of unity chunks as well: the moc-heavy
+# AzToolsFramework AssetBrowser widget headers it includes are fragile there.
 set(SKIP_UNITY_BUILD_INCLUSION_FILES
     Source/Backends/NullBackend.cpp
-    Source/Window/AssetBrowserPanel.cpp
+    Source/Window/CeeAssetBrowserPanel.cpp
 )

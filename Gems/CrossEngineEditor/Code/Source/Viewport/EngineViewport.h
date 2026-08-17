@@ -8,12 +8,12 @@
 
 //! QWidget container that embeds the native EngineViewportWindow into the dock tree.
 //!
-//! Design: qt6_viewport_design.md §3.1. This is the widget the docking system sees; it
+//! Design: Plan §B2. This is the widget the docking system sees; it
 //! wraps EngineViewportWindow with QWidget::createWindowContainer and forwards the
 //! window's lifecycle/input signals. The container carries the attributes that stop Qt
 //! from allocating a backing store or painting a background over the GPU surface, and
 //! sets WA_DontCreateNativeAncestors so docking does not recursively native-ise the
-//! ancestor chain (§2.2, §2.4).
+//! ancestor chain (Plan §B2).
 
 #if !defined(Q_MOC_RUN)
 #include <QWidget>
@@ -39,7 +39,7 @@ namespace CrossEngineEditor
         //! Native surface handle for the backend RHI (see EngineViewportWindow::platformHandle).
         [[nodiscard]] void* NativeHandle() const noexcept;
 
-        //! Client-area size in physical pixels - the swapchain size (§2.6).
+        //! Client-area size in physical pixels - the swapchain size (Plan §B2).
         [[nodiscard]] QSize PhysicalSize() const noexcept;
 
         [[nodiscard]] qreal PixelRatio() const noexcept;
@@ -60,10 +60,10 @@ namespace CrossEngineEditor
         //! Raw input forwarded from the native window to the engine input dispatcher.
         void InputEvent(QEvent* event);
 
-        //! Surface visibility changed - the controller pauses/resumes its frame loop (§2.14).
+        //! Surface visibility changed - the controller pauses/resumes its frame loop (Plan §B3).
         void VisibilityChanged(bool visible);
 
-        //! Viewport focus gained/lost - engine camera input start/stop (§2.12).
+        //! Viewport focus gained/lost - engine camera input start/stop (Plan §B2).
         void FocusChanged(bool hasFocus);
 
     private:

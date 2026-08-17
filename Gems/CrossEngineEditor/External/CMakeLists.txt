@@ -204,7 +204,7 @@ endif()
 
 # =======================================================================================
 # rbfx (Urho3D fork) - optional real engine backend, gated so the editor still builds
-# without it. Uses the local checkout via add_subdirectory (plan section 6.2).
+# without it. Uses the local checkout via add_subdirectory (Plan §B1).
 # =======================================================================================
 # rbfx is large; building it is opt-in. Default ON per project requirement.
 # Path to the rbfx source checkout. Override with -DCEE_RBFX_ROOT=<path> if needed.
@@ -307,7 +307,7 @@ endif()
 # Unlike rbfx/Diligent we do NOT add_subdirectory Godot: it is built out-of-tree with scons
 # (scons platform=windows target=editor library_type=shared_library) into a libgodot DLL,
 # and the editor loads that DLL at RUNTIME via LoadLibrary + libgodot_create_godot_instance
-# (plan §1/§6.3). At BUILD time we only need Godot's GDExtension C-API headers so GodotBackend
+# (Plan §B1 / godot_migration.md §2). At BUILD time we only need Godot's GDExtension C-API headers so GodotBackend
 # can call libgodot.h / gdextension_interface.h. This keeps Godot's enormous build graph out
 # of our configure entirely and means enabling Godot never forces a multi-hour scons build.
 # =======================================================================================
