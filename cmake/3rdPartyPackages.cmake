@@ -750,7 +750,20 @@ if(PAL_TRAIT_BUILD_HOST_TOOLS AND NOT O3DE_SCRIPT_ONLY)
     # (which adds the package folder to CMAKE_MODULE_PATH) followed by
     # find_package(Qt REQUIRED MODULE). Importing it globally here also ensures
     # AUTOMOC/AUTOUIC/AUTORCC see Qt before any target requests it.
-    ly_parse_third_party_dependencies(3rdParty::Qt)
+    #
+    # The qt-6.11.1-rev1-windows package is project-authored and NOT hosted on
+    # the public O3DE package server, so a machine without the unpacked package
+    # (and without a private LY_PACKAGE_SERVER_URLS entry) would fail the
+    # configure-time download. Fall back to a system-installed Qt 6.11.1 SDK:
+    # the repo-local cmake/3rdParty/FindQt.cmake is the same script the package
+    # ships, but resolves the SDK from the -DQT_PATH=<path> cache variable
+    # instead of from inside the package. Machines WITH the package take the
+    # original package path unchanged.
+    if(EXISTS "${LY_PACKAGE_UNPACK_LOCATION}/qt-6.11.1-rev1-windows/FindQt.cmake")
+        ly_parse_third_party_dependencies(3rdParty::Qt)
+    else()
+        include(${LY_ROOT_FOLDER}/cmake/3rdParty/FindQt.cmake)
+    endif()
 
     # PySide6 (Qt for Python) is pip-installed into the O3DE Python venv
     # (pip install "pyside6==6.11.*", which pulls shiboken6). It lives on the
