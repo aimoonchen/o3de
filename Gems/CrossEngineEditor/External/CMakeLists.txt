@@ -34,7 +34,8 @@ set(CEE_ADS_ROOT ${CEE_EXTERNAL_ROOT}/Qt-Advanced-Docking-System)
 
 if(EXISTS ${CEE_ADS_ROOT}/CMakeLists.txt)
     # ADS honours these cache options (see its CMakeLists.txt). Build a static lib for Qt6.
-    set(ADS_VERSION "" CACHE STRING "" FORCE) # let ADS derive its own version
+    # The submodule is pinned to v5.1.1 (gitlink), whose CMakeLists hardcodes VERSION 5.1.1 —
+    # no git-describe / version override needed at this revision.
     set(BUILD_STATIC ON CACHE BOOL "Build ADS as a static library" FORCE)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(QT_VERSION_MAJOR 6 CACHE STRING "" FORCE)
