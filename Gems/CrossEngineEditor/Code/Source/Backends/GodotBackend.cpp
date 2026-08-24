@@ -21,6 +21,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QDir>
@@ -324,6 +325,38 @@ namespace CrossEngineEditor
         // iteration follows immediately (Plan §B3 单循环).
         if (!m_state.m_started)
         {
+#if defined(CEE_GODOT_HEADER_VERSION_MAJOR) && defined(CEE_GODOT_HEADER_VERSION_MINOR)
+            // Header/runtime handshake: the GDExtension headers come from the CEE_GODOT_ROOT
+            // checkout while the engine comes from its bin/ libgodot DLL, and the two can drift
+            // apart (checkout updated without rebuilding the DLL -> silently mixed ABI). Compare
+            // major.minor once at startup; the constants are injected by the CMake facade from
+            // the checkout's git tag.
+            if (GDExtensionObjectPtr engine = m_state.m_api.GetSingleton("Engine"))
+            {
+                const GodotVariant versionInfo = m_state.m_api.Call(engine, "get_version_info");
+                if (m_state.m_api.TypeOf(versionInfo) == GDEXTENSION_VARIANT_TYPE_DICTIONARY)
+                {
+                    const AZStd::string runtimeVersion = m_state.m_api.VariantStringToAz(
+                        m_state.m_api.DictGet(versionInfo, "string"));
+                    const size_t dot = runtimeVersion.find('.');
+                    if (dot != AZStd::string::npos)
+                    {
+                        const int runtimeMajor = atoi(runtimeVersion.substr(0, dot).c_str());
+                        const int runtimeMinor = atoi(runtimeVersion.substr(dot + 1).c_str());
+                        if (runtimeMajor != CEE_GODOT_HEADER_VERSION_MAJOR ||
+                            runtimeMinor != CEE_GODOT_HEADER_VERSION_MINOR)
+                        {
+                            AZ_Warning("CrossEngineEditor", false,
+                                "Godot backend: runtime libgodot is '%s' but the headers were built from "
+                                "Godot %d.%d. Rebuild the DLL (scons platform=windows target=editor "
+                                "library_type=shared_library) or point -DCEE_GODOT_ROOT at the matching checkout.",
+                                runtimeVersion.c_str(),
+                                CEE_GODOT_HEADER_VERSION_MAJOR, CEE_GODOT_HEADER_VERSION_MINOR);
+                        }
+                    }
+                }
+            }
+#endif
             m_state.m_api.Call(m_state.m_instance, "start");
             m_state.m_started = true;
 

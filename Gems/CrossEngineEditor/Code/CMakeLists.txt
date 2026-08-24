@@ -9,10 +9,11 @@ if(NOT PAL_TRAIT_BUILD_HOST_TOOLS)
 endif()
 
 # ---------------------------------------------------------------------------------------
-# External git submodules (Qt-Advanced-Docking-System, DiligentEngine).
-#   Sets CEE_HAVE_ADS / CEE_HAVE_DILIGENT and creates the ads::qtadvanceddocking /
-#   CrossEngine::Diligent targets when the submodules are checked out. Included before
-#   the target so we can conditionally add the dependency + compile definition.
+# External integrations (git submodules Qt-Advanced-Docking-System / DiligentEngine / tracy,
+# plus the rbfx / Godot source checkouts). Sets the CEE_HAVE_* flags and creates the
+# ads::qtadvanceddocking / CrossEngine::Diligent / CrossEngine::Rbfx / CrossEngine::Godot /
+# CrossEngine::Tracy targets when the sources are present. Included before the target so we
+# can conditionally add the dependency + compile definition.
 # ---------------------------------------------------------------------------------------
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../External ${CMAKE_CURRENT_BINARY_DIR}/CrossEngineExternal)
 
@@ -52,7 +53,6 @@ set_target_properties(CrossEngineEditor PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
-target_compile_features(CrossEngineEditor PRIVATE cxx_std_23)
 
 # ---------------------------------------------------------------------------------------
 # Wire the external submodules that are present. Each contributes a link dependency and a
@@ -61,7 +61,6 @@ target_compile_features(CrossEngineEditor PRIVATE cxx_std_23)
 # ---------------------------------------------------------------------------------------
 if(CEE_HAVE_ADS)
     ly_target_link_libraries(CrossEngineEditor PRIVATE ads::qtadvanceddocking)
-    target_include_directories(CrossEngineEditor PRIVATE ${CEE_ADS_INCLUDE_DIR})
     target_compile_definitions(CrossEngineEditor PRIVATE CEE_HAVE_ADS=1)
 endif()
 
@@ -132,17 +131,16 @@ if(CEE_HAVE_GODOT)
     )
 
     # Copy the runtime libgodot DLL next to the editor executable so `--backend godot` loads it
-    # via LoadLibrary without needing it on PATH. Only if a built DLL exists (scons produces
-    # godot.windows.editor.*.dll); silently skipped otherwise so a header-only configure still
-    # builds. Point at your build with -DCEE_GODOT_ROOT=<path>.
-    file(GLOB _cee_godot_dll "${CEE_GODOT_ROOT}/bin/godot.windows.editor*.x86_64.dll")
-    if(_cee_godot_dll)
-        list(GET _cee_godot_dll 0 _cee_godot_dll0)
-        add_custom_command(TARGET CrossEngineEditor POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${_cee_godot_dll0}" "$<TARGET_FILE_DIR:CrossEngineEditor>"
-            COMMENT "Copying libgodot runtime DLL next to CrossEngineEditor")
-    endif()
+    # via LoadLibrary without needing it on PATH. Done at BUILD time (cmake -P script) so a DLL
+    # produced by scons AFTER configure is still picked up — a configure-time file(GLOB) would
+    # miss it. Silently skipped when no DLL exists yet so a header-only configure still builds.
+    # Point at your build with -DCEE_GODOT_ROOT=<path>.
+    add_custom_command(TARGET CrossEngineEditor POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            "-DCEE_GODOT_ROOT=${CEE_GODOT_ROOT}"
+            "-DCEE_GODOT_DLL_DEST=$<TARGET_FILE_DIR:CrossEngineEditor>"
+            -P ${CMAKE_CURRENT_LIST_DIR}/cmake/CopyLibGodotDll.cmake
+        COMMENT "Copying libgodot runtime DLL next to CrossEngineEditor")
 endif()
 
 # ---------------------------------------------------------------------------------------
@@ -157,11 +155,12 @@ if(CEE_HAVE_TRACY)
     # rbfx vendors its OWN (older) copy of Tracy under Source/ThirdParty/tracy/public and adds it
     # to our include path transitively. If <tracy/Tracy.hpp> resolves to THAT copy the client and
     # the instrumentation disagree on the config-mangled symbol names (GetProfiler_CFG_... vs the
-    # plain GetProfiler), and the editor fails to link. Force OUR v0.14.0 public/ dir to the FRONT
+    # plain GetProfiler), and the editor fails to link. Force OUR v0.14.1 public/ dir to the FRONT
     # of the search order (BEFORE) so <tracy/Tracy.hpp> always resolves to the same headers that
-    # built TracyClient.cpp.
+    # built TracyClient.cpp. Use CEE_TRACY_ROOT (not a relative path) so a -DCEE_TRACY_ROOT
+    # override moves both the client TU and this include together.
     target_include_directories(CrossEngineEditor BEFORE PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}/../External/tracy/public)
+        ${CEE_TRACY_ROOT}/public)
     # Tracy's inline client code (ZoneScoped/plots expanded at every call site) trips a handful of
     # MSVC warnings that O3DE promotes to errors under /WX. They fire in OUR TUs at the macro
     # expansion point, so an in-header #pragma push/pop cannot reliably cover every instantiation;
@@ -174,13 +173,9 @@ endif()
 ly_set_gem_variant_to_load(TARGETS CrossEngineEditor VARIANTS Tools)
 
 # Inject LY_CMAKE_TARGET so the application can locate its generated dependency .setreg.
-if(TARGET CrossEngineEditor)
-    set_source_files_properties(
-        Source/Application/CrossEngineEditorApplication.cpp
-        PROPERTIES
-            COMPILE_DEFINITIONS
-                LY_CMAKE_TARGET="CrossEngineEditor"
-    )
-else()
-    message(FATAL_ERROR "Cannot set LY_CMAKE_TARGET define to CrossEngineEditor as the target doesn't exist anymore. Perhaps it has been renamed")
-endif()
+set_source_files_properties(
+    Source/Application/CrossEngineEditorApplication.cpp
+    PROPERTIES
+        COMPILE_DEFINITIONS
+            LY_CMAKE_TARGET="CrossEngineEditor"
+)

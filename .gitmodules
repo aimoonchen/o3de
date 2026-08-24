@@ -1,10 +1,12 @@
 [submodule "Gems/CrossEngineEditor/External/Qt-Advanced-Docking-System"]
 	path = Gems/CrossEngineEditor/External/Qt-Advanced-Docking-System
 	url = https://github.com/githubuser0xFFFF/Qt-Advanced-Docking-System.git
-	branch = master
 	shallow = true
 [submodule "Gems/CrossEngineEditor/External/DiligentEngine"]
 	path = Gems/CrossEngineEditor/External/DiligentEngine
 	url = https://github.com/DiligentGraphics/DiligentEngine.git
-	branch = master
+	shallow = true
+[submodule "Gems/CrossEngineEditor/External/tracy"]
+	path = Gems/CrossEngineEditor/External/tracy
+	url = https://github.com/wolfpld/tracy.git
 	shallow = true

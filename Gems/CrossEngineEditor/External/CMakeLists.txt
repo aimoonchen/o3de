@@ -6,17 +6,21 @@
 # ---------------------------------------------------------------------------------------
 # External git submodules for CrossEngineEditor.
 #
-# Both libraries are pulled in as git submodules (see repo-root .gitmodules) and wired
+# These projects are pulled in as git submodules (see repo-root .gitmodules) and wired
 # via their own official CMake, per each project's documentation:
 #   - Qt-Advanced-Docking-System : https://github.com/githubuser0xFFFF/Qt-Advanced-Docking-System
 #   - DiligentEngine             : https://github.com/DiligentGraphics/DiligentEngine
+#   - tracy                      : https://github.com/wolfpld/tracy (client TU, compiled directly)
 #
 # To fetch:  git submodule update --init --recursive
 #
 # This file is included by Gems/CrossEngineEditor/Code/CMakeLists.txt. It creates the
-# imported/interface targets the editor links against:
+# targets the editor links against (each gated on its CEE_HAVE_* flag):
 #   - ads::qtadvanceddocking   (docking system)
-#   - CrossEngine::Diligent    (RHI facade, only when DILIGENT is present + enabled)
+#   - CrossEngine::Diligent    (RHI facade)
+#   - CrossEngine::Rbfx        (Urho3D engine backend)
+#   - CrossEngine::Godot       (libgodot header facade)
+#   - CrossEngine::Tracy       (profiler client)
 #
 # Design notes:
 #   * These are third-party sources compiled inside an O3DE build that enables /WX
@@ -27,30 +31,57 @@
 
 set(CEE_EXTERNAL_ROOT ${CMAKE_CURRENT_LIST_DIR})
 
+# ---------------------------------------------------------------------------------------
+# O3DE runtime-dependency walker integration (see cmake/Platform/Common/
+# RuntimeDependencies_common.cmake): the walker recursively follows LINK_LIBRARIES of every
+# target and only marks a target "cached" AFTER descending into its children. Third-party
+# static-lib graphs (Diligent has cyclic target_link_libraries between its core libs) can
+# therefore recurse until CMake's 1000-deep limit and abort configuration. Pre-seed the
+# per-target memoization the walker itself uses (O3DE_DEPENDENCIES_CACHED_*) so it treats
+# the whole subtree as already-walked leaves. This is correct: these are STATIC libraries
+# with no runtime output to copy to the target directory.
+#   NOTE: this couples to an O3DE internal implementation detail. If the walker's cache key
+#   or semantics change in a future O3DE release, this macro is the single place to update.
+# ---------------------------------------------------------------------------------------
+macro(cee_mark_third_party_subtree_cached)
+    foreach(_cee_cached ${ARGN})
+        set_property(GLOBAL PROPERTY O3DE_COPY_DEPENDENCIES_${_cee_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_TARGET_DEPENDENCIES_${_cee_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_LINK_DEPENDENCIES_${_cee_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_IMPORTED_DEPENDENCIES_${_cee_cached} "")
+        set_property(GLOBAL PROPERTY O3DE_DEPENDENCIES_CACHED_${_cee_cached} TRUE)
+    endforeach()
+endmacro()
+
 # =======================================================================================
 # Qt-Advanced-Docking-System (ADS)
 # =======================================================================================
 set(CEE_ADS_ROOT ${CEE_EXTERNAL_ROOT}/Qt-Advanced-Docking-System)
 
 if(EXISTS ${CEE_ADS_ROOT}/CMakeLists.txt)
-    # ADS honours these cache options (see its CMakeLists.txt). Build a static lib for Qt6.
+    # ADS declares BUILD_STATIC/BUILD_EXAMPLES via option() and reads QT_VERSION_MAJOR as a plain
+    # variable (v5.1.1: src/CMakeLists.txt uses find_package(Qt${QT_VERSION_MAJOR})). Setting them
+    # as ordinary (non-CACHE) variables shadows ADS's options for the add_subdirectory below
+    # WITHOUT polluting the global cache — these are generic names any other subproject may use.
     # The submodule is pinned to v5.1.1 (gitlink), whose CMakeLists hardcodes VERSION 5.1.1 —
     # no git-describe / version override needed at this revision.
-    set(BUILD_STATIC ON CACHE BOOL "Build ADS as a static library" FORCE)
-    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(QT_VERSION_MAJOR 6 CACHE STRING "" FORCE)
+    set(BUILD_STATIC ON) # Build a static lib for Qt6.
+    set(BUILD_EXAMPLES OFF)
+    set(QT_VERSION_MAJOR 6)
 
-    # ADS's own CMake calls find_package(QT NAMES Qt6 ...) + find_package(Qt6 ...), which need the
-    # umbrella Qt6Config.cmake. O3DE resolves Qt per-component (Qt6Core_DIR, ...) but does not set
-    # Qt6_DIR/QT_DIR, so point ADS at the vendored Qt6 cmake package dir (from O3DE's QT_PATH).
+    # ADS's own CMake calls find_package(Qt6 ...), which needs Qt6Config.cmake via Qt6_DIR.
+    # O3DE resolves Qt per-component (Qt6Core_DIR, ...) but does not set Qt6_DIR/QT_DIR, so point
+    # ADS at the vendored Qt6 cmake package dir (from O3DE's QT_PATH). No FORCE: an existing
+    # user-provided Qt6_DIR/QT_DIR in the cache is respected.
     if(DEFINED QT_PATH AND EXISTS ${QT_PATH}/lib/cmake/Qt6/Qt6Config.cmake)
-        set(QT_DIR ${QT_PATH}/lib/cmake/Qt6 CACHE PATH "" FORCE)
-        set(Qt6_DIR ${QT_PATH}/lib/cmake/Qt6 CACHE PATH "" FORCE)
+        set(QT_DIR ${QT_PATH}/lib/cmake/Qt6 CACHE PATH "")
+        set(Qt6_DIR ${QT_PATH}/lib/cmake/Qt6 CACHE PATH "")
     endif()
 
-    # ADS's find_package(QT ...) uses versionless Qt; our vendored Qt package already
-    # publishes QT_DEFAULT_MAJOR_VERSION=6 and promotes imported targets to GLOBAL, so
-    # ads::qtadvanceddocking resolves Qt6::Core/Gui/Widgets from the same SDK.
+    # v5.1.1 discovers Qt in two stages: find_package(QT NAMES Qt${QT_VERSION_MAJOR}) umbrella
+    # first, then find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Core Gui Widgets). Both resolve
+    # through Qt6_DIR above against the same vendored Qt SDK that O3DE's 3rdParty::Qt targets
+    # use, so the whole editor links one Qt.
     add_subdirectory(${CEE_ADS_ROOT} ${CMAKE_CURRENT_BINARY_DIR}/ads EXCLUDE_FROM_ALL)
 
     # ADS names its target "qtadvanceddocking-qt6" (Qt6) or "qtadvanceddocking".
@@ -63,6 +94,8 @@ if(EXISTS ${CEE_ADS_ROOT}/CMakeLists.txt)
         message(FATAL_ERROR "ADS submodule present but neither qtadvanceddocking-qt6 nor qtadvanceddocking target was created.")
     endif()
 
+    # v5.1.1 (pinned) already creates the ads::qtadvanceddocking alias itself; this guard is
+    # forward-compat only, for a hypothetical older ADS revision that does not.
     if(NOT TARGET ads::qtadvanceddocking)
         add_library(ads::qtadvanceddocking ALIAS ${CEE_ADS_TARGET})
     endif()
@@ -75,9 +108,8 @@ if(EXISTS ${CEE_ADS_ROOT}/CMakeLists.txt)
     endif()
 
     set(CEE_HAVE_ADS TRUE PARENT_SCOPE)
-    # Export the include dir so consumers relying on <DockManager.h> resolve it even if
-    # the ADS target's INTERFACE include dirs are namespaced.
-    set(CEE_ADS_INCLUDE_DIR ${CEE_ADS_ROOT}/src PARENT_SCOPE)
+    # No include-dir export needed: the pinned ADS target PUBLIC-exports its src/ dir, so
+    # linking ads::qtadvanceddocking propagates <DockManager.h> to consumers by itself.
 else()
     message(WARNING
         "Qt-Advanced-Docking-System submodule not found at ${CEE_ADS_ROOT}. "
@@ -178,19 +210,9 @@ if(CEE_ENABLE_DILIGENT AND EXISTS ${CEE_DILIGENT_ROOT}/CMakeLists.txt)
         ${CEE_DILIGENT_ROOT}/DiligentCore)
     target_compile_definitions(CrossEngine_Diligent INTERFACE CEE_HAVE_DILIGENT=1)
 
-    # O3DE's runtime-dependency walker (RuntimeDependencies_common.cmake) recursively follows
-    # LINK_LIBRARIES and only marks a target "cached" AFTER descending into its children. Diligent's
-    # static libs have cyclic target_link_libraries between the core libs, so that walk recurses
-    # until CMake's 1000-deep limit and aborts configuration. Pre-seed the per-target cache so the
-    # walker treats the whole Diligent subtree (and our facade) as already-walked leaves. This is
-    # correct: they are STATIC libraries with no runtime output to copy to the target directory.
-    foreach(_diligent_cached ${_cee_diligent_link} CrossEngine_Diligent)
-        set_property(GLOBAL PROPERTY O3DE_COPY_DEPENDENCIES_${_diligent_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_TARGET_DEPENDENCIES_${_diligent_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_LINK_DEPENDENCIES_${_diligent_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_IMPORTED_DEPENDENCIES_${_diligent_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_DEPENDENCIES_CACHED_${_diligent_cached} TRUE)
-    endforeach()
+    # Keep O3DE's runtime-dependency walker out of Diligent's static-lib graph (see the
+    # cee_mark_third_party_subtree_cached macro at the top of this file).
+    cee_mark_third_party_subtree_cached(${_cee_diligent_link} CrossEngine_Diligent)
 
     set(CEE_HAVE_DILIGENT TRUE PARENT_SCOPE)
 else()
@@ -212,6 +234,16 @@ endif()
 set(CEE_RBFX_ROOT "I:/rbfx" CACHE PATH "Path to the rbfx (Urho3D) source checkout")
 
 if(CEE_ENABLE_RBFX AND EXISTS ${CEE_RBFX_ROOT}/CMakeLists.txt)
+    # Build-log provenance: the checkout is a plain path (not a pinned submodule), so record
+    # which revision this configure actually builds.
+    execute_process(COMMAND git -C ${CEE_RBFX_ROOT} describe --tags --always --dirty
+        OUTPUT_VARIABLE _cee_rbfx_desc OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_cee_rbfx_desc)
+        message(STATUS "CrossEngineEditor: rbfx backend = ${_cee_rbfx_desc} (${CEE_RBFX_ROOT})")
+    else()
+        message(STATUS "CrossEngineEditor: rbfx backend at ${CEE_RBFX_ROOT} (not a git checkout - revision unknown)")
+    endif()
+
     # rbfx build knobs: we only need the engine library, no samples/tools/tests.
     set(URHO3D_SAMPLES OFF CACHE BOOL "" FORCE)
     set(URHO3D_TOOLS OFF CACHE BOOL "" FORCE)
@@ -280,15 +312,9 @@ if(CEE_ENABLE_RBFX AND EXISTS ${CEE_RBFX_ROOT}/CMakeLists.txt)
     target_include_directories(CrossEngine_Rbfx INTERFACE ${CEE_RBFX_ROOT}/Source)
     target_compile_definitions(CrossEngine_Rbfx INTERFACE CEE_HAVE_RBFX=1)
 
-    # Pre-seed O3DE's runtime-dependency walker so it treats the rbfx subtree as walked
-    # leaves (same rationale as Diligent: static lib graph would overflow the walker).
-    foreach(_rbfx_cached Urho3D CrossEngine_Rbfx)
-        set_property(GLOBAL PROPERTY O3DE_COPY_DEPENDENCIES_${_rbfx_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_TARGET_DEPENDENCIES_${_rbfx_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_LINK_DEPENDENCIES_${_rbfx_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_IMPORTED_DEPENDENCIES_${_rbfx_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_DEPENDENCIES_CACHED_${_rbfx_cached} TRUE)
-    endforeach()
+    # Keep O3DE's runtime-dependency walker out of rbfx's static-lib graph (see the
+    # cee_mark_third_party_subtree_cached macro at the top of this file).
+    cee_mark_third_party_subtree_cached(Urho3D CrossEngine_Rbfx)
 
     set(CEE_HAVE_RBFX TRUE PARENT_SCOPE)
 else()
@@ -335,8 +361,27 @@ if(CEE_ENABLE_GODOT AND EXISTS ${CEE_GODOT_ROOT}/core/extension/libgodot.h)
             CEE_GODOT_GDEXTENSION_HEADER="core/extension/gdextension_interface.h")
     endif()
 
+    # Build-log provenance + header/runtime handshake: the checkout is a plain path (not a pinned
+    # submodule) and the libgodot DLL is built independently with scons, so the two can drift.
+    # Record the checkout revision and inject its major.minor as compile definitions for the
+    # backend's startup version check (GodotBackend.cpp).
+    execute_process(COMMAND git -C ${CEE_GODOT_ROOT} describe --tags --always --dirty
+        OUTPUT_VARIABLE _cee_godot_desc OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_cee_godot_desc)
+        message(STATUS "CrossEngineEditor: godot headers = ${_cee_godot_desc} (${CEE_GODOT_ROOT})")
+        if(_cee_godot_desc MATCHES "^([0-9]+)\\.([0-9]+)")
+            target_compile_definitions(CrossEngine_Godot INTERFACE
+                CEE_GODOT_HEADER_VERSION_MAJOR=${CMAKE_MATCH_1}
+                CEE_GODOT_HEADER_VERSION_MINOR=${CMAKE_MATCH_2})
+        else()
+            message(STATUS "CrossEngineEditor: godot describe '${_cee_godot_desc}' has no version "
+                           "tag - version check disabled")
+        endif()
+    else()
+        message(STATUS "CrossEngineEditor: godot headers at ${CEE_GODOT_ROOT} (not a git checkout - version check disabled)")
+    endif()
+
     set(CEE_HAVE_GODOT TRUE PARENT_SCOPE)
-    set(CEE_GODOT_ROOT_OUT ${CEE_GODOT_ROOT} PARENT_SCOPE)
 else()
     if(CEE_ENABLE_GODOT)
         message(WARNING
@@ -348,7 +393,7 @@ else()
 endif()
 
 # =======================================================================================
-# Tracy profiler (client) - https://github.com/wolfpld/tracy  (v0.14.0)
+# Tracy profiler (client) - https://github.com/wolfpld/tracy  (submodule pinned to v0.14.1)
 #
 # Official standard integration (see tracy/manual, "Client markup"): compile the single
 # TU public/TracyClient.cpp into a library, expose the public/ include dir, and define
@@ -397,27 +442,22 @@ if(CEE_ENABLE_TRACY AND EXISTS ${CEE_TRACY_ROOT}/public/TracyClient.cpp)
     endif()
 
     # Facade the editor links against (single stable name), mirroring CrossEngine::Diligent /
-    # CrossEngine::Rbfx. Linking the STATIC client TU through an INTERFACE facade is what O3DE's
-    # ly_add_target expects (a plain link to the STATIC target directly drops its object symbols).
+    # CrossEngine::Rbfx. It is also where the walker-cache pre-seed below lives, keeping O3DE's
+    # runtime-dependency machinery away from the static client lib.
     add_library(CrossEngine_Tracy INTERFACE)
     add_library(CrossEngine::Tracy ALIAS CrossEngine_Tracy)
     target_link_libraries(CrossEngine_Tracy INTERFACE CrossEngine_TracyClient)
 
-    # Keep O3DE's runtime-dependency walker out of these static libs (STATIC, nothing to copy).
-    foreach(_tracy_cached CrossEngine_TracyClient CrossEngine_Tracy)
-        set_property(GLOBAL PROPERTY O3DE_COPY_DEPENDENCIES_${_tracy_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_TARGET_DEPENDENCIES_${_tracy_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_LINK_DEPENDENCIES_${_tracy_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_IMPORTED_DEPENDENCIES_${_tracy_cached} "")
-        set_property(GLOBAL PROPERTY O3DE_DEPENDENCIES_CACHED_${_tracy_cached} TRUE)
-    endforeach()
+    # Keep O3DE's runtime-dependency walker out of these static libs (see the
+    # cee_mark_third_party_subtree_cached macro at the top of this file).
+    cee_mark_third_party_subtree_cached(CrossEngine_TracyClient CrossEngine_Tracy)
 
     set(CEE_HAVE_TRACY TRUE PARENT_SCOPE)
 else()
     if(CEE_ENABLE_TRACY)
         message(WARNING
             "Tracy checkout not found at ${CEE_TRACY_ROOT}/public/TracyClient.cpp. "
-            "Clone https://github.com/wolfpld/tracy (v0.14.0) into ${CEE_TRACY_ROOT}. "
+            "Run: git submodule update --init --recursive (pins v0.14.1). "
             "CrossEngineEditor will build without the Tracy profiler.")
     endif()
     set(CEE_HAVE_TRACY FALSE PARENT_SCOPE)
