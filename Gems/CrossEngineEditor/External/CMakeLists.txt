@@ -352,13 +352,26 @@ if(CEE_ENABLE_GODOT AND EXISTS ${CEE_GODOT_ROOT}/core/extension/libgodot.h)
         ${CEE_GODOT_ROOT}/core/extension)
     target_compile_definitions(CrossEngine_Godot INTERFACE CEE_HAVE_GODOT=1)
 
-    # The generated gdextension_interface.gen.h only exists after Godot has been built once.
-    # Fall back to the checked-in gdextension_interface.h when the generated one is absent so
-    # a from-scratch checkout still configures/compiles the header-facing scaffold.
-    if(NOT EXISTS ${CEE_GODOT_ROOT}/core/extension/gdextension_interface.gen.h
-       AND EXISTS ${CEE_GODOT_ROOT}/core/extension/gdextension_interface.h)
-        target_compile_definitions(CrossEngine_Godot INTERFACE
-            CEE_GODOT_GDEXTENSION_HEADER="core/extension/gdextension_interface.h")
+    # gdextension_interface.gen.h is emitted by Godot's scons build (make_interface_header.py over
+    # gdextension_interface.json). If the checkout has never been built, run that same script here:
+    # byte-identical output, and *.gen.* is gitignored in the Godot tree.
+    if(NOT EXISTS ${CEE_GODOT_ROOT}/core/extension/gdextension_interface.gen.h)
+        # PYTHONPATH=<godot root>: the script imports Godot's build helper `methods`.
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CEE_GODOT_ROOT}"
+                ${LY_PYTHON_CMD} -c
+                "import make_interface_header; make_interface_header.run(['gdextension_interface.gen.h'], ['gdextension_interface.json'], None)"
+            WORKING_DIRECTORY ${CEE_GODOT_ROOT}/core/extension
+            RESULT_VARIABLE _cee_gen_result
+            ERROR_VARIABLE _cee_gen_error
+            OUTPUT_QUIET)
+        if(_cee_gen_result)
+            message(WARNING
+                "CrossEngineEditor: failed to generate gdextension_interface.gen.h in ${CEE_GODOT_ROOT} "
+                "(${_cee_gen_error}). Build Godot once with scons before compiling the Godot backend.")
+        else()
+            message(STATUS "CrossEngineEditor: generated gdextension_interface.gen.h in ${CEE_GODOT_ROOT}")
+        endif()
     endif()
 
     # Build-log provenance + header/runtime handshake: the checkout is a plain path (not a pinned
