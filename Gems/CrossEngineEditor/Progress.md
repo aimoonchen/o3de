@@ -26,7 +26,7 @@
 | 4.5 gizmo 自绘子系统（双风格+交互辅助+Local/World+Snap）| 代码完成，gizmo 视觉待肉眼验收 |
 | 5 首个真引擎后端：**rbfx 先**（代码完成，编译链接通过）、**Godot 随**（已落地主体）| 端到端肉眼验收待做 |
 | 5.x 点选 + 帧循环单循环重构 | 已落地 |
-| 6 打磨/多引擎/Play-in-Editor | 后续 |
+| 6 打磨/多引擎/Play-in-Editor | 打磨方案定稿（`editor_polish.md`，2026-08-27，P0–P3 ≈ 26.5 人日，零 CMake 改动）；多引擎/PIE 后续 |
 
 ## 启动/析构顺序（务必保持）
 ```
@@ -107,15 +107,17 @@ Destroy: 断总线 + reset m_mainWindow → Unregister + reset backend → Tools
 
 ## 待办 / 验收清单
 
+**2026-08-27 文档裁决轮（只出文档）**：编辑器打磨与原生对齐唯一终稿 = `editor_polish.md`（原 review_editor.md 改名，三份过程稿 + 第三方 review.md 已删；D1–D13 裁决全记录）。工作量 P0≈8.6 + P1≈7.1 + P2≈10.0 + P3≈0.8 ≈ 26.5 人日（5.3 人周），零 CMake 改动、零新依赖；另有 rbfx v1.5（undo 命令化+身份稳定化，3~5 人日）为 Undo 开门硬前置。质量尺 9 条见该文 §7，实施时逐条人工点检（不建测试 target）。Plan/rbfx/材质三文档同步已执行。
+
 1. **点选全链路实测**（rbfx + Godot）：点 mesh 精确选中、橙框、Outliner/Inspector 联动、gizmo 拖拽框跟随、Ctrl 多选、Select 模式纯净点选（天空盒/灯光/旋转大盒不再抢选，含 "Geometry 100" 茶壶本体命中而旁边空白不误选）。**最优先证伪：拖 gizmo / 改属性 / 删除 → 引擎侧物体真实响应**（修复5 后应 OK；Godot 删除后 Outliner 不得残留——同步 free 修复）。若仍有 Drawable 抢选，按同法加入 rbfx 排除名单。
-2. **非可视 node 的 icon 拾取**：方向光/空 node 靠 editor icon 点选；点不中查镜像实体是否带 `EditorEntityIconComponent` 且 icon 未 hidden。
+2. ~~非可视 node 的 icon 拾取~~ → **改判（2026-08-27 D13）**：视口 billboard 图标在 CEE 撞 C1 结构性不可实现（`EditorViewportIconDisplayInterface` 唯一实现者是 Atom Gem）→ 改**线框 gizmo**（`editor_polish.md` P0-6：灯光/相机/空节点按 `m_className` 派发 WireSphere/WireCone 等，零契约改动）。
 3. **Tracy 复测** pick-then-orbit：`ApplyPendingMove` 每帧 1 次、Dispatch 总耗时骤降、300-490ms 卡顿帧消失（建议选中/未选中各 30s 对比段）。
-4. **冒烟测试**（qt6 review 遗留，从未实机运行）：🔴 B2 视口聚焦时快捷键（Ctrl+Shift+N / Delete / Q-W-E-R-T，`ShortcutOverride` 能否穿过 window-container 冒泡；失败即切 `Qt::ApplicationShortcut` 或加桥接层）；🔴 B3 gizmo 拖拽文字读数可见；🟠 dock 浮动/恢复不黑屏、resize 无闪烁、最小化恢复无 Resize(0,0)、关闭无 validation error、HiDPI 清晰。
+4. **冒烟测试**（qt6 review 遗留，从未实机运行）：🔴 B2 视口聚焦时快捷键（Ctrl+Shift+N / Delete / Q-W-E-R-T）——**已源码裁决（2026-08-27 D13 R2）**：`ShortcutOverride` 确认穿不过 window-container 边界（视口是裸 QWindow，只转发 KeyPress）→ 桥接层必做项 = `editor_polish.md` P0-2 快捷键上行桥（~15 行），实机验收兜底；🔴 B3 gizmo 拖拽文字读数可见；🟠 dock 浮动/恢复不黑屏、resize 无闪烁、最小化恢复无 Resize(0,0)、关闭无 validation error、HiDPI 清晰。
    基础工作流（阶段 2/3，代码完成未逐项验收）：New/Open/Save Level（`.prefab`）、Ctrl+P 命令面板、**Workspace Save→打乱布局→Restore 复原**。
    > 变通：无 GPU 的 CI 可先 `CEE_ENABLE_DILIGENT=OFF`（NullBackend）跑逻辑，B2 亦可测。
 5. **Gizmo 双风格 100% 对齐肉眼验收**（对照 Blender 5.x / UE）：1/2/3(或 Q/W/E/R/T) 切模式、Blender/Unreal 即时切换、World/Local、Snap 跳格、回写可 Undo；Blender 细线轴+8段锥+菱形平面柄+旋转细环半环+白 view ring+视角淡出+拖拽灰 ghost+area-header 数值；Unreal 3D 圆柱轴+锥头+实体方管臂+旋转厚填充环带朝相机象限+屏幕厚环+中心球/方+hover 变黄+黄 snap 刻度+白字黑底块 HUD；线宽可辨、UE 蓝 Z 不被 remap、Undo/Outliner 拖拽后 gizmo 归位。
 6. **P3 打磨**：Gizmo N4-N7、F.7 backlog（见 `Plan.md` §B7）；Qt6 B4/B5/B7/B8（§B8）。
-7. **v1.5**：undo 命令化 + 镜像身份稳定化（`rbfx_migration.md` §4）。
+7. **v1.5**：undo 命令化 + 镜像身份稳定化（`rbfx_migration.md` §4，3~5 人日）——同时是 CEE 壳 Undo/Redo 开门的**硬前置**（`editor_polish.md` P0-7 先置灰占位，v1.5 落地后开门）。
 8. **v2**：引擎侧增量同步（重同步先清旧镜像）；Godot 三角精拾（同一 `RaycastNode` 接缝）；dirty 渲染；独立渲染线程（与 InputPacket POD 捆绑）；Play-in-Editor；Godot 导入管线进程内；IAssetSource 升 SQLite。
 
 ## 已核实关键 API（速查）
@@ -126,7 +128,7 @@ Destroy: 断总线 + reset m_mainWindow → Unregister + reset backend → Tools
 
 ## 关键文件
 
-- 方案：`Plan.md`（rbfx 后端终稿 `rbfx_migration.md`；Godot 后端终稿 `godot_migration.md`）
+- 方案：`Plan.md`（rbfx 后端终稿 `rbfx_migration.md`；Godot 后端终稿 `godot_migration.md`；编辑器打磨·原生对齐终稿 `editor_polish.md`）
 - 代码：`Framework/EngineNodeComponent.{h,cpp}` / `EngineProperty.{h,cpp}` / `EngineTransformConverter.h`；
   `Backends/{NullBackend,DiligentBackend,RbfxBackend,GodotBackend}.{h,cpp}` / `GodotApi.h`；
   `Viewport/EngineViewport.{h,cpp}` / `EngineViewportWindow.{h,cpp}` / `EditorViewportWidget.{h,cpp}` /

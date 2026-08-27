@@ -105,7 +105,7 @@ entry 树裸指针父子，Root 持有整树（析构 RemoveChildren 级联，As
 - 回写：变更总线（按 entity id 寻址）→ 全量 bag WriteResourceProperties（后端按名匹配，未知名/只读项忽略）；全量回写 = KISS（无 undo 记账需求）
 - Save：面板 Save 按钮 → 契约 SaveResource → 后端把已编辑的缓存资源序列化到源文件（rbfx: Material::Save 写 XML material 根；路径解析同 SaveScene）；失败弹框提示 + Console 告警
 - 数据流：编辑期反射直读直写，不经字节往返；落盘两步 = 编辑进缓存（WriteResourceProperties）→ 序列化缓存（SaveResource）
-- palette 头部可见但惰性（HideComponentPalette 为 private，EntityPropertyEditor.hxx:348，v1 外观项）
+- palette 缺口修正（2026-08-27）：真正缺的是 `ComponentPaletteWidget` 未接（非"头部惰性"——EntityPropertyEditor 自实例化 palette，`EntityPropertyEditor.cpp:607`）；头部隐藏（HideComponentPalette 为 private，EntityPropertyEditor.hxx:348）= P2 外观项（`editor_polish.md` §5）
 
 ### 3.4 双击打开 / 拖放赋值 / Console / 关闭
 
@@ -125,7 +125,7 @@ entry 树裸指针父子，Root 持有整树（析构 RemoveChildren 级联，As
 
 - 已知限制：创建后新对象不自动选中；删除撤销恢复幽灵镜像（再删告警 no-op、重镜像清除；Godot 异步删除幽灵已修=同步 free；Plan §B10 必测项 7）；可编辑资源 = Material（其余类型打开为空+告警）；资源编辑无 undo/redo；New/Open Level 走 O3DE prefab ownership、与引擎场景（SaveScene）正交（v1 不联动）；AssignAnimation 只赋值不播放（编辑器内动画不播放 → bounds 缓存稳定，Plan §B5b；动画/引擎侧自变几何 = 已知滞后，与 v2 增量同步一并解决）；全量重镜像使镜像实体 undo 历史失效（撤销早先编辑落在死 id 上 = no-op 告警非崩溃）
 - v1.5 待办：undo 命令化 + 镜像身份稳定化（§4）
-- v2 待办：新建材质、palette 隐藏、资源编辑 undo/redo、预览/截图/RenderPath 编辑、Play-in-Editor、Godot 导入管线进程内、IAssetSource 升 SQLite、icon provider 作用域分流、Refresh 展开态恢复
+- v2 待办：新建材质、palette 隐藏、资源编辑 undo/redo、预览/截图/RenderPath 编辑、Play-in-Editor、Godot 导入管线进程内、IAssetSource 升 SQLite、icon provider 作用域分流。~~Refresh 展开态恢复~~（2026-08-27 降级 P2：`QTreeViewStateSaver` 现成，`editor_polish.md` §5）
 
 ### 3.7 护栏与构建记录
 
@@ -147,11 +147,11 @@ entry 树裸指针父子，Root 持有整树（析构 RemoveChildren 级联，As
   | SetTransform | `OnEditorTransformChanged(id, newXf)` | 同上（回放 oldXf） |
   | Reparent | `TransformBus::SetParent` + 引擎侧同步 | 反向 |
 
-  ② 镜像身份稳定化——EntityId 由引擎 handle 确定性派生 + 差集式重镜像（新增建/消失删/存留原地更新）→ undo 记录、选中、展开态存活，幽灵镜像自动清除。验收 = **10 次 Ctrl+Z 回到初始状态**；身份稳定化另消除每次创建 O(N·P) 全量重建。
+  ② 镜像身份稳定化——EntityId 由引擎 handle 确定性派生 + 差集式重镜像（新增建/消失删/存留原地更新）→ undo 记录、选中、展开态存活，幽灵镜像自动清除。验收 = **10 次 Ctrl+Z 回到初始状态**；身份稳定化另消除每次创建 O(N·P) 全量重建。**2026-08-27 D13 落账：本节 v1.5 = CEE 壳 Undo/Redo 开门的硬前置（3~5 人日）**——`editor_polish.md` P0-7 先注册 Undo/Redo 但**占位置灰**（`ScopedUndoBatch` 仅 5 处全在 gizmo；`RefreshFromEngine` 整批重建镜像 → 撤销历史悬空，「宁可禁用不可半残」），v1.5 两件套落地后开门，「10 次 Ctrl+Z」尺子随之为可执行验收。
 - **v1.6（低成本高收益，可与 v1.5 并行）**：① E3 属性元信息增量——`EngineProperty` 基类增 4 可选字段：`m_min/m_max/m_step`（rbfx `P_APPLICATION_MIN/MAX` / Godot `PROPERTY_HINT_RANGE`；Min+Max → O3DE 官方 Slider handler 自动生效，`RebuildEditData` 追加 attribute，**零新控件零新 handler**）、`m_description`（tooltip；归还被 `m_category` 占用的语义，`EngineNodeComponent.cpp:118`）、`m_resourceTypeFilter`（资源选择器过滤）。② E2 第一步契约阀门——`IEngineBackend` 增**最后一个**方法 `InvokeCustom(command, PropertyBag& args, PropertyBag& result)`（默认 false = 不支持，符合 C4 哨兵语义）；从此引擎专属功能一律走此路，`IEntityMirror` 冻结。验收：契约方法数不再增长（CI grep 断言纯虚计数）。
 - **v2 首选（L2）**：Open Scene——Save 走引擎（`SaveScene`）、Open 目前走 prefab 不 round-trip；rbfx = 清场景 + `LoadFile` + 重镜像（`RbfxBackend.cpp OnSurfaceCreated`），Godot = ResourceLoader 载 PackedScene 换根。PIE 现成范式（v2 需要时）：rbfx 原版 `SimulateSceneAction` = `PackedSceneData` 全量存档 → 恢复场景更新 → 停止还原（`Editor/Foundation/SceneViewTab.cpp:1327-1368`，可撤销），直接支撑 `ISimulation::Play/Stop` 实现。
 - **可缓（第三后端接入前为 E2 第二步准入线）**：E2 第二步契约瘦身——`AssignMaterial/AssignAnimation/CreatePrefabFromNodes/SaveResource/Read|WriteResourceProperties` 迁回 `InvokeCustom`，`IEntityMirror` 回落 9–10 纯虚（基线：Godot stub **10/15**，`GodotBackend.cpp:1306-1378`；瘦身后 stub 尺子目标 **≤3**）；`BackendCaps`（硬约束字段 ≤10：engineName/engineVersion/supportsPreciseRaycast/supportsResourceEditing/supportsPrefab/supportsSaveScene/sceneExtensions/assetExtensions——`m_assetExtensions` 顺带消灭 shell 4 处 rbfx 扩展名硬编码，吸收原"ClassifyAsset 下沉"项；能力位以引擎数据承载，替代 deepseek_1 的 EngineProfile JSON）；E5 第三后端 PoC 契约证伪——`DiligentBackend` 补齐镜像面（渲染已真、镜像委托 Null），验收 = 最小集（`Initialize/Shutdown/Tick` + 表面 3 + overlay 3 + `SyncToEditor/OnEditorTransformChanged/OnEditorPropertyChanged/CreateObject/DestroyObject/GetWorldBounds` + 枚举 2）之外**零实现**，做不到即回炉 E2；Diligent 默认 OFF（一行 CMake；rbfx 默认 ON 时本就编译期互斥不编译它）。
-- **已驳回/降级（防过度设计先例）**：dynamic_cast 能力探测、ViewportId 预留、契约拆分 Plan A、v1 语义中立化；ActionManager 全量接入与属性懒加载暂不做（仅 §B2 快捷键实测出问题时接 `HotKeyWidgetRegistrationInterface` 一小块）。deepseek_1 三点：**Godot 进程外 IPC**（libgodot 同进程已实测跑通，见 `godot_migration.md` §1）、**EngineProfile JSON 配置层**（按引擎裁剪面板集/布局 = 无消费者即 YAGNI，能力位需求由 BackendCaps 承载）、**数据面存引擎原生值**（违反 C4，坐标转换从单点散布到各消费者）。**防复发清单（从零设计已证伪路径，勿重推）**：跨进程/IPC、自建数据层（SceneDocument/自写树模型/DPE 适配 ≈1900 行重复轮子）、输入上行 + 1 帧延迟、TypeRegistry + 磁盘缓存（进程内可随时直查引擎反射）、Edit POD + Kind 枚举、多 Gem 拆分、ImmediateMesh 逐顶点、octree/物理拾取。
+- **已驳回/降级（防过度设计先例）**：dynamic_cast 能力探测、ViewportId 预留、契约拆分 Plan A、v1 语义中立化；属性懒加载暂不做。~~ActionManager 全量接入暂不做~~（**2026-08-27 推翻**：当时论证只把 ActionManager 当"快捷键方案"，漏掉它同时是**四个** context menu 的唯一数据源 + Undo/Redo 入口；P0/P1 全量接入，见 `editor_polish.md` §5）。deepseek_1 三点：**Godot 进程外 IPC**（libgodot 同进程已实测跑通，见 `godot_migration.md` §1）、**EngineProfile JSON 配置层**（按引擎裁剪面板集/布局 = 无消费者即 YAGNI，能力位需求由 BackendCaps 承载）、**数据面存引擎原生值**（违反 C4，坐标转换从单点散布到各消费者）。**防复发清单（从零设计已证伪路径，勿重推）**：跨进程/IPC、自建数据层（SceneDocument/自写树模型/DPE 适配 ≈1900 行重复轮子）、输入上行 + 1 帧延迟、TypeRegistry + 磁盘缓存（进程内可随时直查引擎反射）、Edit POD + Kind 枚举、多 Gem 拆分、ImmediateMesh 逐顶点、octree/物理拾取。
 - **两把验收尺子**（"跨引擎"从愿景变事实）："接 Unreal 要 stub 几个方法"（Plan §A6 C5 口径；基线 10/15 → 瘦身后 ≤3）、"10 个操作后 10 次 Ctrl+Z 能否回到初始状态"（本 §v1.5）。
 - 裁决中的 P0 已随本轮落地并入正文：§2.1/2.3/2.4 锚点与软退化、§3.1 哨兵默认接缝（19 方法）、§3.5 kimi P0 标注、§3.6 动画不播放与 replaceWithRef 删除；Godot 同步 free 与 transform 抑制位已入代码。
 

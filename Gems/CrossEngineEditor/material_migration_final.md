@@ -793,7 +793,7 @@ P0–P4 已 8~9 人周（2026-08-25 opus review 重估），且它不阻塞任�
 |---|---|
 | ① 双 `AzQtApplication` 不可同进程 | **不承重**。§6.3 早已决定不继承 `AtomToolsApplication`；内嵌形态下只有一个 `CrossEngineEditorApplication`，"双 Application"从来不存在。这条是拿一个被自己否决的前提当论据 |
 | ② `ISceneRenderer` 单表面 → 内嵌须 RTT 回读，"与 §B2 无 QImage 拷贝冲突" | **事实对，推论错**。见 6.4：RTT 回读正是两个引擎**自己的编辑器**渲染材质预览的方式；§B2 那条反例针对的是**主视口**每帧全屏拷贝，不是按需刷新的预览球 |
-| ③ O3DE 是 Editor + MaterialEditor 双进程先例 | **O3DE 是行业孤例，不是常态**。Unreal / Unity / Godot / rbfx / Blender 全部在进程内编辑材质（Unreal/Blender 为 2026-08-25 源码核实补齐）。Godot：`MaterialEditorPlugin : EditorPlugin`，`add_custom_control(editor)` 挂进检视器（`editor/scene/material_editor_plugin.cpp:468-470`，`material_editor_plugin.h:134`）；rbfx：`SystemUI/MaterialInspectorWidget.cpp` 是主窗口内的 ImGui 面板；Unreal：MaterialEditor 是 `FAssetEditorToolkit` 的 **MajorTab 停靠面板**（`MaterialEditor.cpp:726`、`AssetEditorToolkit.cpp:149-165,222`），默认宿主虽是独立 SWindow，但**同进程、可 dock 回主窗口**（`MainFrameModule.cpp:546` "DockedToolkit" 槽）——不是独立 exe；Blender：**没有材质编辑器窗口**——节点编辑器是主窗口内 `SPACE_NODE` SpaceType（`DNA_space_types.h:834`、`space_node.cc:1721`），Material Preview 只是 3D 视口的一个着色模式（`DNA_object_enums.h:41`） |
+| ③ O3DE 是 Editor + MaterialEditor 双进程先例 | **O3DE 是行业孤例，不是常态**。Unreal / Unity / Godot / rbfx / Blender 全部在进程内编辑材质（Unreal/Blender 为 2026-08-25 源码核实补齐）。Godot：`MaterialEditorPlugin : EditorPlugin`，`add_custom_control(editor)` 挂进检视器（`editor/scene/material_editor_plugin.cpp:468-470`，`material_editor_plugin.h:134`）；rbfx：`SystemUI/MaterialInspectorWidget.cpp` 是主窗口内的 ImGui 面板；Unreal：MaterialEditor 是 `FAssetEditorToolkit` 的 **MajorTab 停靠面板**（`MaterialEditor.cpp:726`、`AssetEditorToolkit.cpp:149-165,222`），默认宿主虽是独立 SWindow，但**同进程、可 dock 回主窗口**（`MainFrameModule.cpp:546` "DockedToolkit" 槽）——不是独立 exe；Blender：**没有材质编辑器窗口**——节点编辑器是主窗口内 `SPACE_NODE` SpaceType（`DNA_space_enums.h:1173`、`space_node.cc:1721`），Material Preview 只是 3D 视口的一个着色模式（`DNA_object_enums.h:41`） |
 | ④ 崩溃隔离 | **不成立**。后端引擎已在 CEE 进程内运行；材质预览把引擎搞崩，主编辑器一样死 |
 | ⑤ 材质编辑器可跑不同 `--backend` | **是反特性**。C6 的切换语义是整个编辑器一次性切换；同进程两个后端反而破坏"值不出引擎"（§2.2）的单一真相源 |
 
@@ -848,7 +848,7 @@ CreateBackendFromCommandLine(--backend)        // 现有，CrossEngineEditorAppl
 
 **预览面板不占用 OS 表面。** 后端把预览场景渲进一张离屏纹理，编辑器按需取回 RGBA8 像素画进 Qt widget。
 
-#### 6.4.1 为什么不是"第二个 OS 表面"（2026-08-25 源码核实，两引擎结论对称）
+#### 6.4.1 为什么不是"第二个 OS 表面"（2026-08-25 两引擎核实；2026-08-26 五引擎复核重写横评段）
 
 | | rbfx | Godot |
 |---|---|---|
@@ -859,11 +859,27 @@ CreateBackendFromCommandLine(--backend)        // 现有，CrossEngineEditorAppl
 两个引擎都是**外部未 pin 的 checkout**（rbfx：`External/CMakeLists.txt:298` `add_subdirectory(${CEE_RBFX_ROOT})` + `git describe --dirty` provenance；Godot：out-of-tree scons，`External/CMakeLists.txt:334`）。
 对未 pin 的上游打私补丁是最难交代的组合，直接顶到 C5（接入成本）与"可插拔后端 = 消费 stock 引擎"。**驳回，记入 §9.9。**
 
-**五引擎横评（2026-08-25 补齐 Unreal/Blender 源码核实）**：引擎级多窗口/多 swapchain 能力几乎人人都有——Godot 架构完备（上表）、Unreal 每 `SWindow` 一个 RHI viewport（`SWindow.cpp:1437` → `SlateRHIRenderer.cpp:757,328` → D3D12 `CreateSwapChainForHwnd`，`WindowsD3D12Viewport.cpp:137-138`，逐窗口 Draw+Present `SlateRHIRenderer.cpp:1454-1500`）、Blender 每窗口独立 GPUContext（`wm_window.cc:1047-1048`）、O3DE RHI 工厂按需建（`Factory.h:177`）。**但五家的材质预览没有一个用它**：Unreal 即便浮出独立窗口，预览在窗口里仍是离屏 RT 合成的 widget（`SViewport.cpp:29` 默认非直渲 → `SceneViewport.cpp:2399-2462` 建 "BufferedRT" → `SViewport.cpp:167-169` 当贴图合成）；Blender 连主 3D 视口都走 region FBO → 主窗口合成（`wm_draw.cc:748-789,1129-1148`）；O3DE 预览是主 swapchain 的 scissor 子区域（`EntityPreviewViewportScene.h:60` `SwapChainPass`）。**能力存在 ≠ 预览使用**——预览长在窗口**里面**，swapchain 只挂在 OS 窗口上。多表面路线全行业零判例，驳回结论不变。
+**五引擎横评（2026-08-25 初版；⚠️ 2026-08-26 双线独立复核后重写，全文 `material_editor_research.md`）**：
+
+引擎级多窗口/多 swapchain 能力几乎人人都有——Godot 架构完备（上表）、Unreal 每 `SWindow` 一个 RHI viewport（`SlateRHIRenderer.h:140-141` `WindowToViewportInfo` → `.cpp:315,328` `GetOSWindowHandle()`+`RHICreateViewport`，逐窗口 Draw+Present `.cpp:1486,1500`）、Blender 每窗口独立 GPUContext（`wm_window.cc:1048`）、O3DE Atom 按窗口建（`RenderPipeline::CreateRenderPipelineForWindow`）。
+
+**订正 ①：材质预览不是"5/5 都用 RTT"，而是 4/5——O3DE 恰恰用窗口句柄。**
+Unreal 即便浮出独立窗口，预览仍是离屏 RT 合成的 widget（`SViewport.h:37` 默认 `_RenderDirectlyToWindow(false)` → `SceneViewport.cpp:76,2399-2462` 建 "BufferedRT" → `SViewport.cpp:164-169` 当贴图合成）；Blender 连主 3D 视口都走 region FBO → 主窗口合成（`wm_draw.cc:722,838,1148`），材质球更是离屏渲染 + CPU 回读（`render_preview.cc:1281,1289`）；rbfx/Godot 见上表。
+但 **O3DE 是 `RenderViewportWidget::winId()` 取的独立 HWND 上的独立 swapchain**（`RenderViewportWidget.cpp:62-66` → `EntityPreviewViewportScene.cpp:33-37,107` `CreateRenderPipelineForWindow` → `WindowContext.cpp:216-232` `RHI::SwapChain`）。本文初版写的"主 swapchain 的 scissor 子区域"**是错的**——`EntityPreviewViewportScene.h:60` 的 `SwapChainPass` 恰恰证明**有**独立交换链。
+
+**订正 ②：另外四家是无效样本，这张表撑不起"全行业零判例"。**
+「要不要给引擎窗口句柄」这个选择题，**只在宿主 UI 不是引擎自己画的时候才成立**。rbfx（ImGui）/ Godot（Control 树）/ Unreal（Slate）/ Blender（自家 GPU 模块）的编辑器 UI **本身就跑在引擎渲染管线里，压根没有"外来窗口"可以塞句柄**——它们不是"评估后否决了句柄方案"。唯一与 CEE 同处境（Qt 宿主）的样本是 O3DE，**而它选了句柄**。
+⇒ **驳回论据必须靠 §9.9(a) 的引擎能力硬事实，不能靠这张表。**
+
+**订正 ③：多 swapchain 不是"能力闲置"，而是"能力在用、但被一致限定在 UI/窗口合成层"。**
+Unreal 浮动 tab 新建 `SWindow`（`FDockingDragOperation.cpp:335-363`）、Godot 浮动 dock 默认开（`editor_settings.cpp:664`）、rbfx ImGui 多视口默认开（`UrhoOptions.cmake:282` + `EditorApplication.cpp:206-208` → 每浮出窗口一条 secondary swapchain `ImGuiDiligentRendererEx.cpp:338`）、O3DE 同窗口 Default+XR 三链并存（`WindowContext.h:131-132`）。**但即便把面板浮出成独立 OS 窗口，里面的预览球依然是一张贴图**——3D 场景渲染一律不借用第二块表面。这比"能力闲置"是更强的论据。
+
+**净结论（未变）：材质预览 0/5 用第二个 OS 表面；多表面路线驳回不变**——但理由见 §9.9(a)。
 
 附带结论：**v2 分屏场景编辑也不需要多表面**——两个引擎原生的分屏就是多张 RTT。v2 真正的缺口是"大尺寸纹理低成本进 Qt"（共享 GPU 纹理），与本节的契约形状一致，不是多 swapchain。
+（⚠️ 该缺口的技术形态已澄清：Qt 侧承载体只能是 `QRhiWidget`/Qt Quick，2026-08-26 裁决暂不采用——§6.4.4/§11.8，留到分屏立项再议。）
 
-#### 6.4.2 RTT 是两引擎自家的做法；回读是 Qt 宿主的代价（2026-08-25 口径修正）
+#### 6.4.2 RTT 是两引擎自家的做法；回读是"宿主与引擎不共享合成层"的通用代价（2026-08-25 口径修正；2026-08-26 松口）
 
 | | rbfx | Godot |
 |---|---|---|
@@ -881,7 +897,19 @@ CreateBackendFromCommandLine(--backend)        // 现有，CrossEngineEditorAppl
 所以**"按需重渲、绝不每帧回读"是跨引擎不变量**，写进契约语义，不留给后端各自发挥。
 而两个引擎都把"按需渲一帧"做成了一等公民（上表第 2 行），契约可直落。
 
-**口径修正（R5，2026-08-25 opus review）**：RTT 是两引擎自家预览的做法；**回读不是**——rbfx 自家拿到 `Texture2D*` 后直接 `Widgets::ImageItem(sceneTexture, …)` 喂给 ImGui（`MaterialInspectorWidget.cpp:409-411`，**零 CPU 回读**），Godot 是 `SubViewportContainer` 引擎自合成（`material_editor_plugin.cpp:269-276,308-318`）。上表引用的两处上游"回读判例"（场景 PNG 预览、材质缩略图）都是**一次性、非交互**的。回读是 **Qt 宿主强加的 CEE 独有成本**——所以 §6.4.4 的限频与本节"绝不空闲回读"必须同时成立，缺一条就是每帧全管线停顿。
+**口径修正（R5，2026-08-25 opus review）**：RTT 是两引擎自家预览的做法；**回读不是**——rbfx 自家拿到 `Texture2D*` 后直接 `Widgets::ImageItem(sceneTexture, …)` 喂给 ImGui（`MaterialInspectorWidget.cpp:409-411`，**零 CPU 回读**），Godot 是 `SubViewportContainer` 引擎自合成（`material_editor_plugin.cpp:269-276,308-318`）。上表引用的两处上游"回读判例"（场景 PNG 预览、材质缩略图）都是**一次性、非交互**的。
+
+**⚠️ 口径松口（2026-08-26 复核）**：R5 原文写"回读是 **Qt 宿主强加的 CEE 独有成本**"——**过重**。
+**Blender 的材质预览球就是 RTT + CPU 回读**：`shader_preview_render` 完整离屏渲染（`render_preview.cc:1204,1281`）
+→ `RE_ResultGet32` 回读进 `PreviewImage` 的 CPU uchar 数组（`:1289,1533`）
+→ 上屏时**每次绘制**新建 GPU 纹理上传再销毁（`glutil.cc:68-118`）。它是出货多年的 DCC，且它自绘 UI、根本没有 Qt。
+另外 **O3DE 的缩略图同样是 RTT + `AttachmentReadback` → `QImage`**（§6.4.4 末）。
+⇒ 准确表述是：**回读是"宿主与引擎渲染器不共享合成层"时的通用代价，不是 Qt 造成的畸形**；
+CEE 的 `RTT → 回读 → QImage` 是 DCC 常规做法，缩略图更是 5/5 全行业同款。
+这反而让 §6.4.4 的限频显得**保守而非冒险**——但限频与本节"绝不空闲回读"**仍必须同时成立**，
+因为 rbfx 那条同步路径每次回读都是全管线停顿（`RawTexture.h:157` 自注 "very slow, shouldn't be used in real time"），
+缺一条就退化成每帧停顿。Blender 的缓解手段是异步 job（`WM_jobs_*`），CEE 的对应物是 Godot `texture_get_data_async`（§6.4.3）——
+rbfx 侧的同款是 Diligent fence 异步回读（§6.4.4 升级路径，v1.5 候选）。
 
 #### 6.4.3 契约新增：一个哨兵方法
 
@@ -906,10 +934,32 @@ CreateBackendFromCommandLine(--backend)        // 现有，CrossEngineEditorAppl
 2. **回读尺寸 clamp ≤ 512²（物理像素）**，面板放大用 `QPainter` 拉伸——停顿与拷贝量都随面积走。
 3. **`isVisible()` 门一行**：面板不可见（ADS auto-hide / 非激活文档）不置脏。
 
+**rbfx 后端升级路径：fence 异步回读（2026-08-26 裁决，v1.5 候选，零契约改动）**。
+v1 的 rbfx 是「同步 `GetImage()` + 限频兜底」——每次取回都吃一次 `WaitForIdle()`（`RawTexture.cpp:1017`）**全管线停顿**。
+升级手段在 CEE 侧、不动引擎：绕过 `RawTexture::Read` 的同步路径，直接用 Diligent `IDeviceContext::ReadTexture` + fence——
+**渲染一帧后发起带 fence 的 staging 拷贝，到下一轮限频窗口（66~100 ms 后）再 `Map`**，届时 fence 早已 signal，
+停顿退化为「延迟一帧取回」（交互期额外 ≤2 帧延迟，10~15 Hz 限频下肉眼无感）。
+落点不变：仍只在脏位 + 限频 + `isVisible()` 三重门后发起，稳态依旧零调用。
+**契约形状零变化**（`AcquirePreviewImage` 实现内部换路，签名/三态/频率全不动），
+升级后 rbfx 与 Godot（`texture_get_data_async`）**同为零停顿**，R5 的限频从"兜底"降为纯节流。
+> 2026-08-26 用户裁决：**「QRhiWidget + D3D11 shared handle」零拷贝路线暂不采用**（需动 Plan §B2/§B3、引入额外技术债）；
+> 非 QRhiWidget 下本段 fence 方案 + §6.4.2 的零拷贝 `QImage` 构造已是当前技术栈内的性能上界。§11.8 有裁决记录。
+
 **稳态下零调用、零回读、零停顿。** 不新增 `QTimer` —— Plan §B3 的 233 ms 多渲染尖峰正是第二个渲染 QTimer 造成的，这条铁律不破。
 
 Qt 侧：面板持有像素 `AZStd::vector<AZ::u8>` 成员（`QImage` 包外部缓冲不拷贝，须保证生命周期），
 `QImage(m_pixels.data(), w, h, QImage::Format_RGBA8888)` → `QPainter::drawImage`。**零格式转换。**
+
+**同宿主判例（2026-08-26 复核补录）**：本节的控制流在 **O3DE 自家就有现成实现**——`AtomToolsFramework::PreviewRenderer`
+（缩略图路径）：`CreateRenderPipeline`（**无窗口句柄**，`PreviewRenderer.cpp:80`）
+→ `AddToRenderTickOnce()`（**按需渲一帧**，`:249`）
+→ `CapturePassAttachmentWithCallback(..., "Output", ...)`（`:252-257`）
+→ 回调里 `QPixmap::fromImage(QImage(result.m_dataBuffer->data(), w, h, QImage::Format_RGBA8888))`（`:222-232`）
+→ `RemoveFromRenderTick()`（**渲完退出 tick**，`:271`）。
+与 `AcquirePreviewImage` + `PreviewResult{Unsupported,Unchanged,Updated}` 形状同宗，**且出自同一个 Qt 宿主**——
+可作契约注释里的设计出处。（`PreviewRenderer` 本身深绑 RPI，§9.8 判定不引入，此处只借形状。）
+另：Godot 缩略图的"等帧回读"也是同一形状——`frame_pre_draw` 单发连接 + `VIEWPORT_UPDATE_ONCE`
++ `request_frame_drawn_callback` + 信号量（`editor_resource_preview.cpp:101-118,131-134`），至少等 1~2 帧再取。
 
 #### 6.4.5 预览场景内容：后端自管，惰性构建
 
@@ -921,6 +971,16 @@ Qt 侧：面板持有像素 `AZStd::vector<AZ::u8>` 成员（`QImage` 包外部�
 | rbfx | `Scene` + `Octree` + `Zone` + `Skybox` + 平行光 + `StaticModel(Sphere)` → `SceneRendererToTexture` | `SystemUI/MaterialInspectorWidget.cpp:199-215, 388-466` |
 | Godot | `SubViewport`(自有 `World3D`、透明背景、`MSAA_4X`) + `Camera3D`(0,0,1.1) **FOV 20°**(低 FOV 防畸变) + 双 `DirectionalLight3D` + sphere/box/quad `MeshInstance3D` 挂在一个 `rotation` 节点下 | `editor/scene/material_editor_plugin.cpp:308-316`(视口)、`321-331`(相机)、`333-340`(灯)、`342-363`(网格) |
 | Filament | `filament::Renderer` + 程序生成球 + 方向光 + IBL → 离屏 target | `samples/` 标配 |
+
+> ⚠️ **落地风险（2026-08-26 复核新增，P2 必读）**：上表 rbfx 那一格引用的 `SystemUI/MaterialInspectorWidget.cpp`
+> **不在 CEE 的构建里**——rbfx `Source/Urho3D/CMakeLists.txt` 中 `SystemUI` 在 `if (URHO3D_SYSTEMUI)` 门控内，
+> 而 CEE `External/CMakeLists.txt:264` 明确 `set(URHO3D_SYSTEMUI OFF CACHE BOOL "" FORCE)  # drops bundled ImGui/ImGuizmo`。
+> ⇒ **它只能当参考配方"手抄"，不能 `#include`、不能调用。**
+> 好消息是真正要用的 `SceneRendererToTexture` 在 `Utility/` 目录，处于**无条件编译**列表内（同文件 `define_engine_source_files(... Utility)`），**可用** ✅。
+> 附带收益：rbfx 侧的 ImGui 第二 swapchain 代码（`ImGuiDiligentRendererEx.cpp`，`CreateSecondarySwapChain` 的全仓唯一调用者）
+> 也随 `SystemUI` 一起被编译掉——§9.9 的第三层阻断在 CEE 里是**编译期**的。
+> 同理，§7.2 rbfx 落地行、§6.1 与 §11 中所有以 `MaterialInspectorWidget` 为"上游判例"的引用，
+> 都只作**行为参照**，不构成可复用代码。
 
 Godot 的预览网格集合 **sphere / box / quad**（`material_editor_plugin.cpp:342-363`）与契约的
 `PreviewModel { Sphere, Cube, Plane }` 逐项对应——该哨兵的取值不是拍脑袋定的。
@@ -1249,22 +1309,76 @@ shader 编译/变体是引擎内部事务（Atom `MaterialTypeBuilder` / rbfx te
 | `PreviewModel` 扩到 Cylinder/ShaderBall（B 稿提案 5 项） | ShaderBall 是 O3DE 专属资产；Cylinder YAGNI。收窄为 Sphere/Cube/Plane（枚举可扩展） |
 | `PreviewConfig`（hdri/exposure/grid，A 稿提案） | v1 无消费者；视口设置走官方 `SettingsDialog`，环境预设列 v2 |
 
-### 9.9 ❌ 预览用第二个 OS 表面（多 swapchain 绑 Qt HWND）（2026-08-25 源码核实后驳回）
+### 9.9 ❌ 预览用第二个 OS 表面（多 swapchain 绑 Qt HWND）（2026-08-25 驳回；2026-08-26 承重论据替换，驳回不变）
 
 本文初稿曾以"独立进程内唯一场景 = 预览场景"回避此问题；dock 改判后必须正面回答。
-按 C3 判定手段落账（完整技术论证与五引擎横评在 §6.4.1，RTT/回读先例与限频在 §6.4.2/6.4.4）：
+按 C3 判定手段落账（完整技术论证与五引擎横评在 §6.4.1，RTT/回读先例与限频在 §6.4.2/6.4.4；
+2026-08-26 双线复核全文见 `material_editor_research.md`，处置记 §11.8）：
 
-**(a) 为什么不做**：要做就要**同时 fork 两个第三方引擎**——rbfx RenderPipeline 只认主 swapchain
-（`RenderTargetView.cpp:71,73,119,121,137` 无条件 `GetSwapChain()`），Godot `create_sub_window` 的 parent
-**硬编码 `nullptr`**（`display_server_windows.cpp:1855`）；且两个引擎都是**外部未 pin 的 checkout**
-（`External/CMakeLists.txt:298,334`），对未 pin 上游打私补丁直接顶到 C5 接入成本。
-**上游反证**：两个引擎自己的编辑器都不为材质预览/分屏开第二个 OS 窗口；五引擎横评 0/5 用第二 swapchain（§6.4.1）。
+**⚠️ 承重论据已于 2026-08-26 双线复核后替换**（全文 `material_editor_research.md`）。
+旧版主论据是"上游反证 / 全行业零判例"——那是**可被一条反例推翻的经验归纳，且已被 O3DE 推翻**
+（O3DE 材质编辑器预览恰恰是 `winId()` + 独立 swapchain，§6.4.1 订正 ①）。现降为旁证，主论据换成引擎能力硬事实。
+
+**先澄清一个常见误解：这不是 Qt 的限制，CEE 也不是没在给句柄。**
+CEE 主视口本来就是**纯句柄路径**：`EngineViewportWindow`（`QWindow` + `setSurfaceType`，Qt 不分配 backing store）
+→ `winId()` → 后端（rbfx `params[EP_EXTERNAL_WINDOW]`，`RbfxBackend.cpp:383`；Godot `--wid`，`GodotBackend.cpp:463`），
+见 `Plan.md` §B2。**问题不在"能不能给第 1 个"，而在"能不能给第 2 个"。**
+
+**(a) 为什么不做 —— 两个后端在源码层面收不了第 2 个表面**
+
+- **rbfx（三层阻断，层层独立）**：
+  ① **类型系统级**：`RenderSurface` 的**唯一构造函数只接受 `Texture*`**
+     （`Graphics/RenderSurface.h:43`，成员 `:143` `const WeakPtr<Texture> parentTexture_`）
+     ⇒ 一个 `Viewport` 只有「主交换链 或 一张纹理」两种归宿，**没有第三种**。
+  ② **回退硬编码**：`renderTarget_` 为空时回退到那条唯一主链
+     （`RenderPipeline/RenderBuffer.cpp:188,223` → `RenderAPI/RenderTargetView.cpp:71,73,119,121` 无参 `GetSwapChain()`；
+     `RenderDevice.h:194,201` 的 `window_`/`swapChain_` **各只有一个，非集合**；`RenderPipeline/` 对 `ISwapChain` **零引用**）。
+  ③ **次级链不通场景管线**：`CreateSecondarySwapChain` 存在（`RenderDevice.h:84`），但参数是 **`SDL_Window*` 不是 HWND**，
+     且**全仓唯一调用者是 ImGui 多视口**（`SystemUI/ImGuiDiligentRendererEx.cpp:338`，绕开 `RenderPipeline` 直画顶点），
+     返回的裸 `ISwapChain` **没有任何路径能变成 `RenderSurface` 交给 `Viewport`**（因 ①）。
+     且该文件在 CEE 里被 `URHO3D_SYSTEMUI=OFF` **编译掉**——这层阻断在 CEE 是**编译期**的（§6.4.5 落地风险注）。
+  ⇒ rbfx 走句柄 = **动渲染目标的抽象层**，不是"改 4-5 处"。
+- **Godot（一行硬编码，但在 DisplayServer 里）**：`create_sub_window` 给 `_create_window` 的第 7 参 `p_parent_hwnd`
+  **写死 `nullptr`**（`display_server_windows.cpp:1855`）；只有主窗口创建（`:8094`、`:8291`）才收来自 `--wid` 的
+  `parent_hwnd` ⇒ **外部 HWND 只能喂 `MAIN_WINDOW_ID`，而 CEE 已经用掉了这唯一一次机会**。
+  叠加 libgodot 无 "render into external surface" API（只能自建窗口，`Plan.md:124`）。
+- **共同放大项**：两者都是**外部未 pin 的 checkout**（`External/CMakeLists.txt:298,334`），
+  对未 pin 上游打私补丁直接顶到 C5 接入成本。
+- **旁证（降级，需带限定）**：五引擎材质预览 0/5 用第二 OS 表面（§6.4.1）。
+  **但必须同时说明**：其中 4 家是**无效样本**（UI 自绘，不存在"外来窗口"这个选项），
+  唯一同处境的 O3DE 反而用了句柄——所以此条只能作旁证，不能承重。
+- **对照——O3DE 为什么能**：Atom 是它**自己的 RHI**，`CreateRenderPipelineForWindow(desc, windowContext)` 是一等公民
+  （`EntityPreviewViewportScene.cpp:107`），不需要 fork 任何人。
+  **它的两个前提 CEE 都不满足**：① 它的预览是独立进程里**不可浮动的 `centralWidget`**
+  （`MaterialEditorMainWindow.cpp:52-53`，dock 位只给纯 Qt 面板），CEE 是 **dock 面板**；② 它的后端是 Atom，CEE 是 rbfx/Godot。
+
+**(a2) 即使引擎肯收，Qt 侧仍有一层代价（次要，但需记账）**
+
+① **airspace**：原生子窗口恒浮于 Qt 绘制之上，不参与裁剪/半透明/z 序。**两处自证**——
+   CEE `EngineViewport.cpp:41` `WA_DontCreateNativeAncestors` 注释原文 *"otherwise makes docking re-create HWNDs on every drag and stutters"*；
+   `Plan.md §B8 B3` 记着 `ViewportOverlayLabels` 与"native 表面上不叠 Qt widget"约束冲突。
+   而预览面板天生要和 ADS auto-hide / 浮动拖拽 / tooltip / 顶部 `QComboBox` 工具条（§6.5）混排。
+② **成本不对称**：主视口 1 条 swapchain 换全屏交互；预览球 1 条 swapchain（三重缓冲 VRAM）+ 整套表面生命周期
+   （懒建/DPI 去抖/0×0 防御/销毁 latch，`Plan.md` §B2 那段要再来一遍）只换一个 256² 的球。
+③ **撞单循环**：第二个表面 = 第二次 present + 拍频，破 `Plan.md` §B3「一帧一次 present」；RTT 路径对主循环**零改动**。
+> 这三条**不足以**单独否决句柄（O3DE 扛下了 ①②）。记账是为了：将来若接入"能绑任意 swapchain"的后端（如 Filament），
+> 这三条仍需付账，别以为 (a) 解锁了就白送。
 
 **(b) 替代为什么不是过度设计**：RTT 是两引擎自家预览做法（rbfx `SceneRendererToTexture` / Godot SubViewport，
-零引擎改动、上游各两处同款先例）；**回读是 Qt 宿主的 CEE 独有代价**（rbfx `MaterialInspectorWidget.cpp:409-411`
-`ImageItem(sceneTexture)` 零回读、Godot `SubViewportContainer`），按需单帧让稳态停顿为零（§6.4.2）。
+零引擎改动、上游各两处同款先例）；按需单帧让稳态停顿为零（§6.4.2）。
+**回读的定性已于 2026-08-26 松口**（§6.4.2）：它不是"Qt 宿主强加的畸形"，而是"宿主与引擎渲染器不共享合成层"的通用代价——
+**Blender 自绘 UI、没有 Qt，材质球照样 RTT + CPU 回读**（`render_preview.cc:1281,1289`），
+缩略图更是五引擎 5/5 全走 RTT + 回读（含 O3DE `PreviewRenderer` → `AttachmentReadback` → `QImage`）。
 成本仅"预览面板 ~150 行"，面板本身是 C3 ③ 级——stock 没有"引擎 RTT→QImage"面板，
 且两个引擎自己的编辑器都有预览面板，非过度设计。
+
+**(c) 同批已考虑并驳回的变体**
+
+| 变体 | 驳回理由 |
+|---|---|
+| **只给 Diligent 后端开第二 swapchain**（Diligent 是 CEE 自有代码，成本近乎零） | 会使预览机制 **backend-dependent**（Diligent 走句柄、rbfx/Godot 走 RTT），契约不统一、`AcquirePreviewImage` 哨兵在一个后端上形同虚设、两条路径各自的 resize/DPI/生命周期都要单独验收。**收益仅限一个非主力后端，不值。** |
+| 把 Qt HWND 包成 `SDL_Window` 再喂 rbfx `CreateSecondarySwapChain` | 绕不过 (a) 第①层——拿到的裸 `ISwapChain` 无路径变成 `RenderSurface`；且该代码在 CEE 被编译掉 |
+| v1.5 交互预览时改走句柄 | 阻断 (a) 届时仍在。**升级正解 = fence 异步回读**（§6.4.4，v1.5 候选，零契约改动），不是改走句柄。**终极零拷贝 = 共享 GPU 纹理**（D3D11/12 shared handle → Qt RHI 纹理），但 Qt 侧承载体只能是 `QRhiWidget`/Qt Quick（QWidget+QPainter 合成器消费不了外来 GPU 纹理），**2026-08-26 裁决暂不采用**（撞 Plan §B2/§B3、引入额外技术债，§11.8）；它同时也是 v2「大尺寸纹理低成本进 Qt」的缺口，留到分屏场景编辑真正立项时再议。**v1 不做，不进契约。** |
 
 ---
 
@@ -1278,7 +1392,7 @@ shader 编译/变体是引擎内部事务（Atom `MaterialTypeBuilder` / rbfx te
 | **P3**（1.5 周） | Godot 后端（§7.3）：`get_property_list` → schema 自动生成（含**丢弃规则**）；`.tres` 存取；`AppliedSchemaChanged` 通道；预览（`SubViewport` + `UPDATE_ONCE` **异步** `texture_get_data_async` 回读，§6.4.2/6.4.3）。**+ S7 组头勾选框**（上游 3 行虚工厂 + CEE header 子类 ~100 行，§9.4）——消费者与实现同批落地 | 同上 + Godot 原版 Inspector 交叉验证：**15 个 `GROUP_ENABLE` 组全部显示为组头勾选框**，且被提升的 bool 不在列表里重复出现 |
 | **P4**（0.5 周） | 预览交互收尾（`QComboBox` → `SetPreviewModel`；置脏→刷新链路 §6.4.4 全链联调）；六把尺子跑通 | 见下 |
 | **P5**（0.5 周，**P3 完成后评估触发**） | Filament 后端最小集 = 契约证伪 | 只实现 8 纯虚**零额外方法**；做不到即回炉改契约（同 `rbfx_migration.md` §4 E5 的 Diligent PoC 手法）。**触发条件（2026-08-25 定）**：P2/P3 过尺子、契约冻住后再花这 0.5 周——证伪实验只给已定稿的契约买保险，不验证旧契约 |
-| **v1.5 / v2** | AssetBrowser 拖放建贴图行；预览相机交互（orbit/dolly，置脏入口 +1，契约形状不变）；贴图缩略图；材质缩略图（AssetBrowser，沿 `SetPreviewMaterial`/`AcquirePreviewImage` 同路径按需渲一帧 + 缓存——B 稿后续可选，dock+RTT 下自然延伸）；**贴图集一键导入**（Blender Node Wrangler 判例：`add_principled_setup.py` 关键词表 base_color/metallic/rough/normal/ao/emission + gloss 图自动 invert 提示，关键词表可直接抄）；离线 glTF↔引擎材质转换工具；rbfx 异路径图重打包；`ShaderMaterial` 支持；共享 GPU 纹理预览（③ §6.4 升级路径，为 v2 分屏铺路） | — |
+| **v1.5 / v2** | AssetBrowser 拖放建贴图行；预览相机交互（orbit/dolly，置脏入口 +1，契约形状不变）；贴图缩略图；材质缩略图（AssetBrowser，沿 `SetPreviewMaterial`/`AcquirePreviewImage` 同路径按需渲一帧 + 缓存——B 稿后续可选，dock+RTT 下自然延伸）；**贴图集一键导入**（Blender Node Wrangler 判例：`add_principled_setup.py` 关键词表 base_color/metallic/rough/normal/ao/emission + gloss 图自动 invert 提示，关键词表可直接抄）；离线 glTF↔引擎材质转换工具；rbfx 异路径图重打包；`ShaderMaterial` 支持；**rbfx fence 异步回读**（§6.4.4 升级路径，零契约改动，双后端零停顿） | — |
 
 ### 六把验收尺子（可执行、可证伪）
 
@@ -1424,7 +1538,7 @@ undo 100% 复用框架；纹理 = 路径字符串；`m_colorSpace` 必修；软/
 | C4 归一化条款对材质是否适用 | **不适用**——`Plan.md` §A6 C4 已补适用范围：归一化只针对**编辑器自身参与计算的量**（transform/bounds/相机/拾取）。材质值编辑器只显示与路由，归一化无消费者，只会复制 §B4 已知限制的代价 | §8.4③ / §8.5 规则 4 |
 | C5 是否补材质面接入成本 | **补**——`Plan.md` §A6 C5 已加一行：材质面 = 8 纯虚 + 2 哨兵 + 1 份 schema，stub 率 0 目标（同日 RTT 预览裁决后由 1 哨兵更新为 2） | §7.6 |
 | 材质编辑器形态：独立 exe vs CEE 内 dock 面板 | **dock 面板**（同日先裁决形态后核实渲染路径）。用户先纠正前提——**业界常态是进程内编辑**（Unreal/Unity/Godot/rbfx/Blender 均如此，O3DE 双进程是孤例，Godot `MaterialEditorPlugin : EditorPlugin`、rbfx `MaterialInspectorWidget` 均为面板）；随后核实推翻初稿两条承重理由：双 `AzQtApplication` 不承重（§6.3 本就不继承 `AtomToolsApplication`）、崩溃隔离不成立（引擎已在进程内）。dock 另免费消掉 §6.2 静态库抽取与跨进程同步桥 | §6.1-6.3 |
-| 预览像素：多表面 vs RTT 回读 | **RTT 按需回读**（用户拍板）。多表面 = 同时 fork rbfx（4-5 处引擎内部）+ fork Godot（`display_server_windows.cpp:1855`），且**上游两个引擎自己的编辑器都不这么做**；RTT 回读 = 零引擎改动、两引擎均裁决 (a)、上游各两处同款先例。契约新增 `PreviewResult` + `AcquirePreviewImage` **第 2 个哨兵**（`ISceneRenderer`/`IViewportTick`/主循环/四后端表面生命周期零改动），"按需渲一帧、绝不空闲回读"（停顿点两引擎同构：`RawTexture.cpp:1017` / `rendering_device.cpp:2729`）写入契约语义 | §4.1 / §6.4 / §9.9 |
+| 预览像素：多表面 vs RTT 回读 | **RTT 按需回读**（用户拍板）。多表面 = 同时 fork rbfx（4-5 处引擎内部）+ fork Godot（`display_server_windows.cpp:1855`），且**上游两个引擎自己的编辑器都不这么做**；RTT 回读 = 零引擎改动、两引擎均裁决 (a)、上游各两处同款先例。契约新增 `PreviewResult` + `AcquirePreviewImage` **第 2 个哨兵**（`ISceneRenderer`/`IViewportTick`/主循环/四后端表面生命周期零改动），"按需渲一帧、绝不空闲回读"（停顿点两引擎同构：`RawTexture.cpp:1017` / `rendering_device.cpp:2729`）写入契约语义。**⚠️ 2026-08-26 双线复核：结论维持，但本行括号内的"上游都不这么做"论据已降级（4/5 家是无效样本，O3DE 反而用句柄），承重论据已换成引擎能力硬事实——见 §11.8** | §4.1 / §6.4 / §9.9 |
 | P5 Filament PoC 的触发条件 | **由"可选 PoC（默认做）"改为"P3 完成后评估触发"**（2026-08-25 用户拍板）。证伪实验的价值 = 给已定稿的契约买保险；P2/P3 落地若契约返工，P5 验的是旧契约。rbfx+godot 过尺子、契约冻住后再花这 0.5 周 | §10 P5 |
 
 ### 11.7 opus 独立复核处置（2026-08-25，`review_material_migration.md` 五条 R1–R5 全吸收 + 排期重估）
@@ -1438,6 +1552,28 @@ undo 100% 复用框架；纹理 = 路径字符串；`m_colorSpace` 必修；软/
 | **R5**（高） | 交互回读**无上游先例**：rbfx 直接把 GPU 纹理喂 ImGui（`MaterialInspectorWidget.cpp:409-411` `ImageItem(sceneTexture)`，零回读，`:395-396` 渲一帧后延迟关）；Godot 用 `SubViewportContainer`；上游回读先例只有一次性缩略图；`RawTexture.h:157` 明写 "very slow and shouldn't be used in real time"。初稿 §9.9"回读就是两引擎自家做法"口径过宽 | 成立 | **限频三硬规则**（§6.4.4）：`PreviewRefreshIntervalMs` 66~100 ms（10-15 Hz，复用现有 60fps 门，不新增 QTimer）、≤512² clamp、isVisible() 门；Godot 改异步 `texture_get_data_async`（`rendering_device.h:470`，与 `PreviewResult` 三态对齐）。§6.4.2/§9.9 口径修正 + **尺子 6** |
 | 事实订正 | `GROUP_ENABLE` = **15** 次（非 14）；`.Static` 里 `3rdParty::Python` 只服务 `EditorPythonConsoleBus` 旧引用（`Code/CMakeLists.txt:30-51` 核实）；`MaterialEditorMainWindow.cpp` 仅 105 行 | `grep -c` = 15 等全部复验成立 | 全文修正（6 处 14→15 等）；§3.5 补 "`3rdParty::Python` 不进 Core" |
 | 排期重估 | P0 1.5→**2 周**（+S8/S9）、P1 1.5→**2 周**（+combo 薄壳、主窗口三冲突、限频与 clamp）、总计 6→**8~9 人周** | 采纳 | §0 / §10 已更新；验收尺子 五把 → **六把** |
+
+### 11.8 预览渲染路径双线复核（2026-08-26，`material_editor_research.md` 为唯一记录，两份源稿已删）
+
+触发：用户质疑"五家都用 RTT"并追问"为什么不给引擎一个窗口句柄"。两组独立复核（各自从零 grep 五引擎源码）
+后合并，**驳回结论维持，承重论据替换**。处置如下：
+
+| 编号 | 复核发现 | 处置 |
+|---|---|---|
+| **C1**（事实错误） | "O3DE 预览是主 swapchain 的 scissor 子区域"是错的——它是 `winId()` 取的独立 HWND 上的独立 swapchain（`RenderViewportWidget.cpp:62-66` → `EntityPreviewViewportScene.cpp:33-37,107`）；`SwapChainPass` 恰恰证明有独立交换链。**五引擎实为 4/5 RTT，O3DE 是唯一例外** | §6.4.1 横评整段重写（订正 ①） |
+| **C2**（论据错误） | 五引擎横评里有 **4 家是无效样本**：rbfx/Godot/Unreal/Blender 的编辑器 UI 自绘、跑在引擎渲染管线里，根本不存在"外来窗口"可塞句柄——"全行业零判例"是过度解读，且已被 O3DE 推翻 | §6.4.1（订正 ②）+ §9.9 该条降为旁证 |
+| **C3**（论据加固） | rbfx 最靠上的阻断点不是"四处硬编码"，是 `RenderSurface.h:43` **唯一构造函数只收 `Texture*`**——Viewport 只有"主链或纹理"两种归宿；`CreateSecondarySwapChain` 收 `SDL_Window*`、唯一调用者 ImGui 且被 `URHO3D_SYSTEMUI=OFF` 编译掉。Godot `:1855` parent 写死 null 复验成立 | §9.9(a) 整段重写（三层阻断 + 对照 O3DE） |
+| **C4**（补账） | ① Qt 侧代价三条（airspace 自证两处 / 成本不对称 / 撞 §B3 单循环）；② "只给 Diligent 开第二 swapchain"变体已考虑并驳回（backend-dependent、契约不统一）；③ v1.5 交互预览正解 = 共享 GPU 纹理，不是改走句柄（**同 日 C11 递进：正解降格为终极选项暂不采用，当前正解 = fence 异步回读**） | §9.9(a2)/(c) 新增 |
+| **C5**（论据加固） | 多 swapchain 不是"能力闲置"而是"**在用**"（Unreal 浮动 tab / Godot 浮动 dock 默认开 / rbfx ImGui 多视口默认开 / O3DE XR+多视口），但被一致限定在 UI 合成层——浮出窗口里的预览球依然是贴图 | §6.4.1（订正 ③） |
+| **C6**（口径松口） | "回读是 Qt 宿主强加的独有成本"过重：**Blender 自绘 UI、无 Qt，材质球照样 RTT + CPU 回读**（`render_preview.cc:1281,1289`），且每次绘制重传纹理（`glutil.cc:68-118`）；缩略图 5/5 全行业 RTT+回读 | §6.4.2 R5 口径松口 + §9.9(b) |
+| **C7**（落地风险，P2 必读） | `MaterialInspectorWidget` **不在 CEE 构建里**（`URHO3D_SYSTEMUI=OFF`，`External/CMakeLists.txt:264`）——只能手抄配方不能 `#include`；`SceneRendererToTexture` 在 `Utility/` 无条件编译、可用 | §6.4.5 加落地风险注 |
+| **C8**（补判例） | 本方案控制流在 O3DE 自家就有同宿主现成实现：`PreviewRenderer` = `AddToRenderTickOnce` → `AttachmentReadback` → `QImage::Format_RGBA8888` → `RemoveFromRenderTick`；Godot 缩略图"等帧回读"同形 | §6.4.4 末 |
+| **C11**（回读性能，2026-08-26 用户追问后裁决） | 回读性能优化三层递进：① Godot `texture_get_data_async` 已零停顿（引擎原生异步 = Blender job 线程的更优版）；② rbfx 升级路径 = Diligent `ReadTexture` + fence 延迟 `Map`（CEE 侧改动，绕开 `WaitForIdle()` 全管线停顿，契约零变化）→ **v1.5 候选**；③ 终极零拷贝 = `QRhiWidget` + D3D11 shared handle（Qt 官方外部渲染通道全在 RHI/Quick 侧，QWidget+QPainter 消费不了外来纹理）——**用户裁决暂不采用**（撞 Plan §B2/§B3、额外技术债；业界同宿主判例 O3DE `PreviewRenderer` 也选读回）。非 QRhiWidget 下 fence + 零拷贝 `QImage` 构造已是性能上界 | §6.4.4 新增升级路径段；§6.4.2 末句补 rbfx 对应物；§9.9(c) 该行重写；§10 v1.5/v2 行改列 fence |
+| **C9/C10**（行号失效） | Blender `DNA_space_types.h:834` 实为 `DNA_space_enums.h:1173`；rbfx `RenderTargetView.cpp:137` 未命中（71/73/119/121 成立） | 两处已改；`137` 已删 |
+| 承重引用复验 | `RenderSurface.h:43`、`RenderBuffer.cpp:188,223`、`RenderTargetView.cpp` 四处、`RenderPipeline/` 对 `ISwapChain` 零引用、Godot `:1855` vs `:8094/:8291`、CEE `RbfxBackend.cpp:383`/`GodotBackend.cpp:463` —— 全部亲自 grep 复验通过 | §9.9 新 (a) |
+| 纪律 | 未 pin 的外部 checkout 上行号会漂——**凡引用外部引擎行号必须同时记 commit**（本次两处失效行号即教训） | 调研文 §1 |
+
+**维持不变的项**：§9.9 驳回结论、§6.4 的 RTT+按需回读+限频方案、§6.4.3 三态哨兵契约、§6.4.5 预览场景配方、§6.1 dock 形态——全部复核后确认成立。
 
 ---
 
@@ -1503,7 +1639,7 @@ undo 100% 复用框架；纹理 = 路径字符串；`m_colorSpace` 必修；软/
 - 软/硬范围双轨：`source/blender/makesrna/intern/rna_node_socket.cc:537-552`、`RNA_define.hh:483,529`、`rna_access.cc:1634-1644`
 - glTF 折叠规则（反节点图硬证）：`scripts/addons_core/io_scene_gltf2/blender/exp/material/search_node_tree.py:452-490`（全文 1169 行）
 - Specular ×2：`scripts/addons_core/io_scene_gltf2/blender/exp/material/specular.py:31-60`
-- **形态与预览（§6.4.1 依据）**：无独立材质编辑器窗口——shader 编辑器 = 主窗口内 `SPACE_NODE` SpaceType（`makesdna/DNA_space_types.h:834`、`editors/space_node/space_node.cc:1717-1724`）；Material Preview = 3D 视口 `OB_MATERIAL` 着色模式（`DNA_object_enums.h:41`、`DNA_view3d_types.h:591-592`、`view3d_draw.cc:1677-1689` 走 EEVEE）；连主 3D 视口都是 region FBO → 全屏 quad 合成主窗口（`wm_draw.cc:748-754,789,1129-1148`、`gpu_viewport.cc:488-542`），无第二窗口/swapchain/CPU 回读
+- **形态与预览（§6.4.1 依据）**：无独立材质编辑器窗口——shader 编辑器 = 主窗口内 `SPACE_NODE` SpaceType（`makesdna/DNA_space_enums.h:1173`、`editors/space_node/space_node.cc:1717-1724`）；Material Preview = 3D 视口 `OB_MATERIAL` 着色模式（`DNA_object_enums.h:41`、`DNA_view3d_types.h:591-592`、`view3d_draw.cc:1677-1689` 走 EEVEE）；连主 3D 视口都是 region FBO → 全屏 quad 合成主窗口（`wm_draw.cc:748-754,789,1129-1148`、`gpu_viewport.cc:488-542`），无第二窗口/swapchain/CPU 回读
 - **多窗口 = 每 wmWindow 独立 GPUContext**（`wm_window.cc:1047-1048` `GPU_context_create` per window、`:1634-1635` 切换、`BKE_wm_runtime.hh:169` 槽位）——多显示器工作流底座，材质预览不用它
 - **缩略图 RTT+回读（§6.4.2 同款）**：物体/集合缩略图 `GPU_offscreen_create` → 渲染 → `GPU_offscreen_read_color` → `GPU_offscreen_free`（`view3d_draw.cc:2050-2153`；API 声明 `GPU_framebuffer.hh:686`）；材质缩略图走渲染引擎 `RE_PreviewRender` + `RE_ResultGet32`（`render_preview.cc:1247,1281,1289`）；内置预览场景 Sphere/Cube/Shader Ball（`render_preview.cc:187-205,238-266`）
 
