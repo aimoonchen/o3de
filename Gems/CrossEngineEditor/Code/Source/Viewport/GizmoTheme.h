@@ -27,6 +27,67 @@
 //! Lengths are in the manipulator's local, screen-fixed space (1.0 == the base handle length,
 //! i.e. Unreal's AXIS_LENGTH 35 or Blender's arrow length 1.0), matching how both O3DE
 //! manipulators and the source editors author their geometry.
+//!
+//! Godot 4.x (solid-filled handles look; reference recipe only - the active Blender theme is
+//! unchanged. All values below are normalised to OUR unit system: ring radius 1.0 == Godot's
+//! GIZMO_CIRCLE_SIZE 1.1, i.e. Godot values divided by 1.1):
+//!   - size model: pixel-literal. gizmo_scale = manipulator_gizmo_size / px-per-world-unit at
+//!     the gizmo depth (node_3d_editor_viewport.cpp:5018-5032); setting
+//!     editors/3d/manipulator_gizmo_size default 80px, range 16-160 (editor_settings.cpp:1018).
+//!   - constants (node_3d_editor_constants.h): GIZMO_CIRCLE_SIZE 1.1, GIZMO_RING_HALF_WIDTH 0.1
+//!     (picking bound only - node_3d_editor_viewport.cpp:1581-1624, never rendered),
+//!     GIZMO_ARROW_SIZE 0.35, GIZMO_ARROW_OFFSET = GIZMO_SCALE_OFFSET = 1.4,
+//!     GIZMO_PLANE_SIZE 0.2, GIZMO_PLANE_DST 0.3.
+//!   - mesh profiles (node_3d_editor_plugin.cpp): move arrow = 16-sided revolve, thin wire shaft
+//!     (radius 0.01, ~1.6px) flaring to 0.065 at the cone base, cone tip at 1.75; scale handle =
+//!     4-sided (square) revolve, wire 0.01 to 1.4, solid square block half-width 0.07 from 1.4 to
+//!     1.554; rotation rings (all 4, incl. view rotation) = FLAT circle r=1.1, 128 segments, no
+//!     camera clip - thickness is a shader normal-offset 0.02 (~3.2px) on the axis rings / 0.008
+//!     (~1.3px, x1.14 in 4.7) on the view ring, so they read as thin lines, NOT filled bands;
+//!     planes = FILLED square, near corner 0.3 per axis spanning to 0.5 per axis (full side 0.2).
+//!
+//!   To restyle the Blender theme with Godot's visual weight, set in MakeBlenderGizmoTheme():
+//!     m_arrowAxisLength = 1.27; m_arrowConeLength = 0.32; m_arrowConeRadius = 0.059;
+//!     m_coneSegments = 16;  (shaft stays a line: Godot's wire is only ~1.6px, vs our 2px line)
+//!     m_scaleAxisLength = 1.27; m_scaleBoxCenter = 1.343; m_scaleBoxHalfExtent = 0.064;
+//!     (Godot's scale block is 0.14 wide x 0.154 long - CEE draws a cube, close enough)
+//!     m_ringSegments = 128; keep m_rotateBand = false (Godot rings are THIN lines ~3.2px, not
+//!     filled bands - keep m_ringLineWidth 3.0, within a pixel);
+//!     m_rotateGeometry = FullRing (new enum value: complete circle without the Blender half-ring
+//!     clip, ~15 lines in GizmoViews.cpp);
+//!     m_planeOffset = 0.386; m_planeSize = 0.129;
+//!     (CEE offset = DIAGONAL distance to the near corner, size = across half-width; Godot's
+//!      square has corners at 0.3/0.5 per axis -> diagonal 0.4243, across half 0.1414, /1.1.
+//!      CEE draws a diamond: its 4 corners land on Godot's square corners, the edges differ.)
+//!     View ring: m_viewRingRadius = 1.14; m_viewRingLineWidth = 1.5; keep m_screenRingBand =
+//!     false (the band is Unreal's). (4.7+ scales the view ring 1.14x beyond the axis rings via
+//!     view_plane_rotation_gizmo_scale, editor_settings.cpp:1021; on <= 4.6 use 1.0 / 1.3.)
+//!
+//!   Colors & highlight (Godot 4.x defaults; the geometry recipe above keeps Blender colours):
+//!     m_axisXColor = (0.96,0.20,0.32); m_axisYColor = (0.53,0.84,0.01);
+//!     m_axisZColor = (0.16,0.55,0.96)  (theme_modern.cpp:228-230);
+//!     m_normalAlpha = 0.9; m_highlightAlpha = 1.0
+//!     (every handle alpha = theme alpha x manipulator_gizmo_opacity, default 0.9 -
+//!     editor_settings.cpp:1019 + plugin.cpp:1282; the hover albedo's alpha is a constant 1.0,
+//!     plugin.cpp:1294);
+//!     m_planeFillAlpha = 1.0  (Godot planes are filled at the full axis alpha x 0.9 opacity,
+//!     not Blender's 0.5 relative fill; Godot planes also have NO outline - CEE's diamond
+//!     outline is a Blenderism, skip it for exact parity);
+//!     m_screenRingColor = (0.75,0.75,0.75,0.3)  (axis_view_plane_color (0.75,0.75,0.75,0.33)
+//!     x 0.9 opacity, theme_modern.cpp:232; CEE's screen ring ignores m_normalAlpha, so the
+//!     alpha is baked into the colour);
+//!     hover tint = from_hsv(h, s x 0.25, 1, 1) per axis - keep hue, desaturate to 25%, full
+//!     value (plugin.cpp:1294; formula = Color::set_hsv, core/math/color.cpp). With the axis
+//!     colours above: X (1.00,0.80,0.83), Y (0.91,1.00,0.75), Z (0.79,0.89,1.00).
+//!     CEE's Blender highlight (m_highlightKeepsAxisHue = true) raises alpha but never
+//!     desaturates, and there is no per-axis hover-colour field - exact parity needs the pale
+//!     tint computed per axis at highlight time; alpha 0.9 -> 1.0 alone is the close approx.
+//!     Exact pixel parity (optional): ManipulatorViewBaseScale = 0.941 (Godot ring 1.1 x 80px =
+//!     88px / our 93.5px per unit @1080p/60deg via CalculateScreenToWorldMultiplier =
+//!     max(d, near)/10). Shrinks the Blender/Unreal themes too, but the screen ring + center
+//!     handle draw with bare CalculateScreenToWorldMultiplier (GizmoViews.cpp:754/683) and do
+//!     NOT follow BaseScale - either route them through ManipulatorViewScaleMultiplier or bump
+//!     m_viewRingRadius to ~1.21 (1.14/0.941) if BaseScale is applied.
 
 #include <AzCore/Math/Color.h>
 #include <AzCore/std/string/string.h>
