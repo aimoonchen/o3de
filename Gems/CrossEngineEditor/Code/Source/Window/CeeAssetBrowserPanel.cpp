@@ -18,6 +18,7 @@
 #include <AzToolsFramework/AssetBrowser/AssetBrowserModel.h>
 #include <AzToolsFramework/AssetBrowser/AssetBrowserFilterModel.h>
 #include <AzToolsFramework/AssetBrowser/Views/AssetBrowserTreeView.h>
+#include <AzToolsFramework/UI/UICore/QTreeViewStateSaver.hxx>
 
 #include <QHBoxLayout>
 #include <QToolButton>
@@ -196,8 +197,17 @@ namespace CrossEngineEditor
 
     void CeeAssetBrowserPanel::Refresh()
     {
+        // Keep the user's expansion across the full re-enumeration (editor_polish.md P2; the
+        // stock TreeViewState helper works on any QTreeView - the AssetBrowserTreeView is a
+        // framework widget we cannot rebase onto QTreeViewWithStateSaving). Captured BEFORE the
+        // tree swap, applied after; the model reset would otherwise collapse everything.
+        AZStd::unique_ptr<AzToolsFramework::TreeViewState> treeState(AzToolsFramework::TreeViewState::CreateTreeViewState());
+        treeState->CaptureSnapshot(m_treeView);
+
         BuildTree();
         ExpandRoot();
+
+        treeState->ApplySnapshot(m_treeView);
     }
 
     void CeeAssetBrowserPanel::BuildTree()

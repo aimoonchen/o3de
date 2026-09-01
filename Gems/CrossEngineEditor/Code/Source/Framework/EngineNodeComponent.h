@@ -31,6 +31,7 @@
 #include <AzCore/Component/TransformBus.h>
 #include <AzCore/Serialization/EditContext.h>
 #include <AzCore/std/containers/unordered_map.h>
+#include <AzFramework/Entity/EntityDebugDisplayBus.h>
 #include <AzFramework/Visibility/BoundsBus.h>
 #include <AzToolsFramework/API/ComponentEntitySelectionBus.h>
 #include <AzToolsFramework/ToolsComponents/EditorComponentBase.h>
@@ -42,6 +43,7 @@ namespace CrossEngineEditor
         , public AzToolsFramework::EditorComponentSelectionRequestsBus::Handler
         , public AzFramework::BoundsRequestBus::Handler
         , public AZ::TransformNotificationBus::Handler
+        , public AzFramework::EntityDebugDisplayEventBus::Handler
     {
     public:
         AZ_EDITOR_COMPONENT(EngineNodeComponent, "{4B8E2D1F-6A03-4C97-9E5B-1F2A7C4D8E60}");
@@ -58,6 +60,26 @@ namespace CrossEngineEditor
         [[nodiscard]] const AZStd::string& GetClassName() const { return m_className; }
         [[nodiscard]] PropertyBag& GetProperties() { return m_properties; }
         [[nodiscard]] const PropertyBag& GetProperties() const { return m_properties; }
+
+        //! Which wireframe representation this node's class maps to (editor_polish.md P0-6 /
+        //! S2): viewport billboard icons are structurally unavailable in CEE (their only
+        //! implementer is an Atom Gem), so non-renderable nodes are drawn as Blender-style
+        //! wireframes instead. WireKind::None = no wireframe (unknown class).
+        enum class WireKind
+        {
+            None,
+            PointLight,
+            DirectionalLight,
+            SpotLight,
+            Camera,
+            EmptyNode,
+        };
+        [[nodiscard]] WireKind GetWireKind() const;
+
+        //! Local-space extent of the wireframe (the pick / visibility box for a non-renderable
+        //! node). Only valid when GetWireKind() != None. Draw + pick share this so the clickable
+        //! box is exactly the visible wire - no invisible boxes stealing clicks (the 修复8 rule).
+        [[nodiscard]] AZ::Aabb GetLocalWireBounds() const;
 
         //! Opaque engine-side node handle (rbfx Node* / Godot ObjectID). Reflected in-memory only.
         void SetNodeHandle(AZ::u64 handle)
@@ -99,6 +121,13 @@ namespace CrossEngineEditor
         //! future box-select / frustum-cull. Shares the same world-bounds source as picking.
         AZ::Aabb GetWorldBounds() const override;
         AZ::Aabb GetLocalBounds() const override;
+
+        // AzFramework::EntityDebugDisplayEventBus::Handler...
+        //! Wireframe representation for non-renderable nodes (editor_polish.md P0-6): drawn via
+        //! the per-entity debug display bus, whose dispatch point (EditorHelpers::
+        //! DisplayComponents) already runs for every visible entity each frame.
+        void DisplayEntityViewport(
+            const AzFramework::ViewportInfo& viewportInfo, AzFramework::DebugDisplayRequests& debugDisplay) override;
 
         //! Dynamic edit-data provider (AzCore reflection signature, same as
         //! ScriptEditorComponent). Returns per-element ElementData keyed by the address of

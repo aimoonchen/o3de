@@ -6,6 +6,11 @@
 
 #include <Window/CommandPalette.h>
 
+// AZ_PUSH/POP_DISABLE_WARNING live in PlatformDef.h; include it explicitly so this TU does not
+// depend on unity-build include order (it became the first file of its unity batch when
+// CeeActionsHandler.cpp joined the target and the grouping shifted).
+#include <AzCore/PlatformDef.h>
+
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QAction>
 #include <QKeyEvent>

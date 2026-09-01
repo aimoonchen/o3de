@@ -21,8 +21,14 @@ namespace AzQtComponents
     class WindowDecorationWrapper;
 }
 
+namespace AzToolsFramework
+{
+    class EntityPropertyEditor;
+}
+
 namespace CrossEngineEditor
 {
+    class CeeActionsHandler;
     class EditorMainWindow;
     class EntityMirrorBridge;
     class IEngineBackend;
@@ -64,6 +70,23 @@ namespace CrossEngineEditor
         void BrowseForAssets(AzToolsFramework::AssetBrowser::AssetSelectionModel& selection) override;
         QWidget* GetMainWindow() override;
 
+        // ----- EditorRequests host contract (editor_polish.md P0-3 / A4) -------------------
+        // The precise set of methods with live framework consumers; each delegates to the
+        // main window's single-source-of-truth operation so the Outliner / Inspector context
+        // menus, the pin button and "go to" links all drive the same backend path as the menus.
+        bool IsLevelDocumentOpen() override;
+        AzFramework::EntityContextId GetEntityContextId() override;
+        AZ::EntityId CreateNewEntity(AZ::EntityId parentId) override;
+        void CloneSelection(bool& handled) override;
+        void DeleteSelectedEntities(bool includeDescendants) override;
+        AZStd::string GetDefaultEntityIcon() override;
+        AZStd::string GetComponentEditorIcon(const AZ::Uuid& componentType, const AZ::Component* component) override;
+        AZStd::string GetComponentTypeEditorIcon(const AZ::Uuid& componentType) override;
+        void GoToSelectedEntitiesInViewports() override;
+        bool CanGoToSelectedEntitiesInViewports() override;
+        void OpenPinnedInspector(const AzToolsFramework::EntityIdSet& entities) override;
+        void ClosePinnedInspector(AzToolsFramework::EntityPropertyEditor* editor) override;
+
     private:
         void OnIdle();
 
@@ -85,6 +108,11 @@ namespace CrossEngineEditor
 
         AZStd::unique_ptr<IEngineBackend> m_backend;
         AZStd::unique_ptr<EntityMirrorBridge> m_mirrorBridge;
+
+        //! ActionManager bootstrap (editor_polish.md P0-4): registers the action context,
+        //! the CEE action pool and the three context menus when TriggerRegistrationNotifications
+        //! runs. Owned here so it dies with (and before) the main window it points at.
+        AZStd::unique_ptr<CeeActionsHandler> m_actionsHandler;
 
         //! Last time the engine backend was stepped. The idle loop spins fast (~1 ms) to keep O3DE's
         //! system tick / Qt events responsive, but the backend (which renders a whole engine frame

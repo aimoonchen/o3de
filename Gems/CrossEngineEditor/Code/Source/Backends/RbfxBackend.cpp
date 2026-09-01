@@ -12,12 +12,18 @@
 #include <AzCore/Component/Entity.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzCore/Component/TransformBus.h>
+#include <AzCore/IO/SystemFile.h>
+#include <AzCore/Interface/Interface.h>
 #include <AzCore/Math/Color.h>
 #include <AzCore/Math/Quaternion.h>
 #include <AzCore/Math/Transform.h>
 #include <AzCore/Math/Vector3.h>
 #include <AzCore/Math/MathUtils.h>
 #include <AzCore/std/sort.h>
+
+#include <AzToolsFramework/API/ToolsApplicationAPI.h>
+#include <AzToolsFramework/Editor/ActionManagerIdentifiers/EditorMenuIdentifiers.h>
+#include <AzQtComponents/Components/Widgets/FileDialog.h>
 
 #include <cmath>
 #include <limits>
@@ -365,6 +371,52 @@ namespace CrossEngineEditor
         // "submit-each-frame, cleared-at-frame-end" DebugRenderer model.
     }
 
+    AZStd::vector<EngineActionPattern> RbfxBackend::GetActionRegistrationPatterns()
+    {
+        // Backend action seam (editor_polish.md P1-13 / M1): the rbfx-only workflow(s),
+        // declared as data - adding an engine command is a one-entry change here, never in
+        // the shell.
+        AZStd::vector<EngineActionPattern> patterns;
+
+        EngineActionPattern exportPrefab;
+        exportPrefab.m_id = "cee.action.rbfx.exportPrefab";
+        exportPrefab.m_name = "Export Prefab...";
+        exportPrefab.m_description = "Export the first selected node's subtree to an rbfx prefab XML";
+        exportPrefab.m_menuIdentifier = EditorIdentifiers::FileMenuIdentifier;
+        exportPrefab.m_sortKey = 800; // after Save (500); the Open Recent submenu sits at 300.
+        exportPrefab.m_handler = []
+        {
+            // Export the first selected mirror node's subtree to the engine's own prefab
+            // format (Node::SaveXML; a Model-loadable XML gets picked up by the drop/spawn
+            // path, rbfx_migration.md §3.1).
+            AzToolsFramework::EntityIdList selection;
+            AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
+                selection, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
+            if (selection.empty())
+            {
+                AZ_Warning("CrossEngineEditor", false, "ExportPrefab: nothing selected.");
+                return;
+            }
+
+            const QString path = AzQtComponents::FileDialog::GetSaveFileName(
+                nullptr, QStringLiteral("Export Prefab"), QString(), QStringLiteral("Prefab XML (*.xml *.prefab)"));
+            if (path.isEmpty())
+            {
+                return;
+            }
+
+            if (IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get())
+            {
+                const bool ok = backend->GetEntityMirror().CreatePrefabFromNodes(
+                    selection, AZStd::string(path.toUtf8().constData()));
+                AZ_Warning("CrossEngineEditor", ok, "ExportPrefab failed for %s.", path.toUtf8().constData());
+            }
+        };
+        patterns.push_back(AZStd::move(exportPrefab));
+
+        return patterns;
+    }
+
     // ----------------------------------------------------------- RbfxSceneRenderer
 
     void RbfxBackend::RbfxSceneRenderer::OnSurfaceCreated(void* nativeWindowHandle, uint32_t width, uint32_t height)
@@ -683,6 +735,7 @@ namespace CrossEngineEditor
         Urho3D::RayOctreeQuery query(results, rbfxRay, Urho3D::RAY_TRIANGLE);
 
         float nearest = std::numeric_limits<float>::max();
+        bool testedAnyDrawable = false;
         for (Urho3D::Drawable* drawable : drawables)
         {
             if (!drawable ||
@@ -693,6 +746,7 @@ namespace CrossEngineEditor
                 continue;
             }
 
+            testedAnyDrawable = true;
             results.clear();
             drawable->ProcessRayQuery(query, results);
             for (const Urho3D::RayQueryResult& r : results)
@@ -702,6 +756,15 @@ namespace CrossEngineEditor
                     nearest = r.distance_;
                 }
             }
+        }
+
+        if (!testedAnyDrawable)
+        {
+            // No ray-pickable geometry on this node: Lights ARE Drawables in rbfx but are
+            // excluded from ray picking, so a light ends up here. There is no precise path, so
+            // return false and let the caller keep its coarse AABB decision - for a light that
+            // is the wireframe extent (editor_polish.md P0-6), which keeps lights clickable.
+            return false;
         }
 
         if (nearest < std::numeric_limits<float>::max())
@@ -992,19 +1055,53 @@ namespace CrossEngineEditor
             targetPath += m_state.m_scenePath;
         }
 
-        Urho3D::File file(m_state.m_context, ea::string(targetPath.c_str()), Urho3D::FILE_WRITE);
-        if (!file.IsOpen())
+        // Crash-safe save (editor_polish.md P0-8 / M2): serialize to a temp file first, then
+        // atomically promote it over the target (previous version preserved as .bak). A crash
+        // or power loss mid-write can only ever lose the temp file - the scene file on disk is
+        // always either the old complete version or the new complete one, never a truncated mix.
+        const AZStd::string tmpPath = targetPath + ".tmp";
+        const AZStd::string bakPath = targetPath + ".bak";
         {
-            AZ_Warning("CrossEngineEditor", false, "rbfx SaveScene: could not open %s for write.", targetPath.c_str());
+            Urho3D::File file(m_state.m_context, ea::string(tmpPath.c_str()), Urho3D::FILE_WRITE);
+            if (!file.IsOpen())
+            {
+                AZ_Warning("CrossEngineEditor", false, "rbfx SaveScene: could not open %s for write.", tmpPath.c_str());
+                return false;
+            }
+            if (!m_state.m_scene->SaveXML(file))
+            {
+                AZ_Warning("CrossEngineEditor", false, "rbfx SaveScene: SaveXML failed for %s.", tmpPath.c_str());
+                AZ::IO::SystemFile::Delete(tmpPath.c_str());
+                return false;
+            }
+        } // File closed here: the rename below needs a settled write.
+
+        if (AZ::IO::SystemFile::Exists(targetPath.c_str()))
+        {
+            if (!AZ::IO::SystemFile::Rename(targetPath.c_str(), bakPath.c_str(), /*overwrite=*/true))
+            {
+                AZ_Warning("CrossEngineEditor", false, "rbfx SaveScene: could not back up %s.", targetPath.c_str());
+                AZ::IO::SystemFile::Delete(tmpPath.c_str());
+                return false;
+            }
+        }
+        if (!AZ::IO::SystemFile::Rename(tmpPath.c_str(), targetPath.c_str(), /*overwrite=*/true))
+        {
+            // Promote failed and the original was already moved away: restore it. If even the
+            // restore fails the only complete copy is stranded in the .bak - say so loudly.
+            if (!AZ::IO::SystemFile::Rename(bakPath.c_str(), targetPath.c_str(), /*overwrite=*/true))
+            {
+                AZ_Warning("CrossEngineEditor", false,
+                    "rbfx SaveScene: promote AND restore failed; the intact scene is stranded at %s.",
+                    bakPath.c_str());
+            }
+            AZ_Warning("CrossEngineEditor", false, "rbfx SaveScene: could not promote %s.", targetPath.c_str());
+            AZ::IO::SystemFile::Delete(tmpPath.c_str());
             return false;
         }
-        const bool ok = m_state.m_scene->SaveXML(file);
-        AZ_Warning("CrossEngineEditor", ok, "rbfx SaveScene: SaveXML failed for %s.", targetPath.c_str());
-        if (ok)
-        {
-            AZ_Printf("CrossEngineEditor", "rbfx SaveScene: wrote %s\n", targetPath.c_str());
-        }
-        return ok;
+
+        AZ_Printf("CrossEngineEditor", "rbfx SaveScene: wrote %s (backup: %s)\n", targetPath.c_str(), bakPath.c_str());
+        return true;
     }
 
     // ------------------------------------------------- migration 批次 1 (rbfx_migration.md §3.1)

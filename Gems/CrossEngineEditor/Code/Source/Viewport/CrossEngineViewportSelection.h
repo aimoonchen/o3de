@@ -23,7 +23,10 @@
 #include <AzCore/std/smart_ptr/shared_ptr.h>
 #include <AzCore/std/smart_ptr/unique_ptr.h>
 
+#include <AzToolsFramework/ComponentMode/ComponentModeCollection.h>
+#include <AzToolsFramework/Viewport/EditorContextMenu.h>
 #include <AzToolsFramework/Viewport/ViewportMessages.h>
+#include <AzToolsFramework/ViewportSelection/EditorBoxSelect.h>
 #include <AzToolsFramework/ViewportSelection/EditorHelpers.h>
 #endif
 
@@ -69,5 +72,25 @@ namespace CrossEngineEditor
         AZStd::unique_ptr<GizmoManager> m_gizmoManager;
 
         AzToolsFramework::ViewportInteraction::MouseInteraction m_currentInteraction; //!< For drawing manipulators.
+
+        //! Viewport context-menu state (editor_polish.md P0-5): records the RMB press point and
+        //! opens the registered "o3de.menu.editor.viewport.context" menu on a click-without-drag.
+        AzToolsFramework::EditorContextMenu m_contextMenu;
+
+        //! Box-select state machine (editor_polish.md P2 / D3): the stock EditorBoxSelect with
+        //! industry-standard selection semantics on release (bounds-overlap screen test,
+        //! replace / Ctrl = add / Ctrl+Shift = subtract, one undo point).
+        AzToolsFramework::EditorBoxSelect m_boxSelect;
+
+        //! Box-select commit: evaluate the finished marquee against every visible entity's
+        //! screen-projected bounds and apply the modifier semantics in one SetSelectedEntities.
+        void CommitBoxSelect();
+
+        //! Empty ComponentMode collection: the stock selection handler owns/registers this
+        //! interface, and framework action handlers (e.g. EditorVertexSelection, driven by
+        //! LmbrCentral's registration hook) query it in enabled-state callbacks - without a
+        //! registered instance those callbacks null-deref once TriggerRegistrationNotifications
+        //! runs (editor_polish.md P0-4: powering the registration chain exposed this).
+        AzToolsFramework::ComponentModeFramework::ComponentModeCollection m_componentModeCollection;
     };
 } // namespace CrossEngineEditor

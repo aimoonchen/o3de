@@ -28,11 +28,15 @@
 #include <AzCore/Settings/SettingsRegistry.h>
 #include <AzCore/Settings/SettingsRegistryMergeUtils.h>
 
+#include <AzToolsFramework/ActionManager/ActionManagerSystemComponent.h>
+#include <Window/CeePreferences.h>
 #include <AzToolsFramework/Entity/EditorEntityContextBus.h>
 #include <AzToolsFramework/Entity/PrefabEditorEntityOwnershipInterface.h>
 #include <AzToolsFramework/Prefab/PrefabFocusPublicInterface.h>
 #include <AzToolsFramework/Viewport/ViewportMessages.h>
 #include <AzToolsFramework/ViewportSelection/EditorInteractionSystemViewportSelectionRequestBus.h>
+
+#include <Window/CeeActionsHandler.h>
 
 #include <AzCore/std/smart_ptr/unique_ptr.h>
 #include <AzCore/std/string/conversions.h>
@@ -111,6 +115,10 @@ namespace CrossEngineEditor
         // reflects it through the descriptor's own entry point. Reflecting it here as well would be
         // a second, independent reflection entry for the same types, so EngineProperty et al. would
         // be registered twice and SerializeContext asserts on the duplicated Uuid.
+        // CeePreferences is a plain reflected value type (no descriptor), so it registers here -
+        // the Preferences dialog's ReflectedPropertyEditor resolves it through the serialize
+        // context (editor_polish.md P2 / D9).
+        CeePreferences::Reflect(context);
     }
 
     void CrossEngineEditorApplication::CreateReflectionManager()
@@ -178,21 +186,54 @@ namespace CrossEngineEditor
         m_mainWindowWrapper->setGuest(m_mainWindow);
         AzToolsFramework::EditorWindowRequestBus::Handler::BusConnect();
 
+        // Status bar + title scene name (editor_polish.md P1-17 / P2): project path and backend
+        // name come from the command line - no contract growth (the backend has no name/version
+        // query; the --backend choice IS the displayed name, version is deferred with the doc).
+        {
+            AZStd::string backendName = ReadArgValue(arguments(), "--backend");
+            if (backendName.empty())
+            {
+                backendName = "default";
+            }
+            const AZStd::string projectPath = ReadArgValue(arguments(), "--project");
+            m_mainWindow->SetStatusInfo(
+                QString::fromUtf8(projectPath.c_str()), QString::fromUtf8(backendName.c_str()));
+
+            const AZStd::string scenePath = ReadArgValue(arguments(), "--scene");
+            if (!scenePath.empty())
+            {
+                m_mainWindow->SetSceneDisplayName(QString::fromUtf8(scenePath.c_str()));
+            }
+        }
+
         // Install our viewport interaction handler. Unlike the engine default
         // (EditorDefaultSelection + EditorTransformComponentSelection), this keeps entity
         // picking but replaces the transform gizmos with our self-drawn themed gizmos (route B,
-        // Plan §B7). Selecting an entity now produces our gizmos, not the engine's.
+        // Plan §B7). Selecting an entity now produces our gizmos, not the engine's. The startup
+        // style comes from the persisted preferences (P2), defaulting to Blender.
         AzToolsFramework::EditorInteractionSystemViewportSelectionRequestBus::Event(
             AzToolsFramework::GetEntityContextId(),
             &AzToolsFramework::EditorInteractionSystemViewportSelectionRequestBus::Events::SetHandler,
-            [](const AzToolsFramework::EditorVisibleEntityDataCacheInterface* entityDataCache,
-               AzToolsFramework::ViewportEditorModeTrackerInterface* viewportEditorModeTracker)
+            [defaultStyle = m_mainWindow->GetPreferences().m_defaultGizmoStyle](
+                const AzToolsFramework::EditorVisibleEntityDataCacheInterface* entityDataCache,
+                AzToolsFramework::ViewportEditorModeTrackerInterface* viewportEditorModeTracker)
             {
                 return AZStd::make_unique<CrossEngineViewportSelection>(
-                    entityDataCache, viewportEditorModeTracker, GizmoStyle::Blender);
+                    entityDataCache, viewportEditorModeTracker,
+                    defaultStyle == CeePreferences::GizmoStylePreference::Unreal ? GizmoStyle::Unreal
+                                                                                : GizmoStyle::Blender);
             });
 
         CreateNewLevel();
+
+        // ActionManager bootstrap (editor_polish.md P0-4): create the registration handler and
+        // fire the one-shot registration broadcast, positioned like the native editor's
+        // CryEdit.cpp:1669-1676 - main window built, layout restored, before show(). Framework
+        // components with registered handlers (e.g. GlobalPaintBrushSettingsSystemComponent)
+        // activate here too. Later components (material panel etc.) register directly through
+        // the ActionManager interfaces and never need a second trigger (A7).
+        m_actionsHandler = AZStd::make_unique<CeeActionsHandler>(m_mainWindow);
+        AzToolsFramework::ActionManagerSystemComponent::TriggerRegistrationNotifications();
 
         m_mainWindow->show();
     }
@@ -209,6 +250,9 @@ namespace CrossEngineEditor
         {
             AzToolsFramework::EditorWindowRequestBus::Handler::BusDisconnect();
         }
+        // The actions handler points at the main window and its registered actions parent
+        // their QActions to ActionManager-owned storage - drop it before the window dies.
+        m_actionsHandler.reset();
         // Reset the wrapper, not the guest: the wrapper deletes the guest.
         m_mainWindowWrapper.reset();
         m_mainWindow = nullptr;
@@ -282,6 +326,115 @@ namespace CrossEngineEditor
         if (m_mainWindow)
         {
             m_mainWindow->ShowAssetBrowser();
+        }
+    }
+
+    // ------------------------------------------------------- EditorRequests (P0-3 / A4)
+
+    bool CrossEngineEditorApplication::IsLevelDocumentOpen()
+    {
+        // CEE always has the level container open (CreateNewLevel at startup); the Outliner
+        // gates its whole context menu on this answer (EntityOutlinerWidget.cpp:582-586).
+        return true;
+    }
+
+    AzFramework::EntityContextId CrossEngineEditorApplication::GetEntityContextId()
+    {
+        return AzToolsFramework::GetEntityContextId();
+    }
+
+    AZ::EntityId CrossEngineEditorApplication::CreateNewEntity([[maybe_unused]] AZ::EntityId parentId)
+    {
+        // Delegate to the create path the Edit menu uses. parentId is intentionally unused: the
+        // mirror contract creates engine nodes at the scene root (no parent in ObjectSpec);
+        // parent-aware creation waits for a real consumer (A4 scope ruling).
+        return m_mainWindow ? m_mainWindow->CreateEngineEntity() : AZ::EntityId();
+    }
+
+    void CrossEngineEditorApplication::CloneSelection(bool& handled)
+    {
+        // The Outliner's "Duplicate" (DoDuplicateSelection) routes here inside a
+        // ScopedUndoBatch; the backend duplicate path is the same one the Edit menu drives.
+        if (m_mainWindow)
+        {
+            m_mainWindow->DuplicateSelection();
+            handled = true;
+        }
+    }
+
+    void CrossEngineEditorApplication::DeleteSelectedEntities([[maybe_unused]] bool includeDescendants)
+    {
+        // Engine-side removal already cascades to node subtrees, so includeDescendants needs no
+        // separate path; the post-delete re-mirror clears any orphaned editor entities.
+        if (m_mainWindow)
+        {
+            m_mainWindow->DeleteSelection();
+        }
+    }
+
+    AZStd::string CrossEngineEditorApplication::GetDefaultEntityIcon()
+    {
+        // Stock AzQtComponents resource (the same icon EntityOutlinerListModel falls back to);
+        // it is what the Inspector's entity header shows when no per-entity icon exists.
+        return ":/Entity/entity.svg";
+    }
+
+    AZStd::string CrossEngineEditorApplication::GetComponentEditorIcon(
+        const AZ::Uuid& componentType, const AZ::Component* /*component*/)
+    {
+        // The Inspector's component-header icon path. Only mirrored engine nodes get an icon;
+        // everything else (transform etc.) stays icon-less, matching the native editor where
+        // components opt in through their edit context.
+        if (componentType == azrtti_typeid<EngineNodeComponent>())
+        {
+            return ":/Entity/entity.svg";
+        }
+        return {};
+    }
+
+    AZStd::string CrossEngineEditorApplication::GetComponentTypeEditorIcon(const AZ::Uuid& componentType)
+    {
+        // Type-keyed twin of GetComponentEditorIcon (palette-facing; harmless to answer now).
+        if (componentType == azrtti_typeid<EngineNodeComponent>())
+        {
+            return ":/Entity/entity.svg";
+        }
+        return {};
+    }
+
+    void CrossEngineEditorApplication::GoToSelectedEntitiesInViewports()
+    {
+        // "Focus on selection": EntityIdQLabel (Inspector entity links) and the Outliner menu
+        // route here. The main window frames the shared editor viewport camera.
+        if (m_mainWindow)
+        {
+            m_mainWindow->FocusSelection();
+        }
+    }
+
+    bool CrossEngineEditorApplication::CanGoToSelectedEntitiesInViewports()
+    {
+        // Direct call, not the bus: this application IS the ToolsApplication (and thus the
+        // selection holder), and forming the member pointer through our own private-inheriting
+        // base chain is ill-formed (C2247). Unqualified lookup finds the public override.
+        return AreAnyEntitiesSelected();
+    }
+
+    void CrossEngineEditorApplication::OpenPinnedInspector(const AzToolsFramework::EntityIdSet& entities)
+    {
+        // The Inspector's pin button (EntityPropertyEditor.cpp:605) asks the host app for a
+        // second, locked grid. Implementation lives in the main window (P0-3 / A3).
+        if (m_mainWindow)
+        {
+            m_mainWindow->OpenPinnedInspector(entities);
+        }
+    }
+
+    void CrossEngineEditorApplication::ClosePinnedInspector(AzToolsFramework::EntityPropertyEditor* editor)
+    {
+        if (m_mainWindow)
+        {
+            m_mainWindow->ClosePinnedInspector(editor);
         }
     }
 

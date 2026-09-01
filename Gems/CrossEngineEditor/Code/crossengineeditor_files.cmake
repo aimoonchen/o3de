@@ -18,8 +18,17 @@ set(FILES
     Source/Framework/EngineNodeComponent.cpp
     Source/Window/EditorMainWindow.h
     Source/Window/EditorMainWindow.cpp
+    Source/Window/CeeActionsHandler.h
+    Source/Window/CeeActionsHandler.cpp
+    Source/Window/CeeActionIds.h
     Source/Window/CeeAssetBrowserPanel.h
     Source/Window/CeeAssetBrowserPanel.cpp
+    Source/Window/ViewPaneRegistry.h
+    Source/Window/ViewPaneRegistry.cpp
+    Source/Window/CeePreferences.h
+    Source/Window/CeePreferences.cpp
+    Source/Window/CeePreferencesDialog.h
+    Source/Window/CeePreferencesDialog.cpp
     Source/Window/ResourcePropertiesPanel.h
     Source/Window/ResourcePropertiesPanel.cpp
     Source/Window/CommandPalette.h

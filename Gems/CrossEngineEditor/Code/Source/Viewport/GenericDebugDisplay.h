@@ -156,12 +156,27 @@ namespace CrossEngineEditor
 
         void DrawArrow(const AZ::Vector3& src, const AZ::Vector3& trg, float headScale, bool twoSided) override;
 
+        void DrawWireQuad2d(const AZ::Vector2& p1, const AZ::Vector2& p2, float z) override;
+
         using AzFramework::DebugDisplayRequests::DrawTextLabel;
         void DrawTextLabel(
             const AZ::Vector3& pos, float size, const char* text, bool bCenter, int srcOffsetX, int srcOffsetY) override;
 
         //! World-space text labels collected this frame (painted by the Qt viewport after flush).
         const AZStd::vector<DebugTextLabel>& TextLabels() const { return m_textLabels; }
+
+        //! Screen-space marquee rect collected this frame via DrawWireQuad2d, in NORMALIZED
+        //! viewport coordinates (0..1), or nullopt when none was drawn. Painted by the Qt
+        //! overlay (editor_polish.md P2 box select: the marquee goes through the existing Qt
+        //! overlay path because this display tessellates 3D primitives only).
+        struct Marquee
+        {
+            float m_minX = 0.0f, m_minY = 0.0f, m_maxX = 0.0f, m_maxY = 0.0f;
+            AZ::Color m_color{ 1.0f, 1.0f, 1.0f, 0.4f };
+            float m_widthPx = 2.0f;
+            bool m_valid = false;
+        };
+        const Marquee& MarqueeRect() const { return m_marquee; }
 
         //! Area-header status text (Blender ED_area_status_text): a single line the Qt overlay paints
         //! at the top of the viewport during a drag. Empty = nothing to show. Set each frame.
@@ -234,5 +249,8 @@ namespace CrossEngineEditor
         AZStd::vector<DebugLineSegment> m_overlayLines;
         AZStd::vector<DebugVertex> m_overlayTriangles;
         AZStd::vector<DebugTextLabel> m_textLabels;
+
+        //! Screen-space marquee (normalized), reset each frame in ClearFrame.
+        Marquee m_marquee;
     };
 } // namespace CrossEngineEditor

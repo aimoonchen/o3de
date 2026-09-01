@@ -59,10 +59,10 @@ set_target_properties(CrossEngineEditor PROPERTIES
 # compile definition so the source can #if on availability without breaking a submodule-
 # less checkout.
 # ---------------------------------------------------------------------------------------
-if(CEE_HAVE_ADS)
-    ly_target_link_libraries(CrossEngineEditor PRIVATE ads::qtadvanceddocking)
-    target_compile_definitions(CrossEngineEditor PRIVATE CEE_HAVE_ADS=1)
-endif()
+# Docking is ADS-only since the dock style review round (dock_style_review.md ch.3-1): the
+# FancyDocking fallback branch was removed, so the link is unconditional and no
+# CEE_HAVE_ADS compile definition is needed anymore (no source consumes it).
+ly_target_link_libraries(CrossEngineEditor PRIVATE ads::qtadvanceddocking)
 
 if(PAL_TRAIT_BUILD_EXTERNAL_CRASH_HANDLER_SUPPORTED)
     ly_target_link_libraries(CrossEngineEditor PRIVATE AZ::ToolsCrashHandler)

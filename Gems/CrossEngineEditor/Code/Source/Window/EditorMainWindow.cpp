@@ -5,9 +5,13 @@
  */
 
 #include <Window/EditorMainWindow.h>
+#include <Window/CeeActionIds.h>
 #include <Window/CeeAssetBrowserPanel.h>
+#include <Window/CeePreferences.h>
+#include <Window/CeePreferencesDialog.h>
 #include <Window/CommandPalette.h>
 #include <Window/ResourcePropertiesPanel.h>
+#include <Window/ViewPaneRegistry.h>
 #include <Viewport/GizmoManager.h>
 #include <Viewport/EditorViewportWidget.h>
 #include <Application/EntityMirrorBridge.h>
@@ -20,41 +24,64 @@
 #include <AzCore/Interface/Interface.h>
 #include <AzCore/IO/FileIO.h>
 #include <AzCore/IO/GenericStreams.h>
+#include <AzCore/Math/Crc.h>
 #include <AzCore/Math/Vector3.h>
+#include <AzCore/std/algorithm.h>
 #include <AzCore/std/functional.h>
 
+#include <AzToolsFramework/ActionManager/Action/ActionManagerInternalInterface.h>
+#include <AzToolsFramework/ActionManager/Action/ActionManagerInterface.h>
+#include <AzToolsFramework/ActionManager/HotKey/HotKeyManagerInterface.h>
+#include <AzToolsFramework/ActionManager/Menu/MenuManagerInterface.h>
+#include <AzToolsFramework/ActionManager/Menu/MenuManagerInternalInterface.h>
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
+#include <AzToolsFramework/Editor/ActionManagerIdentifiers/EditorContextIdentifiers.h>
+#include <AzToolsFramework/Editor/ActionManagerIdentifiers/EditorMenuIdentifiers.h>
 #include <AzToolsFramework/Entity/PrefabEditorEntityOwnershipInterface.h>
-#include <AzToolsFramework/Prefab/PrefabPublicInterface.h>
+#include <AzToolsFramework/UI/UICore/QTreeViewStateSaver.hxx>
 #include <AzToolsFramework/UI/Logging/TracePrintFLogPanel.h>
+#include <AzToolsFramework/UI/Notifications/ToastBus.h>
+#include <AzToolsFramework/UI/Notifications/ToastNotificationsView.h>
 #include <AzToolsFramework/UI/Outliner/EntityOutlinerWidget.hxx>
 #include <AzToolsFramework/UI/PropertyEditor/EntityPropertyEditor.hxx>
+#include <AzToolsFramework/Viewport/ViewportSettings.h>
 
-#include <AzQtComponents/Components/FancyDocking.h>
+#include <AzQtComponents/Components/ToastNotificationConfiguration.h>
+#include <AzQtComponents/Components/Widgets/FileDialog.h>
+#include <AzQtComponents/Components/Widgets/SegmentControl.h>
+#include <AzQtComponents/Components/Widgets/ToolBar.h>
 
-#if defined(CEE_HAVE_ADS)
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <DockManager.h>
 #include <DockWidget.h>
 #include <DockAreaWidget.h>
 AZ_POP_DISABLE_WARNING
-#endif
 
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QAction>
 #include <QActionGroup>
 #include <QClipboard>
 #include <QCloseEvent>
-#include <QDockWidget>
+#include <QCoreApplication>
+#include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QResizeEvent>
+#include <QSet>
 #include <QSettings>
+#include <QShowEvent>
+#include <QStatusBar>
+#include <QStyle>
+#include <QTimer>
 #include <QToolBar>
+#include <QTreeView>
+#include <QVBoxLayout>
 AZ_POP_DISABLE_WARNING
 
 namespace
@@ -63,6 +90,18 @@ namespace
     // the payload is the engine's own serialization (rbfx Node::SaveXML bytes), and other O3DE
     // tooling must not mistake it for an entity prefab.
     const QString k_nodeClipboardMimeType = QStringLiteral("application/x-crossengineditor-nodes");
+
+    // Toast bus id for this window's notification host (editor_polish.md P2).
+    constexpr AZ::u32 k_toastBusId = AZ_CRC_CE("CEE::ToastNotifications");
+
+    constexpr int k_maxRecentFiles = 10;
+
+    //! Stable dock names (the ADS lookup keys; the ViewPane registry entries reuse them).
+    constexpr const char* k_dockOutliner = "OutlinerDock";
+    constexpr const char* k_dockInspector = "InspectorDock";
+    constexpr const char* k_dockResourceInspector = "ResourceInspectorDock";
+    constexpr const char* k_dockAssetBrowser = "AssetBrowserDock";
+    constexpr const char* k_dockConsole = "ConsoleDock";
 } // namespace
 
 namespace CrossEngineEditor
@@ -75,7 +114,6 @@ namespace CrossEngineEditor
         setObjectName(QStringLiteral("CrossEngineEditorMainWindow"));
         resize(1600, 900);
 
-#if defined(CEE_HAVE_ADS)
         // Qt-Advanced-Docking-System. The manager registers itself as the central widget of
         // this QMainWindow, so it must be created before any dock panels are added. It owns
         // all CDockWidgets and provides saveState/restoreState for workspaces.
@@ -84,140 +122,193 @@ namespace CrossEngineEditor
         ads::CDockManager::setConfigFlag(ads::CDockManager::FocusHighlighting, true);
         ads::CDockManager::setAutoHideConfigFlags(ads::CDockManager::DefaultAutoHideConfig);
         m_dockManager = new ads::CDockManager(this);
-#else
-        // Visual Studio style docking. saveState/restoreState must go through this
-        // instance (see Workspaces, Plan §B5).
-        m_fancyDocking = AZStd::make_unique<AzQtComponents::FancyDocking>(this);
-#endif
 
-        BuildMenuBar();
-        BuildToolBar();
+        // Preferences first: the autosave timer / helper visibility / default gizmo style all
+        // read from it during panel construction (P2 / D9: persistence before UI).
+        m_preferences = AZStd::make_unique<CeePreferences>();
+        m_preferences->Load();
+        AzToolsFramework::SetHelpersVisible(m_preferences->m_showViewportHelpers);
+
         BuildDockPanels();
-    }
+        BuildStatusBar();
 
-    EditorMainWindow::~EditorMainWindow() = default;
+        // Toast host (P2): floats over this window; repositioned on show/resize.
+        m_toastView = new AzToolsFramework::ToastNotificationsView(this, k_toastBusId);
+        m_toastView->setObjectName(QStringLiteral("CeeToastView"));
 
-    void EditorMainWindow::BuildMenuBar()
-    {
-        QMenuBar* bar = menuBar();
+        // Autosave (P2): periodic save of the engine scene while dirty.
+        m_autosaveTimer = new QTimer(this);
+        connect(m_autosaveTimer, &QTimer::timeout, this, &EditorMainWindow::OnAutosaveTimeout);
+        ApplyAutosaveSettings();
 
-        QMenu* fileMenu = bar->addMenu(QStringLiteral("&File"));
-        QAction* newLevel = fileMenu->addAction(QStringLiteral("&New Level"));
-        newLevel->setShortcut(QKeySequence::New);
-        connect(newLevel, &QAction::triggered, this, &EditorMainWindow::OnNewLevel);
-        QAction* openLevel = fileMenu->addAction(QStringLiteral("&Open Level..."));
-        openLevel->setShortcut(QKeySequence::Open);
-        connect(openLevel, &QAction::triggered, this, &EditorMainWindow::OnOpenLevel);
-        QAction* saveLevel = fileMenu->addAction(QStringLiteral("&Save Level..."));
-        saveLevel->setShortcut(QKeySequence::Save);
-        connect(saveLevel, &QAction::triggered, this, &EditorMainWindow::OnSaveLevel);
-        QAction* exportPrefab = fileMenu->addAction(QStringLiteral("Export Prefab..."));
-        connect(exportPrefab, &QAction::triggered, this, &EditorMainWindow::OnExportPrefab);
+        // Session-slot auto-restore (editor_polish.md P0-10 / A5): bring back the layout the
+        // user closed with, before the window is shown. Runs after every panel exists so the
+        // docking system can resolve them all.
+        RestoreSessionLayout();
 
-        QMenu* editMenu = bar->addMenu(QStringLiteral("&Edit"));
-        // Shortcut context deliberately matches O3DE's ActionManager (EditorAction.cpp sets every
-        // editor action to Qt::WidgetWithChildrenShortcut). O3DE does NOT rely on Qt's native
-        // QShortcutMap for cross-widget firing: it installs an ActionContextWidgetWatcher on the
-        // main window that intercepts the bubbling QEvent::ShortcutOverride and triggers matching
-        // actions manually. Keeping WidgetWithChildrenShortcut (NOT ApplicationShortcut) means these
-        // actions carry over unchanged when the O3DE ActionManager is adopted.
-        // RISK to verify: our viewport is a native QWindow behind createWindowContainer, unlike
-        // O3DE's QWidget+winId viewport. ShortcutOverride must still bubble across the window-
-        // container boundary up to this window; if it does not, a QWindow->main-window shortcut
-        // bridge is required (see Plan §B8 B2).
-        // Create submenu (migration P0): "Empty Node" (Ctrl+Shift+N) + the engine's creatable
-        // object types, filled lazily on first open from EnumerateObjectTypes (the backend
-        // builds its scene lazily on first surface, so enumeration must wait for the menu to
-        // actually open). See PopulateCreateMenu.
-        QMenu* createMenu = editMenu->addMenu(QStringLiteral("&Create"));
-        QAction* createEmptyNode = createMenu->addAction(QStringLiteral("Empty Node"));
-        createEmptyNode->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        createEmptyNode->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+N")));
-        addAction(createEmptyNode);
-        connect(createEmptyNode, &QAction::triggered, this, &EditorMainWindow::OnCreateEntity);
-        connect(createMenu, &QMenu::aboutToShow, this, [this, createMenu]
+        // Engine edits (property writes, gizmo drags) arrive through the mirror bridge; let it
+        // mark the scene dirty here (P2 dirty tracking).
+        if (m_mirrorBridge)
         {
-            if (!m_createMenuPopulated)
+            m_mirrorBridge->SetDirtyCallback([this]
             {
-                PopulateCreateMenu(createMenu);
-            }
-        });
-
-        // Node clipboard (migration P0, §B9). Same shortcut context as the rest of the Edit
-        // menu (see the WidgetWithChildrenShortcut comment above): focused text widgets still
-        // consume Ctrl+C/V/X themselves, so Inspector editing is unaffected.
-        QAction* cutSelection = editMenu->addAction(QStringLiteral("Cu&t"));
-        cutSelection->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        cutSelection->setShortcut(QKeySequence::Cut);
-        addAction(cutSelection);
-        connect(cutSelection, &QAction::triggered, this, &EditorMainWindow::OnCutSelection);
-
-        QAction* copySelection = editMenu->addAction(QStringLiteral("&Copy"));
-        copySelection->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        copySelection->setShortcut(QKeySequence::Copy);
-        addAction(copySelection);
-        connect(copySelection, &QAction::triggered, this, &EditorMainWindow::OnCopySelection);
-
-        QAction* pasteSelection = editMenu->addAction(QStringLiteral("&Paste"));
-        pasteSelection->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        pasteSelection->setShortcut(QKeySequence::Paste);
-        addAction(pasteSelection);
-        connect(pasteSelection, &QAction::triggered, this, &EditorMainWindow::OnPasteSelection);
-
-        QAction* duplicateSelection = editMenu->addAction(QStringLiteral("&Duplicate"));
-        duplicateSelection->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        duplicateSelection->setShortcut(QKeySequence(QStringLiteral("Ctrl+D")));
-        addAction(duplicateSelection);
-        connect(duplicateSelection, &QAction::triggered, this, &EditorMainWindow::OnDuplicateSelection);
-
-        QAction* deleteSelection = editMenu->addAction(QStringLiteral("&Delete Selection"));
-        deleteSelection->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        deleteSelection->setShortcut(QKeySequence::Delete);
-        addAction(deleteSelection);
-        connect(deleteSelection, &QAction::triggered, this, &EditorMainWindow::OnDeleteSelection);
-
-        bar->addMenu(QStringLiteral("&View"));
-
-        // Workspaces (Blender-style saved layouts, Plan §B5).
-        QMenu* windowMenu = bar->addMenu(QStringLiteral("&Window"));
-        QAction* saveWorkspace = windowMenu->addAction(QStringLiteral("Save &Workspace"));
-        connect(saveWorkspace, &QAction::triggered, this, &EditorMainWindow::OnSaveWorkspace);
-        QAction* restoreWorkspace = windowMenu->addAction(QStringLiteral("&Restore Workspace"));
-        connect(restoreWorkspace, &QAction::triggered, this, &EditorMainWindow::OnRestoreWorkspace);
-
-        // Command palette (VSCode/Blender-style, Plan §B5). A window-level shortcut so it
-        // is reachable regardless of which docked panel holds focus.
-        QAction* commandPalette = windowMenu->addAction(QStringLiteral("Command &Palette"));
-        commandPalette->setShortcut(QKeySequence(QStringLiteral("Ctrl+P")));
-        commandPalette->setShortcutContext(Qt::ApplicationShortcut);
-        addAction(commandPalette);
-        connect(commandPalette, &QAction::triggered, this, &EditorMainWindow::OnShowCommandPalette);
-
-        bar->addMenu(QStringLiteral("&Help"));
+                MarkSceneDirty();
+            });
+        }
     }
 
-    void EditorMainWindow::BuildToolBar()
+    EditorMainWindow::~EditorMainWindow()
     {
-        // Gizmo mode switcher. Both the look AND the behaviour are ours: each button drives our
-        // GizmoManager (route B, self-drawn gizmos), not the engine-native transform selection.
-        // Hot-keys follow the industry standard Q/W/E/R (Unity/Unreal/Godot: Move=W, Rotate=E,
-        // Scale=R); Q=Select (unobstructed picking) and T=Combined. The legacy 1/2/3/4 keys are
-        // kept as alternates so existing muscle memory still works.
-        auto* toolBar = addToolBar(QStringLiteral("Transform"));
-        toolBar->setObjectName(QStringLiteral("TransformToolBar"));
-
-        auto addModeAction = [this, toolBar](
-            const QString& text, const QString& primaryKey, const QString& altKey, void (EditorMainWindow::*slot)())
+        // The mirror bridge (application-owned) OUTLIVES this window; drop the dirty callback
+        // it holds into us before the window memory goes away (teardown-time mirror events
+        // would otherwise call a dead window - review round 1, R3).
+        if (m_mirrorBridge)
         {
-            QAction* action = toolBar->addAction(text);
+            m_mirrorBridge->SetDirtyCallback({});
+        }
+    }
+
+    // ------------------------------------------------------------------ panels
+
+    void EditorMainWindow::BuildDockPanels()
+    {
+        // Engine-agnostic viewport surface (Plan §B2). Since P1-18 the gizmo controls live in a
+        // header bar strip attached to the viewport instead of a main-window toolbar.
+        auto* viewport = new EditorViewportWidget(k_viewportId, m_mirrorBridge, this);
+        m_viewport = viewport;
+        // Shortcut upstream bridge (editor_polish.md P0-2): the viewport is a bare QWindow, so
+        // while it has focus no registered shortcut fires; key presses are re-dispatched here.
+        viewport->SetShortcutBridgeTarget(this);
+        IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
+        if (backend)
+        {
+            viewport->SetSceneRenderer(&backend->GetSceneRenderer());
+        }
+
+        // Console (rbfx_migration.md §3.4): the official trace log panel. A fresh panel has no
+        // tabs (editor_polish.md F1) - seed it like the official host does (AssetProcessor
+        // MainWindow.cpp:518,1851): stable settings id, load the persisted layout, else two
+        // default tabs. BaseLogPanel's ctor requires a parent WITH a layout
+        // (pParent->layout(), LogPanel_Panel.cpp:105) - a parentless construction crashes, so
+        // the panel sits in a margin-less host widget the dock takes.
+        auto consoleFactory = [] -> QWidget*
+        {
+            auto* host = new QWidget();
+            auto* layout = new QVBoxLayout(host);
+            layout->setContentsMargins(0, 0, 0, 0);
+            layout->setSpacing(0);
+            auto* console = new AzToolsFramework::LogPanel::TracePrintFLogPanel(host);
+            console->SetStorageID(AZ_CRC_CE("CEE::Console"));
+            if (!console->LoadState())
+            {
+                using AzToolsFramework::LogPanel::TabSettings;
+                console->AddLogTab(TabSettings("All output", "", "", true, true, true, false));
+                console->AddLogTab(TabSettings("Warnings+Errors", "", "", false, true, true, false));
+            }
+            return host;
+        };
+
+        // ViewPane registry (editor_polish.md P1-14 / D6): every tool panel registers name (the
+        // ADS restore key), category and factory here; Tools-menu actions and View toggles
+        // enumerate from it. The viewport stays the central dock, so it is not a pane.
+        m_paneRegistry.RegisterPane({ QString::fromLatin1(k_dockOutliner), QStringLiteral("Entity Outliner"),
+                                      QStringLiteral("Core"), Qt::LeftDockWidgetArea, 100,
+                                      [this]
+                                      {
+                                          return new AzToolsFramework::EntityOutlinerWidget(this);
+                                      } });
+        m_paneRegistry.RegisterPane({ QString::fromLatin1(k_dockInspector), QStringLiteral("Inspector"),
+                                      QStringLiteral("Core"), Qt::RightDockWidgetArea, 200,
+                                      [this]
+                                      {
+                                          return new AzToolsFramework::EntityPropertyEditor(this);
+                                      } });
+        m_paneRegistry.RegisterPane({ QString::fromLatin1(k_dockResourceInspector), QStringLiteral("Resource Inspector"),
+                                      QStringLiteral("Core"), Qt::RightDockWidgetArea, 300,
+                                      [this]
+                                      {
+                                          return new ResourcePropertiesPanel(m_mirrorBridge, this);
+                                      } });
+        m_paneRegistry.RegisterPane({ QString::fromLatin1(k_dockAssetBrowser), QStringLiteral("Asset Browser"),
+                                      QStringLiteral("Core"), Qt::BottomDockWidgetArea, 400,
+                                      [this, backend]
+                                      {
+                                          // backend is never null here: StartCommon registers it
+                                          // before this window is constructed (no fallback path
+                                          // to miscast - review round 1, R4).
+                                          return new CeeAssetBrowserPanel(&backend->GetAssetSource(), m_mirrorBridge, this);
+                                      } });
+        m_paneRegistry.RegisterPane({ QString::fromLatin1(k_dockConsole), QStringLiteral("Console"),
+                                      QStringLiteral("Core"), Qt::BottomDockWidgetArea, 500,
+                                      consoleFactory });
+
+        // Viewport header bar + surface stacked vertically in the central dock.
+        auto* viewportColumn = new QWidget(this);
+        auto* viewportLayout = new QVBoxLayout(viewportColumn);
+        viewportLayout->setContentsMargins(0, 0, 0, 0);
+        viewportLayout->setSpacing(0);
+        viewportLayout->addWidget(BuildViewportHeaderBar());
+        viewportLayout->addWidget(viewport);
+
+        // The viewport is the non-closable central anchor dock; tool panels dock around it.
+        auto* viewportDock = new ads::CDockWidget(m_dockManager, QStringLiteral("Viewport"), this);
+        viewportDock->setObjectName(QStringLiteral("ViewportDock"));
+        viewportDock->setWidget(viewportColumn);
+        viewportDock->setFeature(ads::CDockWidget::DockWidgetClosable, false);
+        viewportDock->setFeature(ads::CDockWidget::DockWidgetMovable, false);
+        viewportDock->setFeature(ads::CDockWidget::DockWidgetFloatable, false);
+        ads::CDockAreaWidget* centralArea = m_dockManager->setCentralWidget(viewportDock);
+        (void)centralArea;
+
+        CeeAssetBrowserPanel* assetBrowser = nullptr;
+        ResourcePropertiesPanel* resourcePanel = nullptr;
+        for (const ViewPaneEntry& pane : m_paneRegistry.Entries())
+        {
+            QWidget* content = pane.m_factory();
+            if (pane.m_name == QLatin1String(k_dockAssetBrowser))
+            {
+                assetBrowser = static_cast<CeeAssetBrowserPanel*>(content);
+            }
+            else if (pane.m_name == QLatin1String(k_dockResourceInspector))
+            {
+                resourcePanel = static_cast<ResourcePropertiesPanel*>(content);
+            }
+            AddPanel(pane.m_name, pane.m_title, content, pane.m_area);
+        }
+
+        // Double-click wiring between the Asset Browser and the Resource Inspector panel
+        // (rbfx_migration.md §3.4).
+        if (assetBrowser && resourcePanel)
+        {
+            assetBrowser->SetResourcePropertiesPanel(resourcePanel);
+        }
+    }
+
+    QWidget* EditorMainWindow::BuildViewportHeaderBar()
+    {
+        // Gizmo control cluster (editor_polish.md P1-18 / S1, replacing the main-window
+        // Transform toolbar): a toolbar strip that is a SIBLING of the render surface (never an
+        // overlay on it), so the native-surface constraints of Plan §B8 B3 cannot bite and the
+        // engine input never competes with a transparent widget. Hot-keys follow the industry
+        // standard Q/W/E/R (Move/Rotate/Scale) + Q=Select and T=Combined; 1/2/3/4 alternates.
+        auto* bar = new QToolBar(QStringLiteral("Viewport Header"), this);
+        bar->setObjectName(QStringLiteral("ViewportHeaderBar"));
+        bar->setMovable(false);
+        bar->setFloatable(false);
+
+        auto addModeAction = [this, bar](
+                                  const QString& text, const QString& primaryKey, const QString& altKey,
+                                  void (EditorMainWindow::*slot)())
+        {
+            QAction* action = bar->addAction(text);
             action->setCheckable(true);
             // Primary industry-standard key plus the legacy numeric key as an alternate.
             action->setShortcuts(QList<QKeySequence>{ QKeySequence(primaryKey), QKeySequence(altKey) });
-            // Same context as the Edit actions above (O3DE ActionManager alignment): the toolbar
-            // lives on the main window, so WidgetWithChildrenShortcut lets the key fire while any
-            // docked child (incl. the viewport, pending the ShortcutOverride bubble verification)
-            // holds focus, without an ApplicationShortcut global hijack.
+            // Same context as the Edit actions (O3DE ActionManager alignment), and the action
+            // is registered with THIS window so the ActionContextWidgetWatcher matches it while
+            // the viewport QWindow has focus (the bridge re-dispatches the key here, P0-2).
             action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+            addAction(action);
             connect(action, &QAction::triggered, this, slot);
             return action;
         };
@@ -241,33 +332,35 @@ namespace CrossEngineEditor
         group->addAction(combined);
         select->setChecked(true); // default mode is Select (industry norm: don't grab a gizmo on entry).
 
-        // Gizmo theme switcher (Blender / Unreal, Plan §B7). Rebuilds the gizmo views on change.
-        toolBar->addSeparator();
-        auto* themeGroup = new QActionGroup(this);
-        themeGroup->setExclusive(true);
-        auto addThemeAction = [this, toolBar, themeGroup](const QString& text, GizmoStyle style)
+        bar->addSeparator();
+
+        // Gizmo style switcher (Plan §B7; P2 A10 control upgrade): a SegmentControl is exactly
+        // the idiom for a two-way exclusive choice. The stacked pages are unused placeholders -
+        // the control is the segmented bar itself; currentChanged drives GizmoControlRequestBus.
+        auto* styleSwitch = new AzQtComponents::SegmentControl(AzQtComponents::SegmentControl::TabPosition::North, bar);
+        styleSwitch->setObjectName(QStringLiteral("GizmoStyleSwitch"));
+        QWidget* blenderPage = new QWidget(styleSwitch);
+        QWidget* unrealPage = new QWidget(styleSwitch);
+        styleSwitch->addTab(blenderPage, QStringLiteral("Blender"));
+        styleSwitch->addTab(unrealPage, QStringLiteral("Unreal"));
+        styleSwitch->setCurrentIndex(
+            m_preferences ? static_cast<int>(m_preferences->m_defaultGizmoStyle) : 0);
+        connect(styleSwitch, &AzQtComponents::SegmentControl::currentChanged, this, [](int index)
         {
-            QAction* action = toolBar->addAction(text);
-            action->setCheckable(true);
-            connect(action, &QAction::triggered, this, [style]()
-            {
-                GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoStyle, style);
-            });
-            themeGroup->addAction(action);
-            return action;
-        };
-        QAction* blender = addThemeAction(QStringLiteral("Blender"), GizmoStyle::Blender);
-        addThemeAction(QStringLiteral("Unreal"), GizmoStyle::Unreal);
-        blender->setChecked(true);
+            GizmoControlRequestBus::Broadcast(
+                &GizmoControlRequests::SetGizmoStyle, index == 1 ? GizmoStyle::Unreal : GizmoStyle::Blender);
+        });
+        bar->addWidget(styleSwitch);
+
+        bar->addSeparator();
 
         // Coordinate space switcher (World / Local, Plan §B5). World = axis-aligned handles;
         // Local aligns them to the entity's orientation.
-        toolBar->addSeparator();
         auto* spaceGroup = new QActionGroup(this);
         spaceGroup->setExclusive(true);
-        auto addSpaceAction = [this, toolBar, spaceGroup](const QString& text, GizmoSpace space)
+        auto addSpaceAction = [this, bar, spaceGroup](const QString& text, GizmoSpace space)
         {
-            QAction* action = toolBar->addAction(text);
+            QAction* action = bar->addAction(text);
             action->setCheckable(true);
             connect(action, &QAction::triggered, this, [space]()
             {
@@ -280,203 +373,94 @@ namespace CrossEngineEditor
         addSpaceAction(QStringLiteral("Local"), GizmoSpace::Local);
         worldSpace->setChecked(true); // default space is World.
 
+        bar->addSeparator();
+
         // Snap toggle (Plan §B5). One checkbox flips grid + angle + scale snap on/off, preserving
-        // the current style's step increments; per-increment tuning is deferred to a settings panel.
-        toolBar->addSeparator();
-        QAction* snap = toolBar->addAction(QStringLiteral("Snap"));
+        // the current style's step increments; per-increment tuning lives in Preferences.
+        QAction* snap = bar->addAction(QStringLiteral("Snap"));
         snap->setCheckable(true);
         connect(snap, &QAction::toggled, this, [](bool enabled)
         {
             GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetSnapEnabled, enabled);
         });
+
+        return bar;
     }
 
-    void EditorMainWindow::OnTransformModeSelect()
+    void EditorMainWindow::BuildStatusBar()
     {
-        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Select);
+        // Two-cell status bar (editor_polish.md P1-17 / D8): project path / backend name. The
+        // AzQtComponents StatusBar style applies to the standard QStatusBar automatically. FPS
+        // and memory cells were deliberately cut - the engines expose no cheap statistics
+        // interface, and polling one in would violate KISS.
+        QStatusBar* status = statusBar();
+        status->setObjectName(QStringLiteral("CeeStatusBar"));
+        m_statusProject = new QLabel(QStringLiteral("-"), status);
+        m_statusProject->setMinimumWidth(200);
+        m_statusBackend = new QLabel(QStringLiteral("-"), status);
+        status->addWidget(m_statusProject);
+        status->addPermanentWidget(m_statusBackend);
     }
 
-    void EditorMainWindow::OnTransformModeMove()
+    void EditorMainWindow::OpenViewPane(const QString& paneName)
     {
-        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Move);
-    }
-
-    void EditorMainWindow::OnTransformModeRotate()
-    {
-        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Rotate);
-    }
-
-    void EditorMainWindow::OnTransformModeScale()
-    {
-        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Scale);
-    }
-
-    void EditorMainWindow::OnTransformModeCombined()
-    {
-        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Combined);
-    }
-
-    void EditorMainWindow::BuildDockPanels()
-    {
-        // Engine-agnostic viewport surface. The manipulator/selection logic runs against
-        // its camera state; the active backend renders overlay geometry into it (Plan §B2).
-        auto* viewport = new EditorViewportWidget(k_viewportId, m_mirrorBridge, this);
-        IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
-        if (backend)
-        {
-            viewport->SetSceneRenderer(&backend->GetSceneRenderer());
-        }
-
-        // Reused AzToolsFramework widgets - they self-wire to the editor entity/selection
-        // buses, so selection stays in sync across Outliner and Inspector for free.
-        auto* outliner = new AzToolsFramework::EntityOutlinerWidget(this);
-        auto* inspector = new AzToolsFramework::EntityPropertyEditor(this);
-
-        // Reused AzToolsFramework AssetBrowser (model/filter/tree) fed by the engine
-        // backend's asset source (Plan §A6 C4 资产面, rbfx_migration.md §2).
-        CeeAssetBrowserPanel* assetBrowser = backend
-            ? new CeeAssetBrowserPanel(&backend->GetAssetSource(), m_mirrorBridge, this)
-            : nullptr;
-        QWidget* assetPanel = assetBrowser
-            ? static_cast<QWidget*>(assetBrowser)
-            : static_cast<QWidget*>(new QLabel(QStringLiteral("Asset Browser"), this));
-
-        // Generic resource property panel (rbfx_migration.md §3.3): the O3DE generic
-        // reflection grid absorbs the engine's per-type resource editors. Opened by
-        // AssetBrowser double-click on .material/.mat/.ani via the handler below.
-        auto* resourcePanel = new ResourcePropertiesPanel(m_mirrorBridge, this);
-        if (assetBrowser)
-        {
-            assetBrowser->SetResourcePropertiesPanel(resourcePanel);
-        }
-
-        // Console (rbfx_migration.md §3.4): the official trace log panel - a 100% reused
-        // AzToolsFramework control listening on the AZ trace bus, so AZ_Warning/AZ_Error
-        // output from the backends and the shell lands here.
-        auto* console = new AzToolsFramework::LogPanel::TracePrintFLogPanel();
-
-#if defined(CEE_HAVE_ADS)
-        // ADS models the viewport as the central dock widget (non-closable, non-floatable),
-        // with the tool panels docked around it. This gives Blender/VS-style "dock anywhere"
-        // while keeping the viewport as the stable anchor.
-        auto* viewportDock = new ads::CDockWidget(m_dockManager, QStringLiteral("Viewport"), this);
-        viewportDock->setObjectName(QStringLiteral("ViewportDock"));
-        viewportDock->setWidget(viewport);
-        viewportDock->setFeature(ads::CDockWidget::DockWidgetClosable, false);
-        viewportDock->setFeature(ads::CDockWidget::DockWidgetMovable, false);
-        viewportDock->setFeature(ads::CDockWidget::DockWidgetFloatable, false);
-        ads::CDockAreaWidget* centralArea = m_dockManager->setCentralWidget(viewportDock);
-        (void)centralArea;
-
-        AddPanel(QStringLiteral("OutlinerDock"), QStringLiteral("Entity Outliner"), outliner, Qt::LeftDockWidgetArea);
-        AddPanel(QStringLiteral("InspectorDock"), QStringLiteral("Inspector"), inspector, Qt::RightDockWidgetArea);
-        AddPanel(QStringLiteral("ResourceInspectorDock"), QStringLiteral("Resource Inspector"), resourcePanel, Qt::RightDockWidgetArea);
-        AddPanel(QStringLiteral("AssetBrowserDock"), QStringLiteral("Asset Browser"), assetPanel, Qt::BottomDockWidgetArea);
-        AddPanel(QStringLiteral("ConsoleDock"), QStringLiteral("Console"), console, Qt::BottomDockWidgetArea);
-#else
-        setCentralWidget(viewport);
-        AddPanel(QStringLiteral("OutlinerDock"), QStringLiteral("Entity Outliner"), outliner, Qt::LeftDockWidgetArea);
-        AddPanel(QStringLiteral("InspectorDock"), QStringLiteral("Inspector"), inspector, Qt::RightDockWidgetArea);
-        AddPanel(QStringLiteral("ResourceInspectorDock"), QStringLiteral("Resource Inspector"), resourcePanel, Qt::RightDockWidgetArea);
-        AddPanel(QStringLiteral("AssetBrowserDock"), QStringLiteral("Asset Browser"), assetPanel, Qt::BottomDockWidgetArea);
-        AddPanel(QStringLiteral("ConsoleDock"), QStringLiteral("Console"), console, Qt::BottomDockWidgetArea);
-#endif
-    }
-
-    void EditorMainWindow::ShowAssetBrowser()
-    {
-#if defined(CEE_HAVE_ADS)
-        // ADS: bring the Asset Browser tab forward and make it the current tab.
-        if (ads::CDockWidget* dock = m_dockManager->findDockWidget(QStringLiteral("AssetBrowserDock")))
+        // Registry key == dock object name, so "open" is a docking-system lookup + raise.
+        const ViewPaneEntry* entry = m_paneRegistry.Find(paneName);
+        const QString dockName = entry ? entry->m_name : paneName;
+        if (ads::CDockWidget* dock = m_dockManager->findDockWidget(dockName))
         {
             dock->toggleView(true);
             dock->setAsCurrentTab();
         }
-#else
-        if (QDockWidget* dock = findChild<QDockWidget*>(QStringLiteral("AssetBrowserDock")))
-        {
-            dock->show();
-            dock->raise();
-        }
-#endif
     }
 
-    QDockWidget* EditorMainWindow::AddPanel(
-        const QString& objectName, const QString& title, QWidget* content, Qt::DockWidgetArea area)
+    void EditorMainWindow::ShowAssetBrowser()
     {
-#if defined(CEE_HAVE_ADS)
-        // Wrap the content in an ADS dock widget and add it to the manager. ADS uses its own
-        // DockWidgetArea enum; map the classic Qt areas to it.
-        auto* dock = new ads::CDockWidget(m_dockManager, title, this);
-        dock->setObjectName(objectName);
-        dock->setWidget(content);
-
-        ads::DockWidgetArea adsArea = ads::CenterDockWidgetArea;
-        switch (area)
-        {
-        case Qt::LeftDockWidgetArea:   adsArea = ads::LeftDockWidgetArea;   break;
-        case Qt::RightDockWidgetArea:  adsArea = ads::RightDockWidgetArea;  break;
-        case Qt::TopDockWidgetArea:    adsArea = ads::TopDockWidgetArea;    break;
-        case Qt::BottomDockWidgetArea: adsArea = ads::BottomDockWidgetArea; break;
-        default:                       adsArea = ads::CenterDockWidgetArea; break;
-        }
-        m_dockManager->addDockWidget(adsArea, dock);
-        return nullptr; // ADS owns the widget; callers do not use the return value.
-#else
-        auto* dock = new QDockWidget(title, this);
-        dock->setObjectName(objectName);
-        dock->setWidget(content);
-        addDockWidget(area, dock);
-        return dock;
-#endif
+        OpenViewPane(QString::fromLatin1(k_dockAssetBrowser));
     }
 
-    void EditorMainWindow::OnCreateEntity()
+    bool EditorMainWindow::IsPanelOpen(const QString& dockName) const
+    {
+        const ads::CDockWidget* dock = m_dockManager ? m_dockManager->findDockWidget(dockName) : nullptr;
+        return dock && !dock->isClosed(); // floating counts as open
+    }
+
+    void EditorMainWindow::SetPanelOpen(const QString& dockName, bool open)
+    {
+        if (ads::CDockWidget* dock = m_dockManager ? m_dockManager->findDockWidget(dockName) : nullptr)
+        {
+            dock->toggleView(open);
+        }
+    }
+
+    QWidget* EditorMainWindow::DockContent(const QString& dockName) const
+    {
+        const ads::CDockWidget* dock = m_dockManager ? m_dockManager->findDockWidget(dockName) : nullptr;
+        return dock ? dock->widget() : nullptr;
+    }
+
+    // ------------------------------------------------------- entity operations
+
+    AZ::EntityId EditorMainWindow::CreateEngineEntity()
     {
         // Migration P0: with an engine backend the engine's native scene is the single source
         // of truth, so creation goes through the mirror contract (rbfx: a bare scene Node)
         // instead of the O3DE prefab path. The rbfx mirror deliberately returns an invalid id -
         // the mirror entity is built on the next full re-sync, which RefreshFromEngine runs.
-        AZ_Printf("CrossEngineEditor", "OnCreateEntity invoked.\n");
-
+        AZ::EntityId createdId;
         if (IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get())
         {
-            backend->GetEntityMirror().CreateObject(ObjectSpec{});
+            createdId = backend->GetEntityMirror().CreateObject(ObjectSpec{});
             if (m_mirrorBridge)
             {
-                m_mirrorBridge->RefreshFromEngine();
+                RefreshFromEngineKeepingState();
             }
         }
+        MarkSceneDirty();
+        return createdId;
     }
 
-    void EditorMainWindow::OnCreateObjectType()
-    {
-        // Create-menu entry: the action's data holds the engine typeId from
-        // EnumerateObjectTypes; everything else matches OnCreateEntity.
-        auto* action = qobject_cast<QAction*>(sender());
-        if (!action)
-        {
-            return;
-        }
-
-        IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
-        if (!backend)
-        {
-            return;
-        }
-
-        ObjectSpec spec;
-        spec.m_typeId = action->data().toString().toUtf8().constData();
-        AZ_Printf("CrossEngineEditor", "OnCreateObjectType invoked for type '%s'.\n", spec.m_typeId.c_str());
-
-        backend->GetEntityMirror().CreateObject(spec);
-        if (m_mirrorBridge)
-        {
-            m_mirrorBridge->RefreshFromEngine();
-        }
-    }
-
-    void EditorMainWindow::OnDeleteSelection()
+    void EditorMainWindow::DeleteSelection()
     {
         IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
         if (!backend)
@@ -513,24 +497,50 @@ namespace CrossEngineEditor
             &AzToolsFramework::ToolsApplicationRequests::DeleteSelected);
         if (m_mirrorBridge)
         {
-            m_mirrorBridge->RefreshFromEngine();
+            RefreshFromEngineKeepingState();
         }
+        MarkSceneDirty();
     }
 
-    void EditorMainWindow::OnCutSelection()
+    void EditorMainWindow::CutSelection()
     {
         // Cut = copy to the node clipboard, then the normal delete flow (engine nodes destroyed
         // first, editor-side removal, re-mirror).
-        CopySelectionToClipboard();
-        OnDeleteSelection();
+        CopySelection();
+        DeleteSelection();
     }
 
-    void EditorMainWindow::OnCopySelection()
+    void EditorMainWindow::CopySelection()
     {
-        CopySelectionToClipboard();
+        IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
+        if (!backend)
+        {
+            return;
+        }
+
+        AzToolsFramework::EntityIdList selection;
+        AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
+            selection, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
+        const AZStd::vector<AZ::u8> bytes = backend->GetEntityMirror().SerializeNodes(selection);
+        if (bytes.empty())
+        {
+            return;
+        }
+
+        auto* mime = new QMimeData;
+        mime->setData(
+            k_nodeClipboardMimeType,
+            QByteArray(reinterpret_cast<const char*>(bytes.data()), static_cast<int>(bytes.size())));
+        QGuiApplication::clipboard()->setMimeData(mime);
     }
 
-    void EditorMainWindow::OnPasteSelection()
+    bool EditorMainWindow::HasNodeClipboard()
+    {
+        const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+        return mime && mime->hasFormat(k_nodeClipboardMimeType);
+    }
+
+    void EditorMainWindow::PasteSelection()
     {
         IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
         if (!backend)
@@ -557,11 +567,12 @@ namespace CrossEngineEditor
             bytes, m_mirrorBridge ? m_mirrorBridge->FirstSelectedMirrorId() : AZ::EntityId());
         if (m_mirrorBridge)
         {
-            m_mirrorBridge->RefreshFromEngine();
+            RefreshFromEngineKeepingState();
         }
+        MarkSceneDirty();
     }
 
-    void EditorMainWindow::OnDuplicateSelection()
+    void EditorMainWindow::DuplicateSelection()
     {
         // Blender-style duplicate: serialize + paste without touching the clipboard. v1 keeps
         // the same "under the first selected mirror" placement as paste (a duplicate of a node
@@ -585,96 +596,73 @@ namespace CrossEngineEditor
             bytes, m_mirrorBridge ? m_mirrorBridge->FirstSelectedMirrorId() : AZ::EntityId());
         if (m_mirrorBridge)
         {
-            m_mirrorBridge->RefreshFromEngine();
+            RefreshFromEngineKeepingState();
+        }
+        MarkSceneDirty();
+    }
+
+    void EditorMainWindow::FocusSelection()
+    {
+        // "Focus on selection" (editor_polish.md P0-3): the industry-standard F-key action.
+        // Frame the camera on the union of the selection bounds so lights / cameras / empty
+        // nodes (wireframe gizmos) frame just as meshes do.
+        if (m_viewport)
+        {
+            m_viewport->FrameSelection();
         }
     }
 
-    void EditorMainWindow::CopySelectionToClipboard()
+    void EditorMainWindow::OpenPinnedInspector(const AzToolsFramework::EntityIdSet& entities)
     {
-        IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
-        if (!backend)
+        // editor_polish.md P0-3 / A3: the Inspector's pin button asks the host app to open a
+        // second, locked copy of the grid. 100% reuse: another EntityPropertyEditor pinned to
+        // explicit ids (SetOverrideEntityIds - the official locked-selection mechanism, same as
+        // ResourcePropertiesPanel). Hosted in a small tool window parented to this main window.
+        if (entities.empty() || m_pinnedInspectorWindows.size() >= 4)
         {
-            return;
+            return; // nothing to pin, or politely cap runaway pinning at four windows.
         }
 
-        AzToolsFramework::EntityIdList selection;
-        AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
-            selection, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
-        const AZStd::vector<AZ::u8> bytes = backend->GetEntityMirror().SerializeNodes(selection);
-        if (bytes.empty())
-        {
-            return;
-        }
+        auto* editor = new AzToolsFramework::EntityPropertyEditor();
+        editor->SetOverrideEntityIds(entities);
 
-        auto* mime = new QMimeData;
-        mime->setData(
-            k_nodeClipboardMimeType,
-            QByteArray(reinterpret_cast<const char*>(bytes.data()), static_cast<int>(bytes.size())));
-        QGuiApplication::clipboard()->setMimeData(mime);
+        auto* window = new QWidget(this, Qt::Tool);
+        window->setAttribute(Qt::WA_DeleteOnClose);
+        window->setWindowTitle(QStringLiteral("Pinned Inspector"));
+        auto* layout = new QVBoxLayout(window);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->addWidget(editor);
+        window->resize(360, 480);
+
+        // Remember the window so ClosePinnedInspector can find (and close) the host of a given
+        // editor instance, and forget it again when the user closes the window directly.
+        m_pinnedInspectorWindows.push_back(window);
+        connect(window, &QObject::destroyed, this, [this, window]
+        {
+            AZStd::erase(m_pinnedInspectorWindows, window);
+        });
+
+        window->show();
+        window->raise();
     }
 
-    void EditorMainWindow::closeEvent(QCloseEvent* event)
+    void EditorMainWindow::ClosePinnedInspector(AzToolsFramework::EntityPropertyEditor* editor)
     {
-        // Migration L1 (rbfx_migration.md §3.4 关闭对话框): confirm before leaving, offer a level save. v1 has
-        // no dirty tracking, so Save is always offered and always saves when chosen. Closing
-        // the box (X/Escape) resolves to Cancel, which keeps the editor open.
-        const QMessageBox::StandardButton answer = QMessageBox::question(
-            this,
-            QStringLiteral("Exit Editor"),
-            QStringLiteral("Save changes before exiting?"),
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
-            QMessageBox::Save);
-        if (answer == QMessageBox::Cancel)
+        // The pinned editor asks the host to close its window (EntityPropertyEditor::
+        // CloseInspectorWindow, e.g. when its entities are about to be context-reset).
+        for (QWidget* window : m_pinnedInspectorWindows)
         {
-            event->ignore();
-            return;
-        }
-        if (answer == QMessageBox::Save && !OnSaveLevel())
-        {
-            event->ignore(); // User cancelled the save dialog - keep the editor open.
-            return;
-        }
-        event->accept();
-    }
-
-    void EditorMainWindow::PopulateCreateMenu(QMenu* createMenu)
-    {
-        IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
-        if (!backend)
-        {
-            return;
-        }
-
-        AZStd::vector<ObjectTypeInfo> types;
-        backend->GetEntityMirror().EnumerateObjectTypes(types);
-        if (types.empty())
-        {
-            return; // Latch stays unset: the menu retries on the next open (the backend
-                    // builds its scene lazily on first surface).
-        }
-        m_createMenuPopulated = true;
-
-        // Backend guarantees category-then-typeId ordering, so equal consecutive categories
-        // group into one submenu without a map.
-        createMenu->addSeparator();
-        QMenu* categoryMenu = nullptr;
-        QString currentCategory;
-        for (const ObjectTypeInfo& type : types)
-        {
-            const QString category = QString::fromUtf8(type.m_category.c_str());
-            if (category != currentCategory)
+            if (window->findChild<AzToolsFramework::EntityPropertyEditor*>() == editor)
             {
-                currentCategory = category;
-                categoryMenu = category.isEmpty() ? createMenu : createMenu->addMenu(category);
+                window->close(); // WA_DeleteOnClose disposes of the editor too.
+                return;
             }
-
-            QAction* action = categoryMenu->addAction(QString::fromUtf8(type.m_displayName.c_str()));
-            action->setData(QString::fromUtf8(type.m_typeId.c_str()));
-            connect(action, &QAction::triggered, this, &EditorMainWindow::OnCreateObjectType);
         }
     }
 
-    void EditorMainWindow::OnNewLevel()
+    // ------------------------------------------------------- level workflow
+
+    void EditorMainWindow::NewLevel()
     {
         // Recreate the level as a fresh in-memory root prefab (Plan §B4).
         if (auto* ownership = AZ::Interface<AzToolsFramework::PrefabEditorEntityOwnershipInterface>::Get())
@@ -683,7 +671,7 @@ namespace CrossEngineEditor
         }
     }
 
-    void EditorMainWindow::OnOpenLevel()
+    void EditorMainWindow::OpenLevel()
     {
         const QString path = QFileDialog::getOpenFileName(
             this, QStringLiteral("Open Level"), QString(), QStringLiteral("Prefab (*.prefab)"));
@@ -708,13 +696,17 @@ namespace CrossEngineEditor
         if (!ownership->LoadFromStream(stream, path.toUtf8().constData()))
         {
             AZ_Warning("CrossEngineEditor", false, "OpenLevel: LoadFromStream failed for %s", path.toUtf8().constData());
+            return;
         }
+        RecordRecentFile(QDir::toNativeSeparators(path));
+        SetSceneDisplayName(QFileInfo(path).fileName());
+        ClearSceneDirty();
     }
 
-    bool EditorMainWindow::OnSaveLevel()
+    bool EditorMainWindow::SaveLevel()
     {
         // Plan §B4: with an engine backend the engine's native scene is the single source of
-        // truth, so route Save to the backend (Godot PackedScene+ResourceSaver / rbfx SaveFile).
+        // truth, so route Save to the backend (Godot PackedScene+ResourceSaver / rbfx SaveXML).
         // Passing an empty path lets the backend save to the scene's current file. If the backend
         // can't save (null/diligent, or no scene), fall back to the O3DE prefab path below.
         // Returns false only when the user cancelled the fallback save dialog, so closeEvent
@@ -723,11 +715,14 @@ namespace CrossEngineEditor
         {
             if (backend->GetEntityMirror().SaveScene(AZStd::string{}))
             {
+                ClearSceneDirty();
                 return true;
             }
         }
 
-        const QString path = QFileDialog::getSaveFileName(
+        // Themed save dialog (editor_polish.md P3): AzQtComponents::FileDialog adds invalid-
+        // character validation over the stock QFileDialog.
+        const QString path = AzQtComponents::FileDialog::GetSaveFileName(
             this, QStringLiteral("Save Level"), QStringLiteral("NewLevel.prefab"), QStringLiteral("Prefab (*.prefab)"));
         if (path.isEmpty())
         {
@@ -737,6 +732,10 @@ namespace CrossEngineEditor
         auto* ownership = AZ::Interface<AzToolsFramework::PrefabEditorEntityOwnershipInterface>::Get();
         if (!ownership)
         {
+            // The contract says write failures warn and still return true, but silently doing
+            // NOTHING would discard a dirty scene in closeEvent - warn so it is visible
+            // (review round 1, R11).
+            AZ_Warning("CrossEngineEditor", false, "SaveLevel: PrefabEditorEntityOwnershipInterface unavailable.");
             return true;
         }
 
@@ -750,73 +749,576 @@ namespace CrossEngineEditor
         {
             AZ_Warning("CrossEngineEditor", false, "SaveLevel: SaveToStream failed for %s", path.toUtf8().constData());
         }
+        RecordRecentFile(QDir::toNativeSeparators(path));
+        SetSceneDisplayName(QFileInfo(path).fileName());
+        ClearSceneDirty();
         return true;
     }
 
-    void EditorMainWindow::OnExportPrefab()
+    void EditorMainWindow::ShowCommandPalette()
     {
-        // Migration P0 (§3.1 简): export the first selected mirror node's subtree to the
-        // engine's own prefab format (rbfx: Node::SaveXML; a Model-loadable XML gets picked up
-        // by the drop/spawn path).
+        CommandPalette::Show(this, CollectCommands());
+    }
+
+    void EditorMainWindow::ShowPreferences()
+    {
+        // Preferences dialog (editor_polish.md P2 / D9 + hotkey rebinding E1). Modal; edits the
+        // shared CeePreferences object and applies/persists on change. The shortcuts page gets
+        // the live command set (registered actions carry their ids as objectName).
+        CeePreferencesDialog dialog(this, m_preferences.get(), CollectCommands());
+        connect(&dialog, &CeePreferencesDialog::PreferencesChanged, this, [this]
+        {
+            m_preferences->Save();
+            ApplyAutosaveSettings();
+            AzToolsFramework::SetHelpersVisible(m_preferences->m_showViewportHelpers);
+        });
+        dialog.exec();
+    }
+
+    void EditorMainWindow::SaveWorkspace()
+    {
+        SaveWorkspaceLayout(QStringLiteral("Default"));
+    }
+
+    void EditorMainWindow::RestoreWorkspace()
+    {
+        RestoreWorkspaceLayout(QStringLiteral("Default"));
+    }
+
+    // ------------------------------------------------------- status / dirty / toast
+
+    void EditorMainWindow::SetStatusInfo(const QString& projectPath, const QString& backendName)
+    {
+        if (m_statusProject)
+        {
+            m_statusProject->setText(projectPath.isEmpty() ? QStringLiteral("-") : projectPath);
+            m_statusProject->setToolTip(projectPath);
+        }
+        if (m_statusBackend)
+        {
+            m_statusBackend->setText(backendName.isEmpty() ? QStringLiteral("-") : backendName);
+        }
+    }
+
+    void EditorMainWindow::SetSceneDisplayName(const QString& sceneName)
+    {
+        m_sceneDisplayName = sceneName;
+        UpdateWindowTitle();
+    }
+
+    void EditorMainWindow::MarkSceneDirty()
+    {
+        if (!m_sceneDirty)
+        {
+            m_sceneDirty = true;
+            UpdateWindowTitle();
+        }
+    }
+
+    void EditorMainWindow::ClearSceneDirty()
+    {
+        if (m_sceneDirty)
+        {
+            m_sceneDirty = false;
+            UpdateWindowTitle();
+        }
+    }
+
+    void EditorMainWindow::UpdateWindowTitle()
+    {
+        QString title = QStringLiteral("Cross-Engine Editor");
+        if (!m_sceneDisplayName.isEmpty())
+        {
+            title += QStringLiteral(" - ") + m_sceneDisplayName;
+        }
+        if (m_sceneDirty)
+        {
+            title += QStringLiteral(" [*]");
+        }
+        setWindowTitle(title);
+    }
+
+    void EditorMainWindow::ShowToast(AzQtComponents::ToastType type, const QString& title, const QString& description)
+    {
+        if (!m_toastView)
+        {
+            return;
+        }
+        AzQtComponents::ToastConfiguration config(type, title, description);
+        AzToolsFramework::ToastRequestBus::Event(k_toastBusId, &AzToolsFramework::ToastRequests::ShowToastNotification, config);
+    }
+
+    void EditorMainWindow::showEvent(QShowEvent* event)
+    {
+        AzQtComponents::DockMainWindow::showEvent(event);
+        if (m_toastView)
+        {
+            m_toastView->OnShow();
+        }
+    }
+
+    void EditorMainWindow::resizeEvent(QResizeEvent* event)
+    {
+        AzQtComponents::DockMainWindow::resizeEvent(event);
+        if (m_toastView)
+        {
+            m_toastView->UpdateToastPosition();
+        }
+    }
+
+    // ------------------------------------------------------- ActionManager follow-ups
+
+    void EditorMainWindow::OnActionManagerReady()
+    {
+        // editor_polish.md P1-12: the menu bar is fully generated by the ActionManager. The
+        // shell is left with the main toolbar (P1-16), the dynamic menu content (S3
+        // exceptions) and enable-state refresh wiring.
+        auto* actionManagerInternal = AZ::Interface<AzToolsFramework::ActionManagerInternalInterface>::Get();
+        auto* actionManager = AZ::Interface<AzToolsFramework::ActionManagerInterface>::Get();
+        auto* menuManagerInternal = AZ::Interface<AzToolsFramework::MenuManagerInternalInterface>::Get();
+        if (!actionManagerInternal || !actionManager || !menuManagerInternal)
+        {
+            return;
+        }
+
+        // --- Main toolbar (P1-16): level workflow + undo/redo, AzQtComponents main-toolbar
+        // style. Icons are the style's standard pixmaps (the native editor's icon set lives in
+        // the Atom-bound EditorLib - stock pixmaps keep this dependency-free).
+        m_mainToolBar = addToolBar(QStringLiteral("Main"));
+        m_mainToolBar->setObjectName(QStringLiteral("MainToolBar"));
+        m_mainToolBar->setMovable(false);
+        AzQtComponents::ToolBar::addMainToolBarStyle(m_mainToolBar);
+
+        QStyle* currentStyle = style();
+        auto addToolAction = [this, actionManagerInternal, currentStyle](AZStd::string_view actionId, QStyle::StandardPixmap icon)
+        {
+            if (QAction* action = actionManagerInternal->GetAction(AZStd::string(actionId)))
+            {
+                action->setIcon(currentStyle->standardIcon(icon));
+                m_mainToolBar->addAction(action);
+            }
+        };
+        addToolAction(CeeActions::FileNew, QStyle::SP_FileDialogNewFolder);
+        addToolAction(CeeActions::FileOpen, QStyle::SP_DirOpenIcon);
+        addToolAction(CeeActions::FileSave, QStyle::SP_DialogSaveButton);
+        m_mainToolBar->addSeparator();
+        addToolAction(CeeActions::EditUndo, QStyle::SP_ArrowBack);
+        addToolAction(CeeActions::EditRedo, QStyle::SP_ArrowForward);
+
+        // --- Dynamic menu content (S3 exceptions; OnActionManagerReady runs once - A7).
+        auto hookMenu = [menuManagerInternal, this](AZStd::string_view menuId, auto&& slot)
+        {
+            if (QMenu* menu = menuManagerInternal->GetMenu(AZStd::string(menuId)))
+            {
+                connect(menu, &QMenu::aboutToShow, this, slot);
+            }
+        };
+
+        // Edit menu: fill the Create submenu once the backend can enumerate types.
+        hookMenu(EditorIdentifiers::EditMenuIdentifier, [this]
+        {
+            if (!m_createMenuPopulated)
+            {
+                PopulateCreateMenu();
+            }
+            // Refresh selection-sensitive enable states while the menu is opening.
+            AZ::Interface<AzToolsFramework::ActionManagerInterface>::Get()->TriggerActionUpdater(AZStd::string(CeeActions::SelectionUpdater));
+        });
+        // File menu: refresh the Open Recent entries right before showing.
+        hookMenu(EditorIdentifiers::FileMenuIdentifier, [this]
+        {
+            SyncRecentActions();
+            AZ::Interface<AzToolsFramework::ActionManagerInterface>::Get()->TriggerActionUpdater(AZStd::string(CeeActions::RecentUpdater));
+        });
+        // Selection-sensitive enable states also refresh on the context menus.
+        for (const AZStd::string_view menuId :
+             { EditorIdentifiers::EntityOutlinerContextMenuIdentifier, EditorIdentifiers::ViewportContextMenuIdentifier,
+               EditorIdentifiers::InspectorEntityComponentContextMenuIdentifier })
+        {
+            hookMenu(menuId, []
+            {
+                AZ::Interface<AzToolsFramework::ActionManagerInterface>::Get()->TriggerActionUpdater(
+                    AZStd::string(CeeActions::SelectionUpdater));
+            });
+        }
+
+        // Panel-toggle check states follow the docking system: every dock visibility change
+        // fires the panels updater (A1: the docking system stays the source of truth).
+        const auto triggerPanelsUpdater = [actionManager]
+        {
+            actionManager->TriggerActionUpdater(AZStd::string(CeeActions::PanelsUpdater));
+        };
+        const auto docks = m_dockManager->dockWidgetsMap();
+        for (auto it = docks.cbegin(); it != docks.cend(); ++it)
+        {
+            connect(it.value(), &ads::CDockWidget::viewToggled, this, triggerPanelsUpdater);
+        }
+
+        // Re-apply persisted hotkey bindings (E1/F4: upstream has no persistence, CEE keeps
+        // them in QSettings).
+        if (auto* hotKeyManager = AZ::Interface<AzToolsFramework::HotKeyManagerInterface>::Get())
+        {
+            QSettings settings;
+            settings.beginGroup(QStringLiteral("HotKeys"));
+            for (const QString& id : settings.allKeys())
+            {
+                const QString binding = settings.value(id).toString();
+                if (!binding.isEmpty() && actionManagerInternal->GetAction(AZStd::string(id.toUtf8().constData())) != nullptr)
+                {
+                    hotKeyManager->SetActionHotKey(
+                        AZStd::string(id.toUtf8().constData()), AZStd::string(binding.toUtf8().constData()));
+                }
+            }
+            settings.endGroup();
+        }
+    }
+
+    void EditorMainWindow::PopulateCreateMenu()
+    {
+        // P1-12 / S3: engine types are DATA, not shell code - each becomes a real registered
+        // action the first time the Edit menu opens after the backend can enumerate (latched;
+        // the backend builds its scene lazily on first surface, so a failed enumeration simply
+        // retries on the next open). Registering binds them into the registered Create submenu;
+        // the MenuManager refreshes the Edit menu by itself. NO empty placeholder slots exist at
+        // any point (the native Recent-Files 10-slot pattern is the rejected compromise).
+        IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
+        auto* actionManager = AZ::Interface<AzToolsFramework::ActionManagerInterface>::Get();
+        auto* menuManager = AZ::Interface<AzToolsFramework::MenuManagerInterface>::Get();
+        if (!backend || !actionManager || !menuManager)
+        {
+            return;
+        }
+
+        const AZStd::string createMenuId(EditorIdentifiers::EntityCreationMenuIdentifier);
+        if (!menuManager->IsMenuRegistered(createMenuId))
+        {
+            AzToolsFramework::MenuProperties menuProperties;
+            menuProperties.m_name = "Create";
+            menuManager->RegisterMenu(createMenuId, menuProperties);
+            menuManager->AddSubMenuToMenu(AZStd::string(EditorIdentifiers::EditMenuIdentifier), createMenuId, 200);
+        }
+
+        AZStd::vector<ObjectTypeInfo> types;
+        backend->GetEntityMirror().EnumerateObjectTypes(types);
+        if (types.empty())
+        {
+            return; // latch stays unset: retry on the next open.
+        }
+        m_createMenuPopulated = true;
+
+        int sortKey = 200; // 100 = "Empty Node" (registered by CeeActionsHandler at startup).
+        for (const ObjectTypeInfo& type : types)
+        {
+            const AZStd::string actionId = AZStd::string::format("cee.action.entity.create.%s", type.m_typeId.c_str());
+            if (actionManager->IsActionRegistered(actionId))
+            {
+                continue;
+            }
+
+            AzToolsFramework::ActionProperties properties;
+            properties.m_name = type.m_displayName;
+            properties.m_description = "Create a " + type.m_displayName + " engine object";
+            properties.m_category = "Entity";
+            properties.m_menuVisibility = AzToolsFramework::ActionVisibility::AlwaysShow;
+
+            actionManager->RegisterAction(
+                AZStd::string(EditorIdentifiers::MainWindowActionContextIdentifier), actionId, properties,
+                [this, backend, typeId = type.m_typeId]
+                {
+                    // Same path as "Empty Node": create through the mirror contract, then a
+                    // full re-mirror (state-keeping) + dirty mark.
+                    backend->GetEntityMirror().CreateObject(
+                        ObjectSpec{ typeId, "", "", AZ::Transform::CreateIdentity() });
+                    RefreshFromEngineKeepingState();
+                    MarkSceneDirty();
+                });
+            menuManager->AddActionToMenu(createMenuId, actionId, sortKey);
+            sortKey += 10;
+        }
+
+        // Menu refreshes normally drain on the next system tick; we are inside the Edit menu's
+        // aboutToShow, so drain NOW or the freshly registered types appear one tick late on the
+        // very first open (review round 1, R9).
+        if (auto* menuManagerInternal = AZ::Interface<AzToolsFramework::MenuManagerInternalInterface>::Get())
+        {
+            menuManagerInternal->RefreshMenus();
+        }
+    }
+
+    void EditorMainWindow::RecordRecentFile(const QString& path)
+    {
+        // QSettings-backed MRU (editor_polish.md P2): only editor-openable documents (.prefab
+        // levels) are tracked; engine scenes are launch arguments (--scene), not documents.
+        QSettings settings;
+        settings.beginGroup(QStringLiteral("Recent"));
+        QStringList files = settings.value(QStringLiteral("files")).toStringList();
+        files.removeAll(path);
+        files.prepend(path);
+        while (files.size() > k_maxRecentFiles)
+        {
+            files.removeLast();
+        }
+        settings.setValue(QStringLiteral("files"), files);
+        settings.endGroup();
+
+        SyncRecentActions();
+    }
+
+    void EditorMainWindow::OpenRecentFile(const QString& path)
+    {
+        // Same load path as OpenLevel, addressed by the remembered path. A stale entry (file
+        // moved or deleted) warns on the console and is dropped from the list.
+        auto* ownership = AZ::Interface<AzToolsFramework::PrefabEditorEntityOwnershipInterface>::Get();
+        if (!ownership)
+        {
+            return;
+        }
+
+        AZ::IO::FileIOStream stream(path.toUtf8().constData(), AZ::IO::OpenMode::ModeRead);
+        if (!stream.IsOpen())
+        {
+            AZ_Warning("CrossEngineEditor", false, "Recent file is no longer readable: %s", path.toUtf8().constData());
+            QSettings settings;
+            settings.beginGroup(QStringLiteral("Recent"));
+            QStringList files = settings.value(QStringLiteral("files")).toStringList();
+            files.removeAll(path);
+            settings.setValue(QStringLiteral("files"), files);
+            settings.endGroup();
+            SyncRecentActions();
+            return;
+        }
+        if (ownership->LoadFromStream(stream, path.toUtf8().constData()))
+        {
+            SetSceneDisplayName(QFileInfo(path).fileName());
+            ClearSceneDirty();
+        }
+    }
+
+    void EditorMainWindow::SyncRecentActions()
+    {
+        // Materialize the MRU as lazily registered actions bound into the Open Recent submenu.
+        // Slots are created on demand and reused (renamed) as the list changes; a slot beyond
+        // the current list length disables itself, and disabled entries hide via
+        // HideWhenDisabled - so the submenu only ever shows real files (S3).
+        auto* actionManager = AZ::Interface<AzToolsFramework::ActionManagerInterface>::Get();
+        auto* menuManager = AZ::Interface<AzToolsFramework::MenuManagerInterface>::Get();
+        auto* menuManagerInternal = AZ::Interface<AzToolsFramework::MenuManagerInternalInterface>::Get();
+        if (!actionManager || !menuManager || !menuManagerInternal)
+        {
+            return;
+        }
+
+        QSettings settings;
+        settings.beginGroup(QStringLiteral("Recent"));
+        const QStringList files = settings.value(QStringLiteral("files")).toStringList();
+        settings.endGroup();
+
+        const AZStd::string recentMenuId(EditorIdentifiers::RecentFilesMenuIdentifier);
+        if (!menuManager->IsMenuRegistered(recentMenuId))
+        {
+            AzToolsFramework::MenuProperties menuProperties;
+            menuProperties.m_name = "Open Recent";
+            menuManager->RegisterMenu(recentMenuId, menuProperties);
+            menuManager->AddSubMenuToMenu(
+                AZStd::string(EditorIdentifiers::FileMenuIdentifier), recentMenuId, 300);
+        }
+
+        for (int i = 0; i < k_maxRecentFiles; ++i)
+        {
+            const AZStd::string actionId = AZStd::string::format("cee.action.file.recent.%d", i);
+            if (i >= files.size())
+            {
+                if (actionManager->IsActionRegistered(actionId))
+                {
+                    actionManager->UpdateAction(actionId); // enabled callback turns it off
+                }
+                continue;
+            }
+
+            const QString path = files.at(i);
+            if (!actionManager->IsActionRegistered(actionId))
+            {
+                AzToolsFramework::ActionProperties properties;
+                properties.m_name = path.toUtf8().constData();
+                properties.m_category = "Level";
+                properties.m_menuVisibility = AzToolsFramework::ActionVisibility::HideWhenDisabled;
+
+                actionManager->RegisterAction(
+                    AZStd::string(EditorIdentifiers::MainWindowActionContextIdentifier), actionId, properties,
+                    [this, i]
+                    {
+                        QSettings s;
+                        s.beginGroup(QStringLiteral("Recent"));
+                        const QStringList list = s.value(QStringLiteral("files")).toStringList();
+                        s.endGroup();
+                        if (i < list.size())
+                        {
+                            OpenRecentFile(list.at(i));
+                        }
+                    });
+                actionManager->InstallEnabledStateCallback(actionId, [i]
+                {
+                    QSettings s;
+                    s.beginGroup(QStringLiteral("Recent"));
+                    const int count = s.value(QStringLiteral("files")).toStringList().size();
+                    s.endGroup();
+                    return i < count;
+                });
+                actionManager->AddActionToUpdater(AZStd::string(CeeActions::RecentUpdater), actionId);
+                menuManager->AddActionToMenu(recentMenuId, actionId, 100 + i);
+            }
+            else
+            {
+                actionManager->SetActionName(actionId, path.toUtf8().constData());
+            }
+        }
+
+        // Name/enabled changes need a menu refresh to show (SetActionName does not queue one).
+        menuManagerInternal->QueueRefreshForMenu(recentMenuId);
+        menuManagerInternal->QueueRefreshForMenu(AZStd::string(EditorIdentifiers::FileMenuIdentifier));
+        menuManagerInternal->RefreshMenus();
+    }
+
+    void EditorMainWindow::OnAutosaveTimeout()
+    {
+        // Autosave (editor_polish.md P2 / M2): while the scene is dirty, periodically write it
+        // to <exe>/autosave/<scene> through the backend's SaveScene(path). A separate file, so
+        // the .bak chain of a manual save stays untouched; recovery is manual (open the file
+        // via --scene) because v1 has no runtime scene-loading contract.
+        if (!m_sceneDirty)
+        {
+            return;
+        }
         IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
         if (!backend)
         {
             return;
         }
 
-        AzToolsFramework::EntityIdList selection;
-        AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
-            selection, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
-        if (selection.empty())
+        QDir autosaveDir(QCoreApplication::applicationDirPath() + QStringLiteral("/autosave"));
+        const QString fileName = (m_sceneDisplayName.isEmpty() ? QStringLiteral("Untitled") : m_sceneDisplayName)
+                                     .replace(QLatin1Char('/'), QLatin1Char('_'))
+                                     .replace(QLatin1Char('\\'), QLatin1Char('_'));
+        const QString autosavePath = autosaveDir.filePath(fileName);
+        if (!autosaveDir.exists() && !autosaveDir.mkpath(QStringLiteral(".")))
         {
-            AZ_Warning("CrossEngineEditor", false, "ExportPrefab: nothing selected.");
+            AZ_Warning("CrossEngineEditor", false, "Autosave: could not create %s.",
+                autosaveDir.absolutePath().toUtf8().constData());
             return;
         }
 
-        const QString path = QFileDialog::getSaveFileName(
-            this, QStringLiteral("Export Prefab"), QString(), QStringLiteral("Prefab XML (*.xml *.prefab)"));
-        if (path.isEmpty())
+        if (backend->GetEntityMirror().SaveScene(AZStd::string(autosavePath.toUtf8().constData())))
+        {
+            ShowToast(AzQtComponents::ToastType::Information, QStringLiteral("Autosaved"),
+                QStringLiteral("Scene saved to ") + QDir::toNativeSeparators(autosavePath));
+        }
+    }
+
+    void EditorMainWindow::ApplyAutosaveSettings()
+    {
+        if (!m_autosaveTimer)
         {
             return;
         }
-
-        const bool ok = backend->GetEntityMirror().CreatePrefabFromNodes(
-            selection, AZStd::string(path.toUtf8().constData()));
-        AZ_Warning("CrossEngineEditor", ok, "ExportPrefab failed for %s.", path.toUtf8().constData());
+        if (m_preferences && m_preferences->m_autosaveEnabled)
+        {
+            m_autosaveTimer->start(
+                AZStd::max(1, m_preferences->m_autosaveIntervalMinutes) * 60 * 1000);
+        }
+        else
+        {
+            m_autosaveTimer->stop();
+        }
     }
 
-    QList<QAction*> EditorMainWindow::CollectCommands() const
+    void EditorMainWindow::RefreshFromEngineKeepingState()
     {
-        // Flatten every menu action into a single command list for the palette. Submenus are
-        // walked recursively; separators and section headers (no text) are skipped by the palette.
-        QList<QAction*> commands;
-        AZStd::function<void(QMenu*)> walk = [&](QMenu* menu)
+        // Full re-mirror with the Outliner's expansion/scroll state carried across
+        // (editor_polish.md P2). The stock TreeViewState helper works on any QTreeView - the
+        // Outliner is a framework widget we cannot rebase onto QTreeViewWithStateSaving.
+        QTreeView* outlinerTree = nullptr;
+        if (QWidget* outlinerDockContent = DockContent(QString::fromLatin1(k_dockOutliner)))
         {
-            for (QAction* action : menu->actions())
+            outlinerTree = outlinerDockContent->findChild<QTreeView*>();
+        }
+        if (outlinerTree)
+        {
+            if (!m_outlinerTreeState)
             {
-                if (action->menu())
-                {
-                    walk(action->menu());
-                }
-                else if (!action->isSeparator())
-                {
-                    commands.append(action);
-                }
+                m_outlinerTreeState = AzToolsFramework::TreeViewState::CreateTreeViewState();
             }
-        };
-        for (QAction* topAction : menuBar()->actions())
+            m_outlinerTreeState->CaptureSnapshot(outlinerTree);
+        }
+
+        if (m_mirrorBridge)
         {
-            if (topAction->menu())
+            m_mirrorBridge->RefreshFromEngine();
+        }
+
+        if (outlinerTree && m_outlinerTreeState)
+        {
+            m_outlinerTreeState->ApplySnapshot(outlinerTree);
+        }
+    }
+
+    // ------------------------------------------------------- close / layout persistence
+
+    void EditorMainWindow::closeEvent(QCloseEvent* event)
+    {
+        // Migration L1 (rbfx_migration.md §3.4) + dirty tracking (editor_polish.md P2 / A6):
+        // only ask about saving when there ARE unsaved changes - the old "always ask" flow was
+        // the v1 stand-in for a dirty flag, not a feature. Closing the box (X/Escape) resolves
+        // to Cancel, which keeps the editor open.
+        if (m_sceneDirty)
+        {
+            const QMessageBox::StandardButton answer = QMessageBox::question(
+                this, QStringLiteral("Exit Editor"), QStringLiteral("Save changes before exiting?"),
+                QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+            if (answer == QMessageBox::Cancel)
             {
-                walk(topAction->menu());
+                event->ignore();
+                return;
+            }
+            if (answer == QMessageBox::Save && !SaveLevel())
+            {
+                event->ignore(); // User cancelled the save dialog - keep the editor open.
+                return;
             }
         }
-        return commands;
+
+        // Session-slot auto-save (editor_polish.md P0-10): persist the layout the user is
+        // leaving with, regardless of the save/discard choice - layout is UI state, not scene
+        // content. Restored by the constructor on the next launch.
+        SaveSessionLayout();
+        event->accept();
     }
 
-    void EditorMainWindow::OnShowCommandPalette()
+    void EditorMainWindow::SaveSessionLayout()
     {
-        CommandPalette::Show(this, CollectCommands());
+        // Session slot (editor_polish.md P0-10 / A5): same saveState pair as the named
+        // Workspaces, but in its own QSettings group so automatic persistence never overwrites a
+        // user-named workspace ("Default" included).
+        QSettings settings;
+        settings.beginGroup(QStringLiteral("Session"));
+        settings.setValue(QStringLiteral("geometry"), saveGeometry());
+        settings.setValue(QStringLiteral("state"), m_dockManager->saveState());
+        settings.endGroup();
+    }
+
+    void EditorMainWindow::RestoreSessionLayout()
+    {
+        QSettings settings;
+        settings.beginGroup(QStringLiteral("Session"));
+        const QVariant geometry = settings.value(QStringLiteral("geometry"));
+        const QVariant state = settings.value(QStringLiteral("state"));
+        settings.endGroup();
+
+        if (!geometry.isValid() || !state.isValid())
+        {
+            return; // first launch - keep the default layout.
+        }
+        restoreGeometry(geometry.toByteArray());
+        m_dockManager->restoreState(state.toByteArray());
     }
 
     void EditorMainWindow::SaveWorkspaceLayout(const QString& name)
@@ -826,11 +1328,7 @@ namespace CrossEngineEditor
         QSettings settings;
         settings.beginGroup(QStringLiteral("Workspaces"));
         settings.setValue(name + QStringLiteral("/geometry"), saveGeometry());
-#if defined(CEE_HAVE_ADS)
         settings.setValue(name + QStringLiteral("/state"), m_dockManager->saveState());
-#else
-        settings.setValue(name + QStringLiteral("/state"), m_fancyDocking->saveState());
-#endif
         settings.endGroup();
     }
 
@@ -847,20 +1345,102 @@ namespace CrossEngineEditor
             return false;
         }
         restoreGeometry(geometry.toByteArray());
-#if defined(CEE_HAVE_ADS)
         return m_dockManager->restoreState(state.toByteArray());
-#else
-        return m_fancyDocking->restoreState(state.toByteArray());
-#endif
     }
 
-    void EditorMainWindow::OnSaveWorkspace()
+    void EditorMainWindow::AddPanel(
+        const QString& objectName, const QString& title, QWidget* content, Qt::DockWidgetArea area)
     {
-        SaveWorkspaceLayout(QStringLiteral("Default"));
+        // Wrap the content in an ADS dock widget and add it to the manager (ADS owns the
+        // widget). ADS uses its own DockWidgetArea enum; map the classic Qt areas to it.
+        auto* dock = new ads::CDockWidget(m_dockManager, title, this);
+        dock->setObjectName(objectName);
+        dock->setWidget(content);
+
+        ads::DockWidgetArea adsArea = ads::CenterDockWidgetArea;
+        switch (area)
+        {
+        case Qt::LeftDockWidgetArea:   adsArea = ads::LeftDockWidgetArea;   break;
+        case Qt::RightDockWidgetArea:  adsArea = ads::RightDockWidgetArea;  break;
+        case Qt::TopDockWidgetArea:    adsArea = ads::TopDockWidgetArea;    break;
+        case Qt::BottomDockWidgetArea: adsArea = ads::BottomDockWidgetArea; break;
+        default:                       adsArea = ads::CenterDockWidgetArea; break;
+        }
+        m_dockManager->addDockWidget(adsArea, dock);
     }
 
-    void EditorMainWindow::OnRestoreWorkspace()
+    QList<QAction*> EditorMainWindow::CollectCommands() const
     {
-        RestoreWorkspaceLayout(QStringLiteral("Default"));
+        // Command palette data source (editor_polish.md P1-15): every QAction reachable from
+        // the GENERATED menu bar (which the ActionManager fills - all registered top-level
+        // commands) plus the three registered context menus (fetched straight from the
+        // MenuManager), so framework-registered actions that only live in context menus are
+        // discoverable too. Pointer-level dedup: the entity pool is bound into several menus,
+        // and one QAction* appearing four times in the palette would read as four commands.
+        QList<QAction*> commands;
+        QSet<QAction*> seen;
+        AZStd::function<void(QMenu*)> walk = [&](QMenu* menu)
+        {
+            for (QAction* action : menu->actions())
+            {
+                if (action->menu())
+                {
+                    walk(action->menu());
+                }
+                else if (!action->isSeparator() && !seen.contains(action))
+                {
+                    seen.insert(action);
+                    commands.append(action);
+                }
+            }
+        };
+
+        for (QAction* topAction : menuBar()->actions())
+        {
+            if (topAction->menu())
+            {
+                walk(topAction->menu());
+            }
+        }
+
+        if (auto* menuManagerInternal = AZ::Interface<AzToolsFramework::MenuManagerInternalInterface>::Get())
+        {
+            for (const AZStd::string_view menuId :
+                 { EditorIdentifiers::EntityOutlinerContextMenuIdentifier,
+                   EditorIdentifiers::ViewportContextMenuIdentifier,
+                   EditorIdentifiers::InspectorEntityComponentContextMenuIdentifier })
+            {
+                if (QMenu* menu = menuManagerInternal->GetMenu(AZStd::string(menuId)))
+                {
+                    walk(menu);
+                }
+            }
+        }
+        return commands;
+    }
+
+    void EditorMainWindow::OnTransformModeSelect()
+    {
+        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Select);
+    }
+
+    void EditorMainWindow::OnTransformModeMove()
+    {
+        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Move);
+    }
+
+    void EditorMainWindow::OnTransformModeRotate()
+    {
+        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Rotate);
+    }
+
+    void EditorMainWindow::OnTransformModeScale()
+    {
+        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Scale);
+    }
+
+    void EditorMainWindow::OnTransformModeCombined()
+    {
+        GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoMode, GizmoMode::Combined);
     }
 } // namespace CrossEngineEditor

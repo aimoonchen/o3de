@@ -11,6 +11,7 @@
 #include <BackendAPI/IEntityMirror.h>
 #include <BackendAPI/ISceneRenderer.h>
 
+#include <AzCore/Component/TransformBus.h>
 #include <AzCore/Interface/Interface.h>
 #include <Framework/EngineNodeComponent.h>
 
@@ -23,15 +24,18 @@
 #include <AzFramework/Viewport/ScreenGeometry.h>
 #include <AzFramework/Viewport/ViewportScreen.h>
 
+#include <AzToolsFramework/API/ToolsApplicationAPI.h>
 #include <AzToolsFramework/Viewport/ViewportMessages.h>
 #include <AzToolsFramework/Viewport/ViewportTypes.h>
 #include <AzToolsFramework/ViewportSelection/EditorInteractionSystemViewportSelectionRequestBus.h>
+#include <AzToolsFramework/ViewportSelection/EditorSelectionUtil.h>
 
 #include <AzCore/Math/Matrix4x4.h>
 #include <AzCore/Math/Transform.h>
 #include <AzCore/Math/Vector3.h>
 
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
+#include <QApplication>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -94,9 +98,38 @@ namespace CrossEngineEditor
             update();
         }
 
+        void SetMarquee(const GenericDebugDisplay::Marquee& marquee)
+        {
+            m_marquee = marquee;
+            update();
+        }
+
     protected:
         void paintEvent(QPaintEvent*) override
         {
+            // Box-select marquee (editor_polish.md P2): normalized screen rect collected by
+            // GenericDebugDisplay::DrawWireQuad2d this frame, painted here - the display has no
+            // 2D primitives, so the Qt overlay path is the painter.
+            if (m_marquee.m_valid)
+            {
+                QPainter painter(this);
+                const QRectF rect(
+                    QPointF(m_marquee.m_minX * width(), m_marquee.m_minY * height()),
+                    QPointF(m_marquee.m_maxX * width(), m_marquee.m_maxY * height()));
+                QColor fill(
+                    aznumeric_cast<int>(m_marquee.m_color.GetR() * 255), aznumeric_cast<int>(m_marquee.m_color.GetG() * 255),
+                    aznumeric_cast<int>(m_marquee.m_color.GetB() * 255),
+                    aznumeric_cast<int>(m_marquee.m_color.GetA() * 63));
+                painter.fillRect(rect, fill);
+                QPen pen(QColor(
+                    aznumeric_cast<int>(m_marquee.m_color.GetR() * 255),
+                    aznumeric_cast<int>(m_marquee.m_color.GetG() * 255),
+                    aznumeric_cast<int>(m_marquee.m_color.GetB() * 255)));
+                pen.setWidthF(m_marquee.m_widthPx);
+                painter.setPen(pen);
+                painter.drawRect(rect);
+            }
+
             if (m_labels.empty() && m_headerText.isEmpty())
             {
                 return;
@@ -175,6 +208,7 @@ namespace CrossEngineEditor
         AzFramework::CameraState m_camera;
         qreal m_pixelRatio = 1.0;
         QString m_headerText;
+        GenericDebugDisplay::Marquee m_marquee;
     };
 
     namespace
@@ -348,6 +382,7 @@ namespace CrossEngineEditor
         if (m_labelOverlay)
         {
             m_labelOverlay->SetLabels(m_debugDisplay.TextLabels(), m_cameraState, m_pixelRatio, m_debugDisplay.HeaderText());
+            m_labelOverlay->SetMarquee(m_debugDisplay.MarqueeRect());
         }
     }
 
@@ -464,12 +499,18 @@ namespace CrossEngineEditor
         case QEvent::MouseButtonPress:
             {
                 auto* me = static_cast<QMouseEvent*>(event);
-                if (m_cameraController.HandleMousePress(*me, ViewportSize()))
+                const bool cameraConsumed = m_cameraController.HandleMousePress(*me, ViewportSize());
+                // RMB is BOTH the camera look gesture and the context-menu gesture: even when
+                // the camera consumed the press, route it to the interaction system as well so
+                // EditorContextMenuUpdate (in CrossEngineViewportSelection, editor_polish.md
+                // P0-5) sees the down-up pair and can tell click (menu) from drag (orbit).
+                // RMB reaches no manipulator (they bind LMB) and no selection code, so this is
+                // otherwise a no-op for the selection system.
+                if (!cameraConsumed || me->button() == Qt::RightButton)
                 {
-                    break;
+                    HandleMouseEvent(
+                        MouseEvent::Down, me->position().toPoint(), me->button(), me->buttons(), me->modifiers(), 0.0f);
                 }
-                HandleMouseEvent(
-                    MouseEvent::Down, me->position().toPoint(), me->button(), me->buttons(), me->modifiers(), 0.0f);
                 break;
             }
         case QEvent::MouseButtonRelease:
@@ -515,6 +556,16 @@ namespace CrossEngineEditor
         case QEvent::KeyPress:
             {
                 auto* ke = static_cast<QKeyEvent*>(event);
+                // Shortcut upstream bridge (editor_polish.md P0-2): the viewport is a bare
+                // QWindow, so Qt never runs the widget ShortcutOverride flow for its keys -
+                // registered shortcuts are deaf while it has focus (~all of the time).
+                // BridgeShortcutToTarget re-dispatches the key to the main window where Qt
+                // regenerates that flow for it. Skipped while the camera is navigating
+                // (RMB look / MMB pan) so the fly keys (WASDQE) do not fire gizmo-mode shortcuts.
+                if (!m_cameraController.HandlingEvents() && BridgeShortcutToTarget(*ke))
+                {
+                    break; // consumed by a registered shortcut - not a camera key.
+                }
                 m_cameraController.HandleKey(*ke, /*pressed=*/true, ViewportSize());
                 break;
             }
@@ -647,5 +698,60 @@ namespace CrossEngineEditor
             interactionEvent);
 
         return result != VI::MouseInteractionResult::None;
+    }
+
+    bool EditorViewportWidget::BridgeShortcutToTarget(const QKeyEvent& keyEvent)
+    {
+        if (!m_shortcutBridgeTarget)
+        {
+            return false;
+        }
+
+        // A fresh, NON-spontaneous copy: QApplication::notify only synthesizes the
+        // ShortcutOverride for non-spontaneous key events (qt_sendShortcutOverrideEvent). When
+        // a shortcut fires the notify chain consumes the copy and sendEvent returns true; when
+        // nothing matches the target ignores the key and we return false.
+        QKeyEvent copy(
+            QEvent::KeyPress, keyEvent.key(), keyEvent.modifiers(), keyEvent.text(), keyEvent.isAutoRepeat(),
+            static_cast<quint16>(keyEvent.count()));
+        return QApplication::sendEvent(m_shortcutBridgeTarget, &copy);
+    }
+
+    void EditorViewportWidget::FrameSelection()
+    {
+        // "Focus on selection" (editor_polish.md P0-3): fit the selection bounds into the view
+        // keeping the current view direction - the standard editor F-key behavior. Bounds come
+        // from the same source as picking, so lights / cameras / empty nodes (wireframe
+        // extents) frame exactly like meshes.
+        AzToolsFramework::EntityIdList selection;
+        AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
+            selection, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
+        if (selection.empty())
+        {
+            return;
+        }
+
+        const AzFramework::ViewportInfo viewportInfo{ static_cast<int>(m_viewportId) };
+        AZ::Aabb bounds = AZ::Aabb::CreateNull();
+        for (const AZ::EntityId entityId : selection)
+        {
+            const AZ::Aabb entityBounds = AzToolsFramework::CalculateEditorEntitySelectionBounds(entityId, viewportInfo);
+            if (entityBounds.IsValid())
+            {
+                bounds.AddAabb(entityBounds);
+            }
+        }
+        if (!bounds.IsValid())
+        {
+            // Selection has no bounds at all (should not happen - wireframe kinds provide one):
+            // fall back to framing a small sphere at the first entity's transform so the camera
+            // still moves somewhere useful.
+            AZ::Vector3 center = AZ::Vector3::CreateZero();
+            AZ::TransformBus::EventResult(center, selection.front(), &AZ::TransformBus::Events::GetWorldTranslation);
+            bounds = AZ::Aabb::CreateCenterRadius(center, 1.0f);
+        }
+
+        m_cameraController.FrameBounds(bounds, m_cameraState);
+        UpdateCameraState();
     }
 } // namespace CrossEngineEditor

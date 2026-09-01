@@ -3,7 +3,8 @@
 > **本文 = 唯一终稿**。吸收三份过程稿（`review_editor_deepseek.md` / `review_editor_opus.md` / `review_editor_kimi.md`）的全部有效结论，完成 2026-08-27 用户**完整再确认**（D1–D12，§7），并吸收**第三方独立复审 `review.md`**（R1–R3 / S1–S4 / M1–M2 / E1–E6 全项落账为 D13）。
 > **触发问题（用户）**：CEE 没有原生 O3DE Editor 的通用菜单/工具栏/子编辑入口/其他 UI 面板，整个编辑器看上去非常简陋。原则：保留原版编辑器框架与控件库，移除 Atom 与编辑器无关模块。
 > **裁决口径**：`Plan.md` §A6——C1 单底线（Atom 渲染模块零依赖）、C3 三级优先序（① 复用 stock ＞ ② 扩展 stock ＞ ③ 自建，走 ②/③ 须带 `文件:行号` 证据）。
-> **执行状态**：本轮**只出文档与决策记录，不动任何代码**；最终方案落定（A1–A9 采纳 + A10 保留 P2）后，`Plan.md` 已同步修订（§A1/§A2/§B1/§B5/§B11/§B12 E7/文末裁决落账），`rbfx_migration.md` 三处小修订已执行（§4 ActionManager 推翻 / §3.3 palette 缺口 / §3.6 展开态恢复降级 P2）。**第三方复审 `review.md` 全部承重论据源码复核通过**（仅两处引用路径勘误），D13 落账 + Plan/rbfx 二次同步已执行。
+> **执行状态**：2026-08-27 轮只出文档；**2026-08-31 实施轮 P0+P1+P2+P3 全量落地**（profile 编译 0 error、check_no_atom 三层 PASS、NullBackend 冒烟通过——修复了两个**先于本轮就存在**的启动崩溃，见 §12.3/§12.4）。实施记录见 §12。仅 ProgressShield 一项缓办（带理由，§12.4）。
+> 历史轮同步记录：最终方案落定（A1–A9 采纳 + A10 保留 P2）后，`Plan.md` 已同步修订（§A1/§A2/§B1/§B5/§B11/§B12 E7/文末裁决落账），`rbfx_migration.md` 三处小修订已执行（§4 ActionManager 推翻 / §3.3 palette 缺口 / §3.6 展开态恢复降级 P2）。**第三方复审 `review.md` 全部承重论据源码复核通过**（仅两处引用路径勘误），D13 落账 + Plan/rbfx 二次同步已执行。
 
 ---
 
@@ -266,5 +267,119 @@ ProgressShield（0.3）· 主题化对话框（`FileDialog`/`MessageBox`/`InputD
 
 ---
 
-*终稿 2026-08-27。三份过程稿（deepseek/opus/kimi）与第三方独立复审 `review.md`（R1–R3/S1–S4/M1–M2/E1–E6）均已被本文吸收并**删除**，D13 为唯一吸收记录。本文为唯一裁决依据。本轮无任何代码改动。*
-*待办：① ✅ `Progress.md` 补记已执行（2026-08-27）；② 开 P0 实施轮。*
+*终稿 2026-08-27。三份过程稿（deepseek/opus/kimi）与第三方独立复审 `review.md`（R1–R3/S1–S4/M1–M2/E1–E6）均已被本文吸收并**删除**，D13 为唯一吸收记录。本文为唯一裁决依据。*
+*2026-08-31：P0 实施轮落地（见 §12）。*
+
+---
+
+## 12. 实施记录（2026-08-31，P0+P1+P2+P3 全量）
+
+> 编码完成 P0-1～P0-10 全部十项 + P0-11 编译回归；profile 构建通过（0 error），C1 三层断言与实机点检见 §12.3。**零新增 CMake 依赖**——唯一构建清单改动 = `crossengineeditor_files.cmake` 追加新文件 `Window/CeeActionsHandler.{h,cpp}`（文件列表登记，非依赖）。P1–P3 未动。
+
+### 12.1 落地明细（文件 → 事项）
+
+| 事项 | 落点 | 说明 |
+|---|---|---|
+| P0-1 Console 补 tab | `EditorMainWindow.cpp` BuildDockPanels | `SetStorageID(AZ_CRC_CE("CEE::Console"))` + `LoadState()` 失败则 `AddLogTab` 两 tab（All output / Warnings+Errors），AssetProcessor 范式原样 |
+| P0-2 快捷键上行桥 | `EditorViewportWidget.{h,cpp}` + `EditorMainWindow.cpp` | **实现升级（优于终稿草案）**：不做手工合成 ShortcutOverride，而是把 KeyPress **非 spontaneous 副本** `sendEvent` 给主窗口——Qt 6 的 `QApplication::notify` 对非 spontaneous KeyPress 自动调 `qt_sendShortcutOverrideEvent`（qapplication.cpp:2647-2656，已读 Qt 6.11.1 源码核实），一条桥同时覆盖 ActionManager watcher 路径 **与** Qt 原生 shortcut map 路径，且 ApplicationWatcher 的一次性吃键标志在同一次 sendEvent 内被正确消费（手工合成方案会吞掉下一次按键）。桥在 `HandlingEvents()`（相机导航中）时旁路，RMB 飞行时 WASDQE 不再同时触发 gizmo 模式键。配套：工具栏 Q/W/E/R/T 动作同时 `addAction` 注册到主窗口（watcher 只查被挂 widget 的 actions() 列表；QAction 可多挂、shortcut map 单条目无歧义，qaction.cpp redoGrab 核实） |
+| P0-3 EditorRequests 12 方法 | `CrossEngineEditorApplication.{h,cpp}` | IsLevelDocumentOpen(true)/GetEntityContextId/CreateNewEntity/CloneSelection/DeleteSelectedEntities/图标×3（`:/Entity/entity.svg`，AzQtComponents 资源）/GoTo/CanGoTo/OpenPinnedInspector/ClosePinnedInspector；实现体全部委托主窗口同一操作方法（单一真相源）。CanGoTo 走 `AreAnyEntitiesSelected()` 直调——应用类从 ToolsApplication **私有**继承 EBus handler，`&ToolsApplicationRequests::GetSelectedEntities` 成员指针形成触发 C2247 |
+| P0-4 ActionManager 引导 | 新文件 `Window/CeeActionsHandler.{h,cpp}` + `CrossEngineEditorApplication.cpp` | 对标 EditorActionsHandler 范式：注册 4 个 action context（mainwindow + assetbrowser + console + entitypropertyeditor——后三者供 EntityPropertyEditor 等框架控件自挂），`AssignWidgetToActionContext(mainWindow)`；`StartCommon` 在 CreateNewLevel 后、show 前 `TriggerRegistrationNotifications()`（A7 一次性）；post-hook 打点 + 调 `OnActionManagerReady()` |
+| P0-5 三个 context menu + 视口触发点 | `CeeActionsHandler.cpp` + `CrossEngineViewportSelection.{h,cpp}` + `EditorViewportWidget.cpp` | **事实修正**：第四处（Inspector 属性行）经源码核实为 EntityPropertyEditor **自建本地 QMenu**（组件动作+字段选项，`EntityPropertyEditor.cpp:2276` `menu.addActions(actions())`），无需注册即可用；真正需要注册的是 Outliner/视口/Inspector 组件头三个（显示点硬编码 o3de.menu.* id）。动作池 `cee.action.*` 7 件（Create/Cut/Copy/Paste/Duplicate/Delete/Focus）×3 菜单；视口触发点 = `CrossEngineViewportSelection::InternalHandleMouseViewportInteraction` 调公开 `EditorContextMenuUpdate`（原版 EditorTransformComponentSelection.cpp:1896 同款）；**配套管线**：`HandleNativeInput` MouseButtonPress 在相机吞掉 RMB 时仍把 RMB 路由进交互系统（EditorContextMenuUpdate 需要 down+up 对才能区分点击/拖拽；RMB 不触碰任何 manipulator/选择逻辑，安全） |
+| P0-6 非可视节点线框 gizmo | `EngineNodeComponent.{h,cpp}` | 挂 `EntityDebugDisplayEventBus`（调用点 EditorHelpers::DisplayComponents 现成）；按 `m_className` 分类六型（Spot/Directional/Point/Camera/Empty/None，覆盖 rbfx `SpotLight`/`DirectionalLight`/`PointLight`/`Camera`/`Node` 与 Godot `*Light3D`/`Camera3D`/`Node3D`）；**朝向约定 = 镜像实体局部 +Y**（两引擎坐标转换器都把镜像 +Y 映射到引擎前向：rbfx +Z / Godot −Z，Plan §B6——一处约定服务全部后端）；图元全用 GenericDebugDisplay 现成 WireSphere/WireCone/DrawArrow/DrawLine；**拾取**：`GetEditorSelectionBoundsViewport` 对线框型返回线框范围盒（可见即诚实，修复8 的"隐形盒抢选"原则不破坏——盒=屏上可见线框）；**rbfx 配套修复**：`RaycastNode` 对无可拾取 Drawable 的节点（灯光——rbfx 里 Light 是 Drawable 但被排除）改返回 false（"无精拾路径，保留 AABB 判定"），否则灯光的线框 AABB 命中会被"精拾 miss"错误拒绝 |
+| P0-7 Undo/Redo 占位置灰 | `CeeActionsHandler.cpp` + `EditorMainWindow.cpp` OnActionManagerReady | `cee.action.edit.undo/redo` 注册进 mainwindow context + Ctrl+Z/Ctrl+Shift+Z + handler 驱动 `ToolsApplicationRequestBus::UndoPressed/RedoPressed` + `InstallEnabledStateCallback→false` + tooltip 说明 + AlwaysShow；QAction 经 `ActionManagerInternalInterface::GetAction` 插入手写 Edit 菜单首两位（undo 在前） |
+| P0-8 保存安全 | `RbfxBackend.cpp` + `GodotBackend.cpp` SaveScene | write-tmp（`<target>.tmp`）→ 旧文件 rename `<target>.bak` → tmp rename 目标（`AZ::IO::SystemFile::Rename`，NTFS 原子）；失败路径：promote 失败回滚 .bak、序列化失败删 tmp——崩溃/断电只可能丢 tmp，场景文件永远是完整版本。**两后端同批**（Godot 同样直写，同一风险） |
+| P0-9 View 菜单 = 面板开关 | `EditorMainWindow.cpp` | D2 落地：顶层 File/Edit/View/Help（Window 菜单删除，Workspaces/命令面板并入 View）；面板开关段落每次 aboutToShow 从 ADS `dockWidgetsMap()` 直取重建（A1 永久直取，无第二注册表），ADS 自带 `toggleViewAction()` checkable 双向同步；fallback 路径收集 `m_dockPanels` 用 QDockWidget::toggleViewAction 同构 |
+| P0-10 布局会话槽 | `EditorMainWindow.cpp` | ctor 尾 `RestoreSessionLayout()` / closeEvent `SaveSessionLayout()`；独立 QSettings "Session" 组，不触碰 Workspaces 组（A5） |
+
+### 12.2 实施中的新发现（落账）
+
+1. **Unity 分组暴露潜伏缺陷**：新增 CeeActionsHandler.cpp 使 `CommandPalette.cpp` 成为 unity_1 首文件——它第 9 行用 `AZ_PUSH_DISABLE_WARNING` 却从未 include `AzCore/PlatformDef.h`（此前依赖 unity 前序文件的传递 include）。已补显式 include（Progress.md 编译坑清单新增一条）。
+2. **AZ::Color 构造非 constexpr**（模板 ctor），线框配色常量用 `const` 而非 `constexpr`。
+3. **Qt 源码级确认**（G:\Qt\6.11.1\Src）：非 spontaneous KeyPress → `qt_sendShortcutOverrideEvent` 自动短路/派发链已逐函数核实（qapplication.cpp notify / qwindowsysteminterface.cpp / qshortcutmap.cpp correctWidgetContext / qaction.cpp redoGrab），P0-2 的机制不依赖猜测。
+
+### 12.3 回归与验收状态
+
+| 项 | 状态 |
+|---|---|
+| profile 编译（-j 8） | ✅ 0 error（最终轮） |
+| `check_no_atom.ps1` 三层断言 | ✅ **PASS（C1 holds）**——含第 3 层构建断言（重跑于全量实施后） |
+| NullBackend 冒烟 | ✅ **通过**——`Scripts/cee_smoke_null.ps1` 启动 15 秒存活无崩溃（ALIVE=True）。注：注册链完成由"存活"传递证明（注册若崩会在 Trigger 处段错误，修复前两次崩溃实测于此）；AZ_Printf 打点走调试通道，强制终止不落盘 |
+| **两个先于本轮的启动崩溃（实测发现并修复）** | ① Console 面板无父构造 → `BaseLogPanel` 构造尾 `pParent->layout()` 空引用（`LogPanel_Panel.cpp:105`）——**该崩溃在本轮之前就存在**（git 提交版本同样无父构造；Console 面板落地后编辑器从未被启动验证过）。修法：面板挂到带布局的宿主 QWidget（官方宿主是 .ui 布局内构造）。② `ComponentModeCollectionInterface` 无人注册：CEE 用 CrossEngineViewportSelection 替换了 EditorDefaultSelection，而该接口的注册者正是它——LmbrCentral（运行时依赖拖入的 Gem 模块）的注册钩子装 enabled 回调时 `IsVertexSelectionEmpty` 解引用 null（`EditorVertexSelection.cpp:84`）。修法：镜像 stock——CrossEngineViewportSelection 持有并注册空 `ComponentModeCollection`（此为 P0-4 通电后暴露的第一个真实框架处理器，恰好验证了"打点确认已实例化的框架注册处理器被触发"） |
+| 尺子 1–9 人工点检 | ⏳ 留给用户实机走查（清单见 §7） |
+
+> 实机点检重点提示：① 视口聚焦按 W/E/R（gizmo 模式）与 Delete/Ctrl+S——这是上行桥的直接验收（尺子 4）；② RMB 拖拽 = orbit、RMB 单击 = 视口菜单；LMB 拖拽 = 框选 marquee、LMB 单击 = 拾取；③ 打开含灯光/相机的场景看线框可点选（尺子 7）；④ 修改属性/移动 gizmo 后标题出现 `[*]`，Esc 不再永远弹保存框（干净退出直接关）。
+
+### 12.4 P1+P2+P3 实施记录（同轮）
+
+**P1（全部落地）**：
+
+| 事项 | 落点与说明 |
+|---|---|
+| P1-12 全量迁移 | 手写菜单栏**整体退役**——菜单栏由 MenuManager 生成（`RegisterMenuBar` 接管 `menuBar()`，EditorMenuBar::RefreshMenuBar 会 clear+重建，混合方案不可行，已按全量迁移落地）；File/Edit/Tools/View/Help 五顶层菜单（o3de.menu.editor.*，Game sortkey 300 仍预留）+ Create 子菜单 + Recent 子菜单；全部动作 cee.action.*（D2b）；热键全走 HotKeyManager（Ctrl+N/O/S/X/C/V/D、Delete、Ctrl+Shift+N、F=Focus、Ctrl+P、Ctrl+Alt+P=Preferences）；**S3 两处例外**均按裁决落地：Create 子菜单引擎类型在首次枚举后 latched 注册为真动作（无预注册空槽）、Recent 槽位懒注册（第一条记录出现前 Recent 菜单根本不存在）；选择敏感动作装 enabled 回调 + `cee.updater.selection`（选择变化 + 菜单 aboutToShow 双触发，尺子2） |
+| P1-13 后端接缝 | `IEngineBackend::GetActionRegistrationPatterns()` 虚默认空（**零纯虚增长**）返回 `EngineActionPattern` 表（BackendTypes.h，POD+AZStd::function 无 Qt 类型，C4 达标）；CeeActionsHandler 通用循环消费；**首个真实表项**：rbfx `cee.action.rbfx.exportPrefab`（Export Prefab 从壳层菜单项迁入后端表，Godot 上该命令诚实缺席）；手写 OnExportPrefab 删除 |
+| P1-14 ViewPane 注册表 | 新文件 `Window/ViewPaneRegistry.{h,cpp}`（名字/标题/类别/dock区/工厂/sortKey）；五工具面板迁入，BuildDockPanels 硬编码消灭；`OpenViewPane`/`IsPanelOpen`/`SetPanelOpen` 直通 ADS（A1 维持：停靠系统仍是唯一真相源）；Tools 菜单 = 注册表驱动的 Open 动作 + View 菜单 = 每面板一个 checkable 注册动作（checkState 直读 ADS，viewToggled → panels updater 双向同步） |
+| P1-15 命令面板 | 数据源 = 生成的菜单栏（=全部注册的顶层命令）∪ 三个注册 context menu（MenuManagerInternalInterface::GetMenu 直取）递归枚举；覆盖面随实际注册数增长（LmbrCentral 等框架处理器的动作自动进入） |
+| P1-16 主工具栏 | New/Open/Save/Undo/Redo 拉取注册 QAction + `AzQtComponents::ToolBar::addMainToolBarStyle` + QStyle 标准图标（引擎 Assets 无文件操作图标、原生图标集在 Atom 绑定的 EditorLib 内——零依赖取标准像素图，注释落理由） |
+| P1-17 状态栏 | 两格（项目路径/后端名）；后端名取 `--backend` 值（**零契约增长**，IEngineBackend 无 name/version 查询；版本随文档缓办） |
+| P1-18 视口 header bar | QToolBar 兄弟件（viewport dock 内、表面上方 QVBoxLayout）；gizmo 模式组（Q/W/E/R/T+1-4，从主窗口 Transform 工具栏整体迁来，主工具栏改持全局命令）+ **SegmentControl 二选一风格切换**（A10 落地，两占位页仅为承载分段条）+ World/Local + Snap |
+
+**P2（全部落地）**：
+
+| 事项 | 落点与说明 |
+|---|---|
+| 框选 | stock `EditorBoxSelect` 状态机接入（先于拾取判定，原生同位）；**判定按 D3 裁决升级为 bounds-overlap**（8 角点投影取屏幕矩形与 marquee 相交，相机后方的角点剔除——原生 stock 是位置点测试，源码核实 `EditorTransformComponentSelection.cpp:466-468`）；普通=替换/Ctrl=并集/Ctrl+Shift=差集；松手结算包 `ScopedUndoBatch("Box Select Entities")` 单 undo 点；marquee：`GenericDebugDisplay::DrawWireQuad2d`（新实现）收集归一化矩形 → ViewportOverlayLabels QPainter 绘制（终稿指定的 Qt overlay 路径） |
+| Preferences | 新文件 `Window/CeePreferences.{h,cpp}`（反射：autosave 开关/间隔、viewport helpers 显隐、默认 gizmo 风格[真枚举，EnumAttribute 硬要求]；**SettingsRegistry 持久化**：/CEE/Preferences 树 + DumpSettingsRegistryToStream 落 `exe 目录/cee_preferences.setreg`，启动 MergeSettingsFile 合回——D9"持久化先行"达成）+ `Window/CeePreferencesDialog.{h,cpp}`（QListWidget 分类页 + **ReflectedPropertyEditor** 直编共享实例 + **Card** 包裹[A10]；改动即 Save+Apply） |
+| 快捷键重绑定 | Preferences 第二页：`SetActionHotKey`（公开 API，E1）+ 双击捕获新组合（KeyCaptureDialog）+ QSettings `HotKeys/*` 自管持久化（上游无持久化，F4）+ 启动 OnActionManagerReady 时重放 |
+| ViewportSettings 接入 | `showViewportHelpers` 直写 `AzToolsFramework::SetHelpersVisible`（registry 键 `/Amazon/Preferences/Editor/HelpersVisible`，EditorHelpers 每帧查询自动生效——零新管线） |
+| Recent Files | QSettings MRU（上限 10，只记**编辑器可打开的 .prefab 文档**——引擎场景是 --scene 启动参数非文档，注释落理由）；槽位懒注册（S3）；失效条目打开时警告并从列表清除 |
+| 脏标记+标题+关闭框 | bridge 回写路径（属性/transform，同步期除外）→ dirty 回调 → 标题 `[*]`；create/delete/duplicate/paste 置脏；Save 成功清脏；**closeEvent 只在脏时问** Save/Discard/Cancel（干净直接退——A6"避免永远询问换皮"达成） |
+| 自动保存 | QTimer（间隔取 Preferences）；脏时 SaveScene 到 `<exe>/autosave/<场景名>` 独立**绝对路径**文件 + Toast 提示；**崩溃恢复 = 手动**：autosave 文件可直接用 `--scene` 打开——v1 无运行时场景加载契约，且"文件存在期间每次启动弹提示"是噪音，故不做启动检测弹窗（review 轮修正：原文误称有启动检测） |
+| Toast 宿主 | `ToastNotificationsView`（bus id `AZ_CRC_CE("CEE::ToastNotifications")`）+ show/resize 跟随重排 |
+| 展开态恢复 | `TreeViewState::CreateTreeViewState()`（stock 通用快照，Outliner/AssetBrowser 树是框架控件无法换基类 QTreeViewWithStateSaving——头注释落理由）：Outliner 在 `RefreshFromEngineKeepingState` 前捕后放；AssetBrowser 刷新同法。**rbfx_migration.md §3.6 v2 待办就此清账** |
+| Help 外链 | cee.action.help.documentation/api/github → QDesktopServices |
+
+**P3**：主题化对话框 ✅（Save/Export 走 `AzQtComponents::FileDialog::GetSaveFileName`；MessageBox 全局 qss 已覆盖——经 BaseStyleSheet.qss:129 @import 链生效，dock_style_review.md 已复核）；Card ✅（Preferences）；InputDialog 无使用点（无消费者），与 ProgressShield 同理缓办归档。**ProgressShield 缓办（带理由）**：`LegacyShowAndWait` 需要可分块回调式任务，而 CEE v1 的镜像同步是一次性阻塞调用（阻塞期间 Qt 事件循环停转，shield 的延迟显示永远来不及绘制）——没有诚实的长任务消费者，上 shield 就是死 UI（违尺子1）；待出现分块/异步任务（v2 增量同步）再接。
+
+### 12.5 本轮新沉淀（Progress.md 已同步）
+
+- **新编译坑**：`QStringLiteral` 只吃字符串字面量（const char* 变量要用 `QString::fromLatin1`）；`EnumAttribute` 必须真枚举类型；`TreeViewState::CreateTreeViewState()` 返回 unique_ptr（用赋值不用 reset）；unity 传递 include 陷阱与 C2247 见 P0 轮。
+- **框架事实**：菜单生成器 `EditorMenu::RefreshMenu()` clear+重建（动态内容必须走注册而非旁路添加）；`RegisterMenuBar` 接管 menuBar（手写菜单与生成菜单不可共存）；AzToolsFramework 的 stock 面板构造契约（BaseLogPanel 必须挂带布局的父）；替换 EditorDefaultSelection 时必须继承其 `ComponentModeCollection` 注册义务。
+- **运行时事实**：CEE 进程实际装载 LmbrCentral.Editor 等 Gem 模块（运行时依赖拖入）——其注册钩子在 Trigger 后真实运行，P0-4 的"打点验收"由此获得第一个实测样本。
+
+### 12.6 第三方实施审查吸收（2026-08-31，`review_editor_polish_deepseek.md`，1🔴+4🟠+10🟡）
+
+> 审查方：另一 AI（主审+三子代理，🔴 与关键 🟠 亲自复验）。总评"实施质量高、方案基本忠实"；两个子代理 🔴 误报已被其自行驳回（§5）。本轮逐条独立核验后吸收 14 项、修正其 1 项论据、维持 1 项知情决策，全部修复已编译+回归复验。
+
+**已修复（核验成立）**：
+
+| # | 问题 | 修复 |
+|---|---|---|
+| 🔴-1 | **Preferences 持久化静默失效**：dump 导出访问器在根 Begin 不写键名（SettingsRegistryMergeUtils.cpp:1478-1487 include 栈空即跳过）→ 落盘无 `/CEE/Preferences` 前缀；而 Load 的 `MergeSettingsFile` 默认锚点 `""` 合并到注册表**根** → 两侧永不交汇，每次启动回默认（D9"持久化先行"名存实亡；会话内正常，冒烟测不出）。独立核验：rapidjson::Pointer 锚点语义（SettingsRegistryImpl.cpp:1334-1346）确认 | Merge 传 `k_registryRoot` 锚点（一行）；**人工点检新增**：改偏好→完全退出→重启→值保留 |
+| 🟠-2 | 命令面板重复条目（实体池 7 动作绑 Edit+三 context menu，同一 QAction 至多 ×4） | `CollectCommands` 内 `QSet<QAction*>` 指针级去重 |
+| 🟠-3 | 脏回调悬空：bridge（应用所有）比窗口活得长，Destroy 顺序窗口先死 | `~EditorMainWindow` 内 `SetDirtyCallback({})` |
+| 🟠-4 | AssetBrowser 工厂 backend==null 回退 QLabel 被无条件 static_cast → 死路 UB | 删回退（StartCommon 保证 backend 先于窗口注册，注释落理由），static_cast 恒安全 |
+| 🟠-5 | 快捷键 Backspace 清除无效：空序列过不了 `SetActionHotKey` 校验（HotKeyManager.cpp:83-86，`QKeySequence("")==Key_unknown`） | 清除改经 `ActionManagerInternalInterface::GetAction`→`QAction::setShortcut(QKeySequence())` 直清（即 `EditorAction::SetHotKey` 内部所为）；自管持久化存空标记、启动 replay 跳过空（本就如此） |
+| 🟡-6 | Godot 序列化失败残留 tmp | 失败分支补 `SystemFile::Delete(tmp)` |
+| 🟡-7 | rbfx promote 失败回滚返回值未查（回滚也失败时场景搁浅 .bak 无诊断） | 回滚失败补 AZ_Warning 指明 .bak 位置 |
+| 🟡-8 | 线框分类子串误伤（`find("Light")` 会吃 LightFixture 等）——**审查方论据有误已修正**：其称"rbfx 三类灯名已明确"，实测 rbfx 是**单一 `Light` 类**（I:/rbfx Light.h:183 `class Light : public Drawable`，无 PointLight/SpotLight 拆分，light type 是属性）→ 子串匹配 "Light" 本是 rbfx 必需路径；但精确名集合更稳，方向采纳 | 改精确名集合：`{"Light","OmniLight3D"}→点光、`"DirectionalLight3D"`、`"SpotLight3D"`、`{"Camera","Camera3D"}`、`{"Node","Node3D"}` |
+| 🟡-9 | Create 子菜单首开时序：注册动作的菜单刷新默认下一系统 tick 排空（MenuManager::OnSystemTick），首开瞬间只见 Empty Node | `PopulateCreateMenu` 尾部立即 `RefreshMenus()` |
+| 🟡-10 | 非 ADS 路径 `IsPanelOpen` 把浮动当关闭（与 ADS `!isClosed()` 语义分歧） | 删 `!isFloating()` |
+| 🟡-11 | SaveLevel 在 Prefab ownership 缺失时静默 return true（与自身"写失败必警告"合同不一致） | 补 AZ_Warning |
+| 🟡-12 | 残留调试打印（每次 Ctrl+Shift+N 一条 AZ_Printf） | 删除 |
+| 🟡-13 | RegisterPane assert+守卫双 Find 冗余 | 合并为单次查找 |
+| 🟡-14 | 偏好落盘打不开文件时静默 | 补 AZ_Warning |
+
+**维持原判（记录）**：
+- 🟡-15 header bar 变换动作（Q/W/E/R/T+1-4）不进 ActionManager → 不入命令面板/重绑定页——P1-18 知情决策（键帽桥经主窗口 actions() 生效），落账为已知边界；后续如需重绑定再迁注册。
+- 审查方 §5 两个子代理误报驳回（"菜单栏不出现"——OnSystemTick 每 tick 排空刷新队列；"dockWidgetsMap 引用误拷"——API 按值返回）：独立核验均同意驳回。
+- 工作区卫生（review_gizmo_glm.md / run_glm.bat 未跟踪文件、冒烟脚本硬编码路径）：非本轮范围，留用户处置。
+
+### 12.7 Dock/Style 专项复查吸收（2026-09-01，`dock_style_review.md`）
+
+> 复查两问：实现是否引入 FancyDocking/是否依赖 legacy；样式是否直接复用原版。其结论（FancyDocking 系 init commit 既有兜底非本轮引入、属 AzQtComponents Atom-free 无 legacy 依赖；样式零自写 QSS 全走 StyleManager）经独立核验成立。三项建议全部采纳：
+
+1. **✅ 已执行——fallback 双路径收敛（唯一实质代码改动）**：ADS 子模块缺失由 `WARNING+FALSE`（降级 FancyDocking）改 **FATAL_ERROR**（提示 `git submodule update --init`）；`Code/CMakeLists.txt` ADS 链接去条件化、`CEE_HAVE_ADS` 编译定义删除（无消费者）；EditorMainWindow.{h,cpp} 删全部 13 处 `#if defined(CEE_HAVE_ADS)` 的 `#else` 分支与 FancyDocking 前置声明/成员。**理由（独立核验补充）**：后端 submodule 缺失时优雅降级是 C2 可拔插设计，而 dock 是 UI 基础设施——fallback 产出的是一条从未编译过的半残路径（把故障从 configure 期推迟到运行期）；ADS 是 pin v5.1.1 submodule，一条 git 命令补齐；收敛后 dock 单一路径（KISS），deepseek R10 的双路径浮动语义分歧从结构上消失。
+2. **✅ 已记账——两条缝隙落账**：(a) **ADS 面板不吃 O3DE 主题**（AzQtComponents Style 管线对 ADS 零支持，O3DE 原生 dock 是 EditorLib 的 DockBar 撞 C1 不可用）→ 编辑主体 O3DE 深色主题与 ADS 默认观感并存，属"dock 基于 ADS"裁定的固有代价；**接受并存、不做**（若将来强求一致，最小路径是给 ADS 写 CEE 级 css——其自带样式表机制，不动 stock；C3 定性=扩展无 stock 可抄，观感问题优先级低）。(b) InputDialog 主题化无消费者，缓办归档（已入 §12.4 P3 行）。
+3. **样式侧零调整**：全仓零自写 setStyleSheet、新增 UI 全挂 stock 控件——复查确认为"直接复用原版"的正确姿势，维持。
+
+

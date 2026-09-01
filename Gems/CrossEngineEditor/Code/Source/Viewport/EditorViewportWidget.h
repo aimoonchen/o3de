@@ -76,6 +76,17 @@ namespace CrossEngineEditor
         //! Passing nullptr detaches and the viewport renders nothing.
         void SetSceneRenderer(ISceneRenderer* renderer) { m_sceneRenderer = renderer; }
 
+        //! Shortcut upstream bridge target (editor_polish.md P0-2 / R2): a widget that should
+        //! receive a re-dispatched copy of every key press while this viewport has focus. The
+        //! main window is the natural target - its ActionContextWidgetWatcher (ActionManager)
+        //! and Qt's shortcut map live there. Null disables the bridge.
+        void SetShortcutBridgeTarget(QWidget* target) { m_shortcutBridgeTarget = target; }
+
+        //! Frame the camera on the current selection (the industry "focus / F key" action,
+        //! editor_polish.md P0-3): positions the camera so the selection's bounds fit the view,
+        //! keeping the current view direction. No-op when nothing is selected.
+        void FrameSelection();
+
         // AzToolsFramework::ViewportInteraction::ViewportInteractionRequestBus::Handler...
         AzFramework::CameraState GetCameraState() override;
         AzFramework::ScreenPoint ViewportWorldToScreen(const AZ::Vector3& worldPosition) override;
@@ -139,6 +150,10 @@ namespace CrossEngineEditor
         //! Map a logical-pixel Qt position from the native window to physical-pixel screen space.
         AzFramework::ScreenPoint ToPhysicalScreenPoint(const QPointF& logicalPos) const;
 
+        //! Re-dispatch a key press to the bridge target (see SetShortcutBridgeTarget). Returns
+        //! true when a registered shortcut consumed it (so it is NOT viewport input).
+        bool BridgeShortcutToTarget(const QKeyEvent& keyEvent);
+
         AzFramework::ViewportId m_viewportId;
         AzFramework::CameraState m_cameraState;
 
@@ -154,6 +169,8 @@ namespace CrossEngineEditor
         EngineViewport* m_engineViewport = nullptr;
         //! Transparent 2D overlay on top of the surface for world-space text labels.
         ViewportOverlayLabels* m_labelOverlay = nullptr;
+        //! Shortcut upstream bridge target (editor_polish.md P0-2); the main window, or null.
+        QWidget* m_shortcutBridgeTarget = nullptr;
 
         //! When false (surface hidden: dock tab / auto-hide), TickRender steps the camera but
         //! skips generating overlays and presenting - no point drawing to an invisible surface.

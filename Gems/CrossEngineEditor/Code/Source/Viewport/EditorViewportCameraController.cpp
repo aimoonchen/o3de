@@ -13,6 +13,8 @@
 #include <AzFramework/Input/Devices/Keyboard/InputDeviceKeyboard.h>
 #include <AzFramework/Input/Devices/Mouse/InputDeviceMouse.h>
 
+#include <cmath>
+
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -212,5 +214,30 @@ namespace CrossEngineEditor
             return false;
         }
         return DispatchDiscrete(*channel, pressed, viewportSize);
+    }
+
+    void EditorViewportCameraController::FrameBounds(const AZ::Aabb& bounds, const AzFramework::CameraState& cameraState)
+    {
+        // "Focus on selection" (editor_polish.md P0-3). The AzFramework::Camera the system
+        // steps is pivot + offset + yaw/pitch: re-anchor the pivot at the bounds' center and
+        // solve the offset so the camera lands on the current view ray at the framing distance.
+        // Keeping yaw/pitch means the view direction is unchanged - the camera only dollies to
+        // fit, which is what every major editor's "frame selection" does.
+        const AZ::Vector3 center = bounds.GetCenter();
+        const float radius = AZStd::max(bounds.GetExtents().GetLength() * 0.5f, 0.1f);
+
+        const AZ::Vector3 forward = cameraState.m_forward.GetNormalizedSafe();
+        // Spherical fit against the vertical FOV (radians), with a 20% breathing margin; also
+        // respect the near clip so tiny objects (an empty node's box) don't end up inside it.
+        const float fovRadians = AZStd::max(cameraState.VerticalFovRadian(), 0.1f);
+        const float distance = AZStd::max(radius / sin(fovRadians * 0.5f) * 1.2f, cameraState.m_nearClip * 10.0f);
+        const AZ::Vector3 position = center - forward * distance;
+
+        m_targetCamera.m_pivot = center;
+        // Camera translation = pivot + R * offset (R = yaw/pitch rotation), so
+        // offset = R^-1 * (position - pivot). R is orthonormal, the transpose is its inverse.
+        const AZ::Matrix3x3 rotation = m_targetCamera.Rotation();
+        m_targetCamera.m_offset = rotation.GetInverseFull() * (position - center);
+        m_camera = m_targetCamera;
     }
 } // namespace CrossEngineEditor

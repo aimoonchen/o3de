@@ -88,6 +88,12 @@ namespace CrossEngineEditor
         IEntityMirror& GetEntityMirror() override { return m_entityMirror; }
         IAssetSource& GetAssetSource() override { return m_assetSource; }
 
+        //! Engine-specific editor commands (editor_polish.md P1-13 / M1): the one rbfx-only
+        //! workflow today is exporting a node subtree to the engine's own prefab XML
+        //! (CreatePrefabFromNodes); on backends without that capability the command simply
+        //! does not exist - an honest capability surface instead of a menu entry that warns.
+        [[nodiscard]] AZStd::vector<EngineActionPattern> GetActionRegistrationPatterns() override;
+
     private:
         //! Shared engine state, owned by the backend and referenced by the sub-contracts.
         struct EngineState

@@ -111,11 +111,14 @@ if(EXISTS ${CEE_ADS_ROOT}/CMakeLists.txt)
     # No include-dir export needed: the pinned ADS target PUBLIC-exports its src/ dir, so
     # linking ads::qtadvanceddocking propagates <DockManager.h> to consumers by itself.
 else()
-    message(WARNING
+    # ADS is UI infrastructure, not an optional backend: a configure-time failure with the
+    # one-line fix beats silently building an untested FancyDocking fallback editor (dock
+    # style review round, dock_style_review.md ch.3-1). Backends degrade gracefully by
+    # design (C2 removability); the dock system has no second supported path.
+    message(FATAL_ERROR
         "Qt-Advanced-Docking-System submodule not found at ${CEE_ADS_ROOT}. "
-        "Run: git submodule update --init --recursive. "
-        "CrossEngineEditor will fall back to AzQtComponents::FancyDocking.")
-    set(CEE_HAVE_ADS FALSE PARENT_SCOPE)
+        "Run: git submodule update --init --recursive and re-configure. "
+        "ADS is required - the FancyDocking fallback was removed.")
 endif()
 
 # =======================================================================================

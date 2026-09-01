@@ -223,6 +223,14 @@ namespace CrossEngineEditor
             AZ::TransformBus::EventResult(worldTm, entityId, &AZ::TransformBus::Events::GetWorldTM);
             mirror.OnEditorTransformChanged(entityId, worldTm);
         }
+
+        // A real editor->engine transform write (gizmo drag / Outliner reparent) means the
+        // scene changed. Sync-driven broadcasts are not distinguished here (the engine write
+        // they echo is idempotent), but they must NOT mark the scene dirty.
+        if (!m_syncing && m_dirtyCallback)
+        {
+            m_dirtyCallback();
+        }
     }
 
     void EntityMirrorBridge::OnEntityComponentPropertyChanged(AZ::ComponentId componentId)
@@ -254,6 +262,11 @@ namespace CrossEngineEditor
         }
 
         backend->GetEntityMirror().OnEditorPropertyChanged(entityId);
+
+        if (m_dirtyCallback)
+        {
+            m_dirtyCallback();
+        }
     }
 
     void EntityMirrorBridge::AfterEntitySelectionChanged(

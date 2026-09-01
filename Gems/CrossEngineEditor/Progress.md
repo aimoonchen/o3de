@@ -36,6 +36,9 @@ Destroy: 断总线 + reset m_mainWindow → Unregister + reset backend → Tools
 ```
 
 ## 编译坑（保留，防重犯）
+- **Unity 分组的传递 include 陷阱（2026-08-31）**：新增源文件会改变 unity 批分组——`CommandPalette.cpp` 曾依赖批内前序文件传递 include `AzCore/PlatformDef.h` 才能用 `AZ_PUSH_DISABLE_WARNING`，新文件使其成为批首文件后暴雷。规则：**每个用 AZ_PUSH/POP_WARNING 的 .cpp 必须自 include `AzCore/PlatformDef.h`**。
+- **应用类成员指针 C2247**：`CrossEngineEditorApplication` 从 `ToolsApplication` **私有**继承 EBus handler，`&AzToolsFramework::ToolsApplicationRequests::Xxx` 成员指针形成会被拒——直调公共 override（如 `AreAnyEntitiesSelected()`）或把广播留在非派生类（EditorMainWindow 等）里。
+- `AZ::Color` 四浮点构造为模板且非 constexpr——命名空间级配色常量用 `const`。
 - `GenericDebugDisplay` C4266：override 基类重载对（DrawArc/DrawPolyLine/DrawQuad/DrawWireSphere）会隐藏另一个 → 已 `using AzFramework::DebugDisplayRequests::Xxx;`。
 - FancyDocking/ADS 会重建原生表面：surface 生命周期信号必须 `OnSurfaceAboutToBeDestroyed` 同步释放 swapchain 再返回，否则崩。
 - `EditorGrid`：中心整格吸附到相机在 z=0 的投影，网格锁死世界坐标不随相机滑动。
@@ -75,8 +78,9 @@ Destroy: 断总线 + reset m_mainWindow → Unregister + reset backend → Tools
 | 相机/网格 | 自建 `EditorViewportCameraController`（orbit/pan/dolly/fly）；`EditorGrid` 世界 overlay |
 | 帧循环 | 单循环 `OnIdle`（1ms/100ms 自旋）+ 60fps 节流门；无手写 Win32 泵；鼠标 move 每帧合并；一帧一次 present |
 | Prefab/关卡 | New/Open/Save Level（`.prefab`）；`CreateNewLevel` 启动即调；Ctrl+P 命令面板；Save/Restore Workspace（停靠 saveState + QSettings）|
-| 停靠 | vendored Qt-Advanced-Docking-System（`CEE_HAVE_ADS` 默认）/ `FancyDocking` fallback，双路径 `saveState/restoreState` |
-| 持久化 | `SaveScene` 已实现并接菜单：rbfx `SaveXML` / Godot `PackedScene`+`ResourceSaver`；镜像不写 prefab |
+| 停靠 | vendored **Qt-Advanced-Docking-System 唯一路径**（v5.1.1 submodule pin，缺失即 configure FATAL——`dock_style_review.md` 3-① 裁决后 FancyDocking fallback 分支已删）；面板经 ViewPaneRegistry 注册（editor_polish P1-14） |
+| 命令层 | **ActionManager 全量生成**（editor_polish P1-12）：五顶层菜单+三 context menu+Create/Recent 子菜单，动作 `cee.action.*`，后端命令经 GetActionRegistrationPatterns 表注册（M1）；快捷键上行桥使视口聚焦时全部生效 |
+| 持久化 | `SaveScene` 已实现并接菜单：rbfx `SaveXML` / Godot `PackedScene`+`ResourceSaver`；镜像不写 prefab；**.tmp+.bak 原子替换**（P0-8）；脏标记/Recent/布局会话槽/Preferences 均落盘 |
 | 资产 | 双引擎目录枚举 + 扩展名图标 |
 | Tracy | `CEE_ENABLE_TRACY`（采样默认 OFF）；FrameMark 在节流门内；统一头 `Profiling/CrossEngineProfiler.h` |
 
@@ -107,7 +111,18 @@ Destroy: 断总线 + reset m_mainWindow → Unregister + reset backend → Tools
 
 ## 待办 / 验收清单
 
-**2026-08-27 文档裁决轮（只出文档）**：编辑器打磨与原生对齐唯一终稿 = `editor_polish.md`（原 review_editor.md 改名，三份过程稿 + 第三方 review.md 已删；D1–D13 裁决全记录）。工作量 P0≈8.6 + P1≈7.1 + P2≈10.0 + P3≈0.8 ≈ 26.5 人日（5.3 人周），零 CMake 改动、零新依赖；另有 rbfx v1.5（undo 命令化+身份稳定化，3~5 人日）为 Undo 开门硬前置。质量尺 9 条见该文 §7，实施时逐条人工点检（不建测试 target）。Plan/rbfx/材质三文档同步已执行。
+**2026-08-31 实施轮（editor_polish.md P0+P1+P2+P3 全量落地，全部记录见该文 §12）**：
+- **P0**：Console 补 tab / 快捷键上行桥（KeyPress 副本 sendEvent 主窗口，Qt 自动合成 ShortcutOverride）/ EditorRequests 12 方法 / ActionManager 引导（`Window/CeeActionsHandler.{h,cpp}`）/ 三个 context menu + 视口右键 / 非可视节点线框 gizmo（rbfx RaycastNode 灯光修复）/ Undo/Redo 占位置灰 / 保存 .bak+原子替换（rbfx+Godot）/ View=面板开关 / 布局会话槽。
+- **P1**：手写菜单栏整体退役（MenuManager 生成五顶层菜单，全动作 cee.action.*，热键走 HotKeyManager，选择敏感装 enabled 回调+updater）/ 后端动作接缝 M1（IEngineBackend::GetActionRegistrationPatterns 表驱动，rbfx Export Prefab 首个表项）/ ViewPane 薄注册表（`Window/ViewPaneRegistry.{h,cpp}`，五面板工厂化，Tools 菜单+View 开关注册表驱动）/ 命令面板=菜单栏∪context menu 枚举 / 主工具栏（注册 QAction+addMainToolBarStyle）/ 状态栏两格 / 视口 header bar（gizmo 控件迁入+SegmentControl）。
+- **P2**：框选（stock 状态机+bounds-overlap 判定+QPainter marquee）/ Preferences（`Window/CeePreferences{,Dialog}.{h,cpp}`，SettingsRegistry 持久化+ReflectedPropertyEditor+Card）/ 快捷键重绑定（SetActionHotKey+QSettings 自管）/ Recent / 脏标记+标题+诚实关闭框 / 自动保存+Toast / Outliner+AssetBrowser 展开态（TreeViewState，**rbfx §3.6 v2 待办清账**）/ Help 外链。
+- **P3**：主题化 Save/Export 对话框；**ProgressShield 缓办**（v1 无分块长任务，LegacyShowAndWait 包不住阻塞同步——带理由落 editor_polish §12.4）。
+- **回归**：profile 0 error ✅ / check_no_atom 三层 PASS ✅ / NullBackend 冒烟（新工具 `Scripts/cee_smoke_null.ps1`，15 秒存活）✅。**修复两个先于本轮的启动崩溃**：① Console 无父构造踩 BaseLogPanel pParent->layout()（LogPanel_Panel.cpp:105，提交版本即如此——Console 落地后从未启动验证过）；② ComponentModeCollectionInterface 无人注册（EditorDefaultSelection 被替换后其注册义务未继承，LmbrCentral 注册钩子解引用 null）——CrossEngineViewportSelection 现持有空 ComponentModeCollection 镜像 stock。
+- **实施后第三方审查吸收（2026-08-31，`review_editor_polish_deepseek.md`，全记录=editor_polish.md §12.6）**：1🔴+4🟠+9🟡 已修复——🔴 Preferences 持久化锚点错配（dump 无根键前缀+merge 默认锚根，改传 `/CEE/Preferences` 锚）；🟠 命令面板 QSet 去重/脏回调析构清空/AssetBrowser 回退死路删除/快捷键清除改直清 QAction；🟡 Godot tmp 残留/rbfx 回滚诊断/线框分类改精确名（**修正审查方论据：rbfx 是单一 Light 类非三类**）/Create 首开即时刷新/浮动面板语义对齐/SaveLevel 静默分支/调试打印/RegisterPane 单次查找/落盘警告。维持：header bar 裸动作不入面板（知情边界）。
+- **新编译坑**：QStringLiteral 只吃字面量；EnumAttribute 必须真枚举；CreateTreeViewState 返回 unique_ptr 用赋值。
+- **Dock/Style 专项复查吸收（2026-09-01，`dock_style_review.md`，全记录=editor_polish.md §12.7）**：三项建议全采纳——① **fallback 双路径收敛已执行**（ADS 缺失 WARNING+降级 → FATAL_ERROR；CEE_HAVE_ADS 宏删除；EditorMainWindow 13 处 #else 分支+FancyDocking 成员删除；理由：后端降级是 C2 可拔插设计、dock 是 UI 基础设施，fallback 是从未编译过的半残路径）；② 两条缝隙落账（**ADS 面板不吃 O3DE 主题=固有代价接受并存不做**；InputDialog 无消费者缓办）；③ 样式侧零调整（零自写 QSS 确认）。回归复验：编译 0 error + check_no_atom PASS + 冒烟 ALIVE。
+- **待人工实机点检**：editor_polish.md §7 尺子 1–9 + **新增：改偏好→完全退出→重启→值保留（专测持久化锚点修复）**。
+
+**2026-08-27 文档裁决轮（只出文档）**：编辑器打磨与原生对齐唯一终稿 = `editor_polish.md`（原 review_editor.md 改名，三份过程稿 + 第三方 review.md 已删；D1–D13 裁决全记录）。质量尺 9 条见该文 §7；Plan/rbfx/材质三文档同步已执行。
 
 1. **点选全链路实测**（rbfx + Godot）：点 mesh 精确选中、橙框、Outliner/Inspector 联动、gizmo 拖拽框跟随、Ctrl 多选、Select 模式纯净点选（天空盒/灯光/旋转大盒不再抢选，含 "Geometry 100" 茶壶本体命中而旁边空白不误选）。**最优先证伪：拖 gizmo / 改属性 / 删除 → 引擎侧物体真实响应**（修复5 后应 OK；Godot 删除后 Outliner 不得残留——同步 free 修复）。若仍有 Drawable 抢选，按同法加入 rbfx 排除名单。
 2. ~~非可视 node 的 icon 拾取~~ → **改判（2026-08-27 D13）**：视口 billboard 图标在 CEE 撞 C1 结构性不可实现（`EditorViewportIconDisplayInterface` 唯一实现者是 Atom Gem）→ 改**线框 gizmo**（`editor_polish.md` P0-6：灯光/相机/空节点按 `m_className` 派发 WireSphere/WireCone 等，零契约改动）。

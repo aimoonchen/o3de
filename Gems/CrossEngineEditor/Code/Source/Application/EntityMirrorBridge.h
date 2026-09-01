@@ -15,6 +15,7 @@
 //! talks to a concrete engine, only to the mirror contract.
 
 #include <AzCore/Component/EntityId.h>
+#include <AzCore/std/functional.h>
 #include <Framework/EngineProperty.h>
 
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
@@ -73,6 +74,14 @@ namespace CrossEngineEditor
         //! Material::Save). Returns false on failure.
         bool SaveResource(const AZStd::string& type, const AZStd::string& path);
 
+        //! Scene-dirty notification (editor_polish.md P2): invoked for every editor->engine
+        //! write that is NOT part of a sync (property edit, gizmo transform drag). The main
+        //! window uses it to drive the title-bar dirty marker and the close/autosave flows.
+        void SetDirtyCallback(AZStd::function<void()> callback)
+        {
+            m_dirtyCallback = AZStd::move(callback);
+        }
+
     private:
         // EditorTransformChangeNotificationBus::Handler...
         void OnEntityTransformChanged(const AzToolsFramework::EntityIdList& entityIds) override;
@@ -93,5 +102,8 @@ namespace CrossEngineEditor
         //! True while SyncFromEngine runs: sync writes (SetParent etc.) must not echo back
         //! to the engine through the property bus.
         bool m_syncing = false;
+
+        //! Scene-dirty callback (see SetDirtyCallback); empty until the main window installs it.
+        AZStd::function<void()> m_dirtyCallback;
     };
 } // namespace CrossEngineEditor

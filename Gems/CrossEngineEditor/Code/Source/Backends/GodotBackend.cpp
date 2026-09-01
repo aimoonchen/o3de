@@ -12,6 +12,7 @@
 #include <AzCore/Component/Entity.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzCore/Component/TransformBus.h>
+#include <AzCore/IO/SystemFile.h>
 #include <AzCore/Math/Quaternion.h>
 #include <AzCore/Math/Matrix3x3.h>
 #include <AzCore/Math/Transform.h>
@@ -1316,19 +1317,44 @@ namespace CrossEngineEditor
             return false;
         }
 
+        // Crash-safe save (editor_polish.md P0-8 / M2, same dance as the rbfx backend): write to
+        // a temp path, then atomically promote it over the target with the previous version kept
+        // as .bak. A crash mid-save can only lose the temp file, never corrupt the scene file.
+        const AZStd::string tmpPath = targetPath + ".tmp";
+        const AZStd::string bakPath = targetPath + ".bak";
+
         GodotVariant args[3];
-        args[0] = api.MakeObject(packed);       // resource
-        args[1] = api.MakeString(targetPath.c_str()); // path
-        args[2] = api.MakeInt(0);               // flags (default)
+        args[0] = api.MakeObject(packed);            // resource
+        args[1] = api.MakeString(tmpPath.c_str());   // path
+        args[2] = api.MakeInt(0);                    // flags (default)
         const int64_t saveErr = api.AsInt(api.Call(saver, "save", args, 3));
         if (saveErr != 0)
         {
             AZ_Warning("CrossEngineEditor", false, "Godot SaveScene: ResourceSaver.save failed (Error %lld) for %s.",
-                static_cast<long long>(saveErr), targetPath.c_str());
+                static_cast<long long>(saveErr), tmpPath.c_str());
+            AZ::IO::SystemFile::Delete(tmpPath.c_str()); // do not leave a failed partial file.
             return false;
         }
 
-        AZ_Printf("CrossEngineEditor", "Godot SaveScene: wrote %s\n", targetPath.c_str());
+        if (AZ::IO::SystemFile::Exists(targetPath.c_str()))
+        {
+            if (!AZ::IO::SystemFile::Rename(targetPath.c_str(), bakPath.c_str(), /*overwrite=*/true))
+            {
+                AZ_Warning("CrossEngineEditor", false, "Godot SaveScene: could not back up %s.", targetPath.c_str());
+                AZ::IO::SystemFile::Delete(tmpPath.c_str());
+                return false;
+            }
+        }
+        if (!AZ::IO::SystemFile::Rename(tmpPath.c_str(), targetPath.c_str(), /*overwrite=*/true))
+        {
+            // Promote failed and the original was already moved away: restore it.
+            AZ::IO::SystemFile::Rename(bakPath.c_str(), targetPath.c_str(), /*overwrite=*/true);
+            AZ_Warning("CrossEngineEditor", false, "Godot SaveScene: could not promote %s.", targetPath.c_str());
+            AZ::IO::SystemFile::Delete(tmpPath.c_str());
+            return false;
+        }
+
+        AZ_Printf("CrossEngineEditor", "Godot SaveScene: wrote %s (backup: %s)\n", targetPath.c_str(), bakPath.c_str());
         return true;
     }
 

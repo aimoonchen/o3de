@@ -15,7 +15,9 @@
 #include <AzCore/Math/Color.h>
 #include <AzCore/Math/Transform.h>
 #include <AzCore/Math/Vector3.h>
+#include <AzCore/std/functional.h>
 #include <AzCore/std/string/string.h>
+#include <AzCore/std/containers/vector.h>
 
 #include <cstdint>
 
@@ -28,6 +30,23 @@ namespace CrossEngineEditor
     {
         AZ::Vector3 m_position;
         AZ::Color m_color;
+    };
+
+    //! One engine-specific editor command, described as data (editor_polish.md P1-13 / M1).
+    //! Backends return a static table of these from IEngineBackend::
+    //! GetActionRegistrationPatterns; a GENERIC loop in the shell registers them into the
+    //! ActionManager, so wiring a new engine's own commands never touches shell code. Ids use
+    //! cee.action.<engine>.* (D2b). An empty menu identifier means "command palette only".
+    //! POD + AZStd::function only - no Qt types (C4 data-plane rule).
+    struct EngineActionPattern
+    {
+        AZStd::string m_id;
+        AZStd::string m_name;
+        AZStd::string m_description;
+        AZStd::string m_hotKey;        //!< Empty = no hotkey.
+        AZStd::string m_menuIdentifier; //!< Empty = command palette only.
+        int m_sortKey = 0;
+        AZStd::function<void()> m_handler;
     };
 
     //! Parameters passed to IEngineBackend::Initialize.

@@ -18,6 +18,7 @@
 #include <AzFramework/Viewport/CameraState.h>
 #include <AzFramework/Viewport/ScreenGeometry.h>
 
+#include <AzCore/Math/Aabb.h>
 #include <AzCore/std/smart_ptr/shared_ptr.h>
 
 class QMouseEvent;
@@ -50,6 +51,13 @@ namespace CrossEngineEditor
 
         //! Is the camera system currently consuming input (mid-navigation)?
         bool HandlingEvents() const { return m_cameraSystem.HandlingEvents(); }
+
+        //! Frame the given world bounds: keep the current view direction, move the camera back
+        //! just far enough that the bounds' bounding sphere fits the vertical FOV (with margin),
+        //! and re-anchor the pivot at the bounds' center so later orbiting rotates around the
+        //! framed area ("focus on selection", editor_polish.md P0-3). cameraState supplies the
+        //! direction + fov to frame with (the viewport's current state).
+        void FrameBounds(const AZ::Aabb& bounds, const AzFramework::CameraState& cameraState);
 
     private:
         bool DispatchDiscrete(

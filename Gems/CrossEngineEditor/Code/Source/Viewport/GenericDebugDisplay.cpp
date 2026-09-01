@@ -11,6 +11,7 @@
 
 #include <AzCore/Math/MathUtils.h>
 #include <AzCore/Math/Vector2.h>
+#include <AzCore/std/algorithm.h>
 
 #include <AzFramework/Viewport/CameraState.h>
 #include <AzFramework/Viewport/ViewportScreen.h>
@@ -52,6 +53,7 @@ namespace CrossEngineEditor
         m_overlayLines.clear();
         m_overlayTriangles.clear();
         m_textLabels.clear();
+        m_marquee = Marquee{};
 
         m_color = AZ::Colors::White;
         m_lineWidth = 1.0f;
@@ -758,5 +760,20 @@ namespace CrossEngineEditor
         m_nextLabelBackgroundBlock = false;
         (void)srcOffsetX;
         (void)srcOffsetY;
+    }
+
+    void GenericDebugDisplay::DrawWireQuad2d(const AZ::Vector2& p1, const AZ::Vector2& p2, float /*z*/)
+    {
+        // 2D screen-space primitive: this display tessellates 3D lines/triangles only, so the
+        // rect is collected for the Qt overlay to paint after the flush (editor_polish.md P2
+        // box-select marquee; the coordinates arrive normalized, matching the stock
+        // EditorBoxSelect::Display2d convention).
+        m_marquee.m_minX = AZStd::min(p1.GetX(), p2.GetX());
+        m_marquee.m_minY = AZStd::min(p1.GetY(), p2.GetY());
+        m_marquee.m_maxX = AZStd::max(p1.GetX(), p2.GetX());
+        m_marquee.m_maxY = AZStd::max(p1.GetY(), p2.GetY());
+        m_marquee.m_color = CurrentColor();
+        m_marquee.m_widthPx = m_lineWidth;
+        m_marquee.m_valid = true;
     }
 } // namespace CrossEngineEditor

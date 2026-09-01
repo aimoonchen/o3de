@@ -46,5 +46,14 @@ namespace CrossEngineEditor
         virtual ISceneRenderer& GetSceneRenderer() = 0;
         virtual IEntityMirror& GetEntityMirror() = 0;
         virtual IAssetSource& GetAssetSource() = 0;
+
+        //! Engine-specific editor commands for the ActionManager (editor_polish.md P1-13 / M1).
+        //! Default: none (a sentinel-style default keeps the pure-virtual surface unchanged -
+        //! C4). The shell registers whatever a backend returns through a generic loop, so an
+        //! engine adds its own menus/commands by implementing only this method.
+        [[nodiscard]] virtual AZStd::vector<EngineActionPattern> GetActionRegistrationPatterns()
+        {
+            return {};
+        }
     };
 } // namespace CrossEngineEditor
