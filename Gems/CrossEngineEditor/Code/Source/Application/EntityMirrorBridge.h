@@ -61,19 +61,6 @@ namespace CrossEngineEditor
         //! target), or invalid when the selection has none.
         AZ::EntityId FirstSelectedMirrorId() const;
 
-        //! Read a resource's editable values into a PropertyBag for the generic resource panel
-        //! (rbfx_migration.md §3.3). type is the engine's resource type name (e.g. "Material").
-        bool ReadResourceProperties(const AZStd::string& type, const AZStd::string& path, PropertyBag& out);
-
-        //! Push the generic panel's edited values back into the resource (name-matched; the
-        //! backend ignores unknown names).
-        bool WriteResourceProperties(const AZStd::string& type, const AZStd::string& path, const PropertyBag& bag);
-
-        //! Persist the open resource to its source file: the backend serializes the cached
-        //! resource (already edited via WriteResourceProperties) in its native format (rbfx:
-        //! Material::Save). Returns false on failure.
-        bool SaveResource(const AZStd::string& type, const AZStd::string& path);
-
         //! Scene-dirty notification (editor_polish.md P2): invoked for every editor->engine
         //! write that is NOT part of a sync (property edit, gizmo transform drag). The main
         //! window uses it to drive the title-bar dirty marker and the close/autosave flows.

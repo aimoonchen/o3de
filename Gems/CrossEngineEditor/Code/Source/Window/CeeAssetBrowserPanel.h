@@ -43,7 +43,6 @@ namespace AzToolsFramework
 namespace CrossEngineEditor
 {
     class EntityMirrorBridge;
-    class ResourcePropertiesPanel;
 
     //! Root entry of the CEE asset tree. The official RootAssetBrowserEntry rebases
     //! its children onto its own path in UpdateChildPaths (DB/scan-folder semantics);
@@ -115,17 +114,8 @@ namespace CrossEngineEditor
         //! v1 rebuilds instead of incrementally updating (KISS, rbfx_migration.md §2.6).
         void Refresh();
 
-        //! Double-click routing (rbfx_migration.md §3.4): .mdl/.xml spawn at the origin,
-        //! .material/.mat/.ani open the generic resource panel (rbfx original behavior:
-        //! double-click opens the resource editor, drag-onto-selection assigns instead),
-        //! anything else is reported to the Console trace panel. The mirror bridge is the
-        //! shared routing path with the viewport drop handler (not owned).
+        //! Target of resource-type double-clicks (.material/.mat/.ani): AtomToolsDocumentSystemRequestBus.
         void OpenOrAssignEntry(const QModelIndex& index);
-
-        //! Target of resource-type double-clicks (.material/.mat/.ani): the generic
-        //! resource panel (rbfx_migration.md §3.3), wired by the main window. Null = not
-        //! wired, resource double-clicks fall through to the v1 assign path.
-        void SetResourcePropertiesPanel(ResourcePropertiesPanel* panel) { m_resourcePanel = panel; }
 
     private:
         void BuildTree();
@@ -136,7 +126,6 @@ namespace CrossEngineEditor
 
         IAssetSource* m_source = nullptr;
         EntityMirrorBridge* m_mirrorBridge = nullptr;
-        ResourcePropertiesPanel* m_resourcePanel = nullptr; // not owned
         CeeAssetBrowserIconProvider m_iconProvider; // interaction-bus handler, connected in ctor
         AzToolsFramework::AssetBrowser::AssetBrowserModel* m_model = nullptr; // aznew, parented to this
         AzToolsFramework::AssetBrowser::AssetBrowserFilterModel* m_filterModel = nullptr; // parented to this

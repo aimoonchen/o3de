@@ -18,6 +18,7 @@
 #include <Backends/GodotBackend.h>
 #endif
 #include <BackendAPI/IEngineBackend.h>
+#include <BackendAPI/IMaterialSource.h>
 #include <BackendAPI/IViewportTick.h>
 #include <Viewport/CrossEngineViewportSelection.h>
 #include <Window/EditorMainWindow.h>
@@ -37,6 +38,13 @@
 #include <AzToolsFramework/ViewportSelection/EditorInteractionSystemViewportSelectionRequestBus.h>
 
 #include <Window/CeeActionsHandler.h>
+#include <MaterialEditor/CeeMaterialDocument.h>
+#include <MaterialEditor/CeeMaterialPreviewPanel.h>
+
+// Vendor: AtomToolsFramework Core types for material editor stack
+#include "MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentSystem.h"
+#include "MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorWidget.h"
+#include "MaterialEditor/Vendor/AtomToolsFramework/Inspector/PropertyWidgets/PropertyStringBrowseEditCtrl.h"
 
 #include <AzCore/std/smart_ptr/unique_ptr.h>
 #include <AzCore/std/string/conversions.h>
@@ -111,6 +119,14 @@ namespace CrossEngineEditor
     void CrossEngineEditorApplication::Reflect(AZ::ReflectContext* context)
     {
         ToolsApplication::Reflect(context);
+        // Reflect AtomToolsFramework.Core types (DynamicProperty, InspectorWidget, etc.)
+        // that the material editor stack needs. These are vendored copies in MaterialEditor/Vendor/.
+        AtomToolsFramework::AtomToolsDocument::Reflect(context);
+        AtomToolsFramework::AtomToolsDocumentSystem::Reflect(context);
+        AtomToolsFramework::DynamicProperty::Reflect(context);
+        AtomToolsFramework::DynamicPropertyGroup::Reflect(context);
+        AtomToolsFramework::InspectorWidget::Reflect(context);
+
         // EngineNodeComponent is NOT reflected here: RegisterComponentDescriptor (in StartCommon)
         // reflects it through the descriptor's own entry point. Reflecting it here as well would be
         // a second, independent reflection entry for the same types, so EngineProperty et al. would
@@ -235,6 +251,18 @@ namespace CrossEngineEditor
         m_actionsHandler = AZStd::make_unique<CeeActionsHandler>(m_mainWindow);
         AzToolsFramework::ActionManagerSystemComponent::TriggerRegistrationNotifications();
 
+        // Material document system bootstrap (material_migration_final.md SS6.3).
+        // Create the document system and register the material document type.
+        // This is positioned after backend registration so GetMaterialSource() is available.
+        m_materialDocumentSystem = new AtomToolsFramework::AtomToolsDocumentSystem(k_ceeMaterialToolId);
+        {
+            auto typeInfo = CeeMaterialDocument::BuildDocumentTypeInfo();
+            m_materialDocumentSystem->RegisterDocumentType(typeInfo);
+        }
+
+        // Register the StringFilePath property handler for texture file browsing (S5).
+        AtomToolsFramework::RegisterStringBrowseEditHandler();
+
         m_mainWindow->show();
     }
 
@@ -253,6 +281,15 @@ namespace CrossEngineEditor
         // The actions handler points at the main window and its registered actions parent
         // their QActions to ActionManager-owned storage - drop it before the window dies.
         m_actionsHandler.reset();
+
+        // Material document system: close all documents before tearing down.
+        if (m_materialDocumentSystem)
+        {
+            m_materialDocumentSystem->CloseAllDocuments();
+            delete m_materialDocumentSystem;
+            m_materialDocumentSystem = nullptr;
+        }
+
         // Reset the wrapper, not the guest: the wrapper deletes the guest.
         m_mainWindowWrapper.reset();
         m_mainWindow = nullptr;
@@ -496,7 +533,7 @@ namespace CrossEngineEditor
         // input (incl. WM_MOUSEMOVE) is drained by Qt's own dispatcher below - matching the native
         // O3DE editor, which does zero PeekMessage/DispatchMessage in OnIdle. A former hand-written
         // Win32 pump here double-pumped the queue and spun hundreds of moves/frame during orbit; the
-        // real per-move fix is EditorViewportWidget::ApplyPendingMouseMove (Progress.md 修复13).
+        // real per-move fix is EditorViewportWidget::ApplyPendingMouseMove (Progress.md fix13).
         {
             CEE_PROFILE_SCOPE("Idle::TickSystem");
             TickSystem();
@@ -509,7 +546,7 @@ namespace CrossEngineEditor
         // Single main loop (Unreal/Godot/rbfx all render as one step of one loop, presenting once per
         // frame). The idle loop spins fast (~1 ms) to keep O3DE SystemTick / Qt input responsive; the
         // render frame is gated to ~60 fps by this SINGLE throttle - the sole cadence (not redundant
-        // with vsync: Godot presents on this thread with vsync OFF, Progress.md 修复11/修复12). Order matters:
+        // with vsync: Godot presents on this thread with vsync OFF, Progress.md fix11/fix12). Order matters:
         // TickRender FIRST (camera + overlay; rbfx presents in EndOverlayFrame), THEN backend->Tick
         // (Godot's iteration() presents with the just-submitted overlay). One present per backend/frame.
         constexpr float k_frameIntervalSeconds = 1.0f / 60.0f;
@@ -534,6 +571,37 @@ namespace CrossEngineEditor
                 {
                     m_mirrorBridge->SyncFromEngine();
                     m_engineSynced = true;
+                }
+
+                // Material preview readback (material_migration_final.md SS6.4.4).
+                // Called after backend->Tick() so the preview frame is ready.
+                // Throttled to 10-15 Hz by the dock preview panel's dirty flag + timestamp.
+                auto* previewDock = m_mainWindow ? m_mainWindow->FindMaterialPreviewPanel() : nullptr;
+                if (previewDock && previewDock->IsDirty() && previewDock->isVisible())
+                {
+                    using sys_clock = AZStd::chrono::system_clock;
+                    const auto previewNowMs = AZStd::chrono::duration_cast<AZStd::chrono::milliseconds>(
+                        sys_clock::now().time_since_epoch()).count();
+                    constexpr decltype(previewNowMs) k_previewIntervalMs = 100; // ~10 Hz
+                    if (previewNowMs - previewDock->LastAcquireTime() >= k_previewIntervalMs)
+                    {
+                        AZStd::vector<AZ::u8> pixels;
+                        IMaterialSource& matSrc = backend->GetMaterialSource();
+                        PreviewResult result = matSrc.AcquirePreviewImage(512, 512, pixels);
+                        previewDock->SetLastAcquireTime(previewNowMs);
+                        if (result == PreviewResult::Updated)
+                        {
+                            previewDock->SetImageData(512, 512, pixels);
+                        }
+                        else if (result == PreviewResult::Unsupported)
+                        {
+                            previewDock->ClearDirty();
+                        }
+                        else if (result == PreviewResult::Unchanged)
+                        {
+                            // Preview frame not ready yet; keep dirty for next poll.
+                        }
+                    }
                 }
             }
 

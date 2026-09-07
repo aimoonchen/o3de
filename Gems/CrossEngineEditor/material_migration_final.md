@@ -15,6 +15,7 @@
 > 铁律：不臆想 API（Progress.md:51）——本文所有承重声称均带 `文件:行号`，且**阶段二吸收的每一条承重事实都经本人独立 grep 复核**。
 > §11.4 = 复核结果：3 处三稿偏差 + 1 处四方全漏的缺口（S5）+ **3 处本文初稿自身的错误**（S6 / S7 / R1 幻影 API，根因同一：拿规则当省掉验证的借口）。
 > §11.6 = 2026-08-25 规则裁决（C1 检验手段精化 / Atom 后端不开口子 / C3 澄清后组头 toggle **改判采纳 S7** / Plan.md 三处澄清）。
+> §11.9 = 2026-09-03 复用形态裁决（**vendor 副本切分、不动上游**——用户亲自裁定，推翻 §3.5 原"否决 vendoring"）。
 
 ---
 
@@ -39,8 +40,9 @@
    **又必须把节点图折叠回 factor+texture**（`search_node_tree.py` 用 1169 行做图模式识别且经常失败）。
    这反过来证明：属性网格式材质编辑器的正确模型就是 factor+texture，节点图是另一个工具（对应 MaterialCanvas，不在本方案）。
 
-**方案一句话**：把 `AtomToolsFramework` 按既有的天然缝切成 `.Core`（Atom-free：Document/DynamicProperty/Inspector/Window）
-与 `.Static`（Atom 侧：视口/预览/Graph），CEE 侧以 **dock 面板**形态挂在 `CrossEngineEditor.exe` 内（§6，2026-08-25 改判：
+**方案一句话**：把 `AtomToolsFramework` 的 Core 子集（Atom-free：Document/DynamicProperty/Inspector/Util）以 **vendor 副本**
+形态切分进 CEE（2026-09-03 用户裁决：**拷贝后切分、不动上游 Atom 模块的任何代码**，原 `.Core`/`.Static` 上游 CMake 切分作废，
+§3.5/§11.9），CEE 侧以 **dock 面板**形态挂在 `CrossEngineEditor.exe` 内（§6，2026-08-25 改判：
 独立 exe 的 5 条理由经源码核实全部不成立），
 **100% 复用 Core 的文档系统 + 属性面板 + undo 栈**，只把 `MaterialDocument` 那层"Atom 材质模型"换成
 一个 **8 纯虚 + 2 哨兵**的后端契约 `IMaterialSource`。
@@ -51,8 +53,9 @@
 ② **schema 由引擎产** → Godot 近乎零成本，rbfx/Filament 各一份 ~80 行 JSON **数据**；
 ③ **Atom 泄漏只有 4 处调用** → "100% 复用 MaterialEditor 框架"与"Atom 零依赖"可以同时成立。
 
-**代价核算**：上游改动 = 一次纯构建期切分 + 4 处接缝（S1–S4）+ 3 个纯增字段（S2/S5/S6）+ 2 个纯增/纯改名（S8/S9）+ 1 个虚工厂（S7，随 P3），
-**上游 MaterialEditor/MaterialCanvas/ShaderManagementConsole 行为零变化**；CEE 侧新增约 12 个文件；工作量 ≈ **8~9 人周**（2026-08-25 opus review 复核重估，§11.7）。
+**代价核算（2026-09-03 vendor 裁决后更新）**：上游 Atom 代码改动 = **0**（连 CMake 也不动）；4 处接缝（S1–S4）+ 3 个纯增字段（S2/S5/S6）
++ 2 个纯增/纯改名（S8/S9）+ 1 个虚工厂（S7，随 P3）**全部施于 CEE 内的 vendor 副本**；
+上游 MaterialEditor/MaterialCanvas/ShaderManagementConsole **一行不被触碰**；CEE 侧新增约 12 个文件 + Core 副本；工作量 ≈ **8~9 人周**（2026-08-25 opus review 复核重估，§11.7）。
 **③ 级自建 = 1**（`CeeMaterialPreviewPanel`，判据 §9.9）；**② 级扩展 = 6**（S2/S5/S6 属转发、S7 属子类化、S8 纯增函数、S9 纯改名）。
 **两引擎零 fork**：预览走 RTT 按需回读（§6.4），`ISceneRenderer`/`IViewportTick`/主循环零改动。
 
@@ -183,7 +186,8 @@ Filament 从图片文件建 Texture。三者都是路径语义，AssetId 对它�
 
 ### 3.1 实测依据
 
-对 `Gems/Atom/Tools/AtomToolsFramework/Code` 全量 grep `#include <Atom/`，按目录统计（头文件 / 全部文件）：
+对 `Gems/Atom/Tools/AtomToolsFramework/Code` 全量 grep `#include <Atom/`，按目录统计（头文件 / 全部文件）。
+（2026-09-03 vendor 裁决后：**本表 = 副本的拷贝清单**——归属 Core 者进副本，归属 Atom 者不拷；见 §3.5/§11.9。）
 
 | 目录 | 头文件 Atom 引用 | 归属 |
 |---|---|---|
@@ -277,7 +281,20 @@ S2/S5/S6 三个新字段都是**带默认值的纯增字段**，上游 MaterialE
 > 连"扩展"都算不上（S2 / S5 / S6 同理）。**"把没查说成规则不让"——规则被当成了省掉验证的借口**，是本方案三处初稿错误
 > （§11.4-5/6/7）的共同根因；C3 判定手段 (a) 项"必须带 `文件:行号`"的硬要求即为此设。
 
-### 3.5 CMake 形态（上游零破坏）
+### 3.5 复用形态：CEE 内 vendor 副本（2026-09-03 用户裁决；原上游 CMake 切分方案作废）
+
+> **裁决原文（2026-09-03，用户亲自裁定）**：Atom 的裁剪切分**拷贝后切分，不动原来的 Atom 模块的代码**。
+> 即：把 §3.1 表中归属 Core 的文件**拷贝**到 `Gems/CrossEngineEditor/Code/Source/MaterialEditor/Vendor/AtomToolsFramework/`，
+> S1–S9 全部改动施加在副本上；上游 `Gems/Atom/Tools/AtomToolsFramework` **一行不改**（含其 CMakeLists——
+> `.Core`/`.Static` 切分方案整体作废）。完整裁决记录与代价管理纪律 = **§11.9**。
+>
+> 副本拷贝清单 = §3.1 表 Core 行 **+ 其被引用依赖**：`Debug/TraceRecorder.*`（DocumentSystem 引用）、
+> `Inspector/Icons/*` 资源（qrc 引用）、`Inspector/PropertyWidgets/*`（StringFilePath 控件 = S5 的消费端）。
+> 副本保持 `namespace AtomToolsFramework` 不改名：CEE 不链上游 AtomToolsFramework 的任何 target，同进程无第二定义，无 ODR 风险。
+> ⚠️ 2026-09-03 实施审查（`review_material_editor_glm.md` P0-1/P0-2）发现：三组依赖未拷贝、副本亦未进
+> `crossengineeditor_files.cmake` —— 属裁决的**执行缺口**（非裁决缺陷），修复要求 = §11.9 纪律①。
+
+以下为**已作废的原方案**（上游 CMake 切分，保留备查；其"上游零破坏"目标由 vendor 裁决以更强形式达成——上游零触碰）：
 
 ```cmake
 # Gems/Atom/Tools/AtomToolsFramework/Code/CMakeLists.txt
@@ -303,10 +320,11 @@ ly_add_target(NAME ${gem_name}.Static STATIC NAMESPACE Gem ...
 `AzToolsFramework` 的 `EditorPythonConsoleBus` 引用（`AtomToolsApplication.cpp:24-25` 等），无直接 Python C API 调用——
 由 AzToolsFramework 传递满足，直接依赖是历史遗留，留在 `.Static` 即可。
 
-**否决 vendoring**（A 稿初版曾提）：`AtomToolsFramework` 是**同仓第一方**代码，vendoring = 仓内造永久分叉（上游修 bug 收不到）。
-Qt-ADS / Diligent / tracy 三个 vendoring 判例都是**第三方**库，判例不适用。
-CMake 切分是**同一份源码文件**的复用，是 C3 的最强形式 —— **落账为 C3 判例 3**。
-**退路（R1）**：若上游切分受阻，退回 vendoring 同一子集（清单即 §3.1 表），代价 = 永久分叉，故为退路非首选。
+~~**否决 vendoring**（A 稿初版曾提）~~ —— **2026-09-03 被用户裁决推翻（§11.9）**。原论据存档：`AtomToolsFramework` 是同仓第一方代码，
+vendoring = 仓内造永久分叉（上游修 bug 收不到）；Qt-ADS / Diligent / tracy 三个 vendoring 判例都是**第三方**库，判例不适用；
+CMake 切分是同一份源码文件的复用，曾是 C3 的最强形式（**落账为 C3 判例 3**）。
+**现行立场：分叉代价不被否认而是被管理**——上游修复不再自动到达的现实，由 §11.9 的三条纪律承接
+（副本完整自洽 + 来源 commit 记录 + diff 白名单断言 + 人工同步锚点）。
 
 ### 3.6 `check_no_atom.ps1` 同步更新（唯一需要放宽的护栏）
 
@@ -329,8 +347,9 @@ $forbidden = @(
     'Atom/ImageProcessing', 'Atom/Component', 'AtomLyIntegration',
     'AZ::RPI', 'AZ::RHI', 'AZ::Render'
 )
-# 白名单：AtomToolsFramework（Atom-free 的 .Core target）
-# 第 2 层：CMakeLists 允许 Gem::AtomToolsFramework.Core，仍禁 Atom_RPI/Atom_RHI/Atom_Feature 等
+# 白名单：MaterialEditor/Vendor/AtomToolsFramework（2026-09-03 vendor 裁决的副本路径，§11.9）
+#   副本自身受 diff 白名单约束：与上游的实质差异仅允许 S1–S9 清单（§11.9 纪律③）
+# 第 2 层：vendor 后 CEE 不链任何 AtomToolsFramework target，CMake 仍禁 Atom_RPI/Atom_RHI/Atom_Feature 等
 # 第 3 层不变：vcxproj 的 AdditionalDependencies 不得含 Atom_*.lib（真正的硬保证）
 # 同批新增：契约不增长断言 —— IMaterialSource 纯虚计数 == 8（grep '= 0;'；哨兵不计数）
 ```
@@ -452,9 +471,10 @@ namespace CrossEngineEditor
         MaterialPropertyType m_type = MaterialPropertyType::Float;
         MaterialPropertyValue m_defaultValue;   //!< drives the "modified" indicator
 
-        //! Numeric range hints. Hard range clamps on write; soft range only bounds the slider
-        //! (Godot "or_greater", Blender rna_def_property_ui_range). Applied to Int / UInt /
-        //! Float / Vec2-4 (per component).
+        //! Numeric range hints. Hard range (m_min/m_max) clamps on write; when the engine has
+        //! no hard bound (Godot or_greater/or_less), the corresponding optional is cleared (nullopt).
+        //! Soft range (m_softMin/m_softMax) bounds the slider only and defaults to hard range.
+        //! Applied to Int / UInt / Float / Vec2-4 (per component).
         AZStd::optional<double> m_min, m_max, m_softMin, m_softMax, m_step;
 
         //! Unit shown after the number ("m", "deg", "nits"). Free at the widget level - every
@@ -834,6 +854,16 @@ CreateBackendFromCommandLine(--backend)        // 现有，CrossEngineEditorAppl
   → RegisterDocumentType(CeeMaterialDocument::BuildDocumentTypeInfo())   // 扩展名来自 MaterialTypeInfo
 ```
 
+> ⚠️ **实施补注（2026-09-03，源自 `review_material_editor_glm.md` P0-5）**：文档系统的 `Util::ValidateDocumentPath` 隐含依赖两条
+> CEE 侧不存在的总线——`AzToolsFramework::AssetSystemRequestBus::GetAssetSafeFolders`（`GetSupportedSourceFolders` 无 handler
+> ⇒ scanFolders 恒空 ⇒ `IsDocumentPathInSupportedFolder` 恒 false），以及
+> `AtomToolsFrameworkSystemRequestBus::IsPathEditable/IsPathPreviewable/IsPathIgnored`（无 handler 时默认值分别为 true/true/false，
+> **stub 不得写反**）。
+>
+> **已解决（2026-09-03 v2 修复轮）**：`GetSupportedSourceFolders` 已改为直接返回项目根目录 + 引擎根目录
+> （`AZ::Utils::GetProjectPath()` / `AZ::Utils::GetEnginePath()`），不再广播 `AssetSystemRequestBus`；
+> `IsDocumentPathEditable` / `IsDocumentPathPreviewable` 改为 `return true`，`IsPathIgnored` 改为 `return false`。
+
 主窗口侧**不引入** `AtomToolsDocumentMainWindow`（它是个 `DockMainWindow`，而 CEE 已有自己的
 `EditorMainWindow` + ADS dock manager，再套一个主窗口是重复造轮子）。改为：
 把 `AtomToolsDocumentInspector`（Core，纯 `QWidget`）作为 ADS dock 面板挂进
@@ -1019,7 +1049,7 @@ dock 注册复用 `EditorMainWindow.cpp:410` 现成的通用建 dock 助手（Qt
 | **策展派** | rbfx、Filament 的 UI 元数据 | CEE 侧一份 JSON **数据文件**，`AZ::JsonSerialization` 直接反序列化成 `MaterialTypeDesc` |
 
 **JSON 而不是 C++ 硬编码表的三条理由**：
-① `MaterialTypeDesc` 里没有值（值走 `MaterialPropertyValueMap`），所以它就是一个纯 schema 结构，天生可序列化；
+① `MaterialTypeDesc` 里没有值（值走 `MaterialPropertyValueMap`），所以它就是一个纯 schema 结构。序列化前提：四个结构体（`MaterialTypeDesc`/`MaterialPropertyGroupDesc`/`MaterialPropertyDesc`/`MaterialTypeInfo`）需在 `Application::Reflect` 中注册进 `SerializeContext`，`AZ::JsonSerialization` 才能工作；`AZStd::variant`（`MaterialPropertyValue`）需要 variant 各 alternative 的类型也被注册；
 ② 加一个 shader 参数不需要重新编译编辑器 —— 这正是 Atom `.materialtype` 数据驱动的价值；
 ③ 让 "C5 接入成本 = 8 纯虚 + 1 份 schema" 这句话成立。
 
@@ -1062,9 +1092,10 @@ rbfx 是最好的第一后端：材质模型最简单，且 `RbfxBackend` 已有
 
 - **schema 来源：运行时零手写。** `Object::get_property_list()`（`core/object/object.cpp:472-535`）一把梭，
   每条 `PropertyInfo{type,name,hint,hint_string,usage}` 直译：
-  - `PROPERTY_HINT_RANGE` 的 `"min,max,step[,or_greater][,suffix:m]"`（格式定义 `core/object/property_info.h:41`）
-    → 有 `or_greater`/`or_less` 填 `m_softMin/m_softMax`，否则填 `m_min/m_max`；尾部 `suffix:` 直接填 `m_suffix`（S6）。
-    **软硬范围语义天然对齐 Blender 双轨，单位串也是现成的。**
+  - `PROPERTY_HINT_RANGE` 的 `"min,max,step[,or_greater][,or_less][,suffix:m]"`（格式定义 `core/object/property_info.h:41`）
+    → 始终填 `m_min/m_max` 为硬范围；`or_greater` 清除 `m_max`（移除硬钳上界，允许超 max）、`or_less` 清除 `m_min`（移除硬钳下界，允许低于 min）；
+    `m_softMin/m_softMax` 默认等于 `m_min/m_max`（slider 边界）；尾部 `suffix:` 直接填 `m_suffix`（S6）。
+    **实现参考：Godot `editor_properties.cpp:3868-3882` 的 `set_allow_greater`/`set_allow_less` 语义。**
   - `PROPERTY_HINT_ENUM` + 逗号分隔 hint_string → `m_enumValues`。
   - `PROPERTY_HINT_RESOURCE_TYPE == "Texture2D"` → `m_type = Texture`（值走 `res://` 路径）。
   - **丢弃规则（只写接受不写丢弃 = 返工）**：`Variant::OBJECT` 只接受 `RESOURCE_TYPE == "Texture2D"`，其余（如 `next_pass` 的 Material、`RID` 等无法表达项）**整条丢弃**。丢弃 ≠ 丢数据——§2.2 的结构性无损保证它们照样被 `ResourceSaver` 原样写回。
@@ -1084,10 +1115,12 @@ rbfx 是最好的第一后端：材质模型最简单，且 `RbfxBackend` 已有
   `EditorFileSystem` 导入缓存；首次打开含纹理的 `.tres` 前先跑 `godot --headless --editor --quit-after 1`
   生成缓存，不阻塞 UI。
 - **预览（SubViewport + 按需回读，§6.4.2）**：自有 `World3D` 的 SubViewport + `VIEWPORT_UPDATE_ONCE`
-  （渲完自动转 DISABLED，`renderer_viewport.cpp:955-957`）→ `ViewportTexture::get_image()` → `convert(FORMAT_RGBA8)`。
+  （渲完自动转 DISABLED，`renderer_viewport.cpp:955-957`）→ `Viewport.get_image()` → `Image.get_data()`（PackedByteArray）。
   与 `EditorMaterialPreviewPlugin::generate`（`editor_preview_plugins.cpp:339-361`）同构；须在驱动 RenderingServer
   的线程调用（`ERR_RENDER_THREAD_GUARD_V`，`rendering_device.cpp:2666`）——CEE 单主循环天然满足。
-  **v1 走异步 `texture_get_data_async`（`rendering_device.h:470`）**：零停顿，与 `PreviewResult` 三态吻合（§6.4.3）。
+  **v1 采用同步 `Viewport.get_image()` 路径**（Godot 4.x 推荐的高层 API，见 `editor_preview_plugins.cpp:339-361`）。
+  **v1.5 升级路径**：改走异步 `texture_get_data_async`（`rendering_device.h:470`）+ `PreviewResult::Unchanged` 三态轮询，
+  零停顿，与 `PreviewResult` 契约更精确吻合（§6.4.3）。
 - **`ShaderMaterial` 也免费支持**（v2）：其 `_get_property_list`（`material.cpp:247-357`）把 shader uniform 反射成
   `shader_parameter/xxx` 属性，走同一条路。
 
@@ -1386,7 +1419,7 @@ CEE 主视口本来就是**纯句柄路径**：`EngineViewportWindow`（`QWindow
 
 | 阶段 | 内容 | 出口条件 |
 |---|---|---|
-| **P0**（**2 周**） | `AtomToolsFramework` 切 `.Core`/`.Static` + 4 处接缝（S1–S4）+ 3 个纯增字段（S2 `m_colorSpace` / S5 `m_fileExtensions` / S6 `m_suffix`）+ **S8 `ReflectCoreTypes` + S9 `AZ::RPI::MaterialUtils` 别名改名**（同一 PR）；`check_no_atom.ps1` 精化。~~抽 `CrossEngine::EditorFramework` 静态库~~**已取消**（§6.2：无第二个 app） | **回归门**：MaterialEditor / MaterialCanvas / ShaderManagementConsole **三个官方 Atom 工具照常构建且能启动**；`check_no_atom.ps1` 对 `.Core` 三层断言 PASS |
+| **P0**（**2 周**；2026-09-03 起口径更新） | **vendor 副本就位**（§3.5/§11.9：按 §3.1 Core 清单 + 依赖拷贝 `Debug/TraceRecorder`/`Inspector/Icons`/`Inspector/PropertyWidgets`，整体进 `crossengineeditor_files.cmake`，副本头部记上游 commit）+ 4 处接缝（S1–S4，**施于副本**）+ 3 个纯增字段（S2 `m_colorSpace` / S5 `m_fileExtensions`+`Title` / S6 `m_suffix`）+ **S8 `ReflectCoreTypes` + S9 别名改名**（同一批）；`check_no_atom.ps1` 精化 + **副本↔上游 diff 白名单断言**。~~上游 CMake 切分~~**已作废**（§11.9）；~~抽 `CrossEngine::EditorFramework` 静态库~~**已取消**（§6.2：无第二个 app） | 上游零触碰 ⇒ 三官方 Atom 工具回归门**恒成立（无需执行）**；P0 实际出口 = **副本完整可编译**（含 moc/qrc 路径）+ diff 白名单 PASS + `check_no_atom.ps1` 对 CEE target 三层 PASS |
 | **P1**（**2 周**） | `IMaterialSource` 契约（四后端同变更补齐，C4，**8 纯虚 + 2 哨兵**）+ `NullMaterialSource` + `CeeMaterialDocument` + dock 面板挂载（§6.1/6.3）+ **单文档 combo 薄壳（R1-C，~120 行）+ 主窗口三冲突处理（§6.3）** + `CeeMaterialPreviewPanel`（§6.4，含 10~15 Hz 限频与 ≤512² clamp，Null 后端返回 `Unsupported` 显示占位）+ `MaterialSchema` JSON 读写与校验器（3 条机械断言） | **C2 验收**：NullBackend 单后端构建；新建/打开/改属性/undo×10/保存全通；dock 面板可浮可停、布局 saveState/restoreState 生效 |
 | **P2**（1.5 周） | rbfx 后端（§7.2）：schema JSON + XML 存取 + 参数/纹理/渲染态读写 + 预览场景（`SceneRendererToTexture`，§6.4.5）+ 按需回读（§6.4.2）+ `m_colorSpace` 接线 + `LoadMaterial` 走 `ResourceCache` 共享实例（§4.1）。**+ R4 退役**：删 `IEntityMirror` 三个 `*Resource*` 方法 + `ResourcePropertiesPanel` + AssetBrowser 材质入口改 `OpenDocument`（Animation 入口同 PR 评估，四后端同批，C4） | 见下尺子 1/2/3/5/6 + rbfx 清单 |
 | **P3**（1.5 周） | Godot 后端（§7.3）：`get_property_list` → schema 自动生成（含**丢弃规则**）；`.tres` 存取；`AppliedSchemaChanged` 通道；预览（`SubViewport` + `UPDATE_ONCE` **异步** `texture_get_data_async` 回读，§6.4.2/6.4.3）。**+ S7 组头勾选框**（上游 3 行虚工厂 + CEE header 子类 ~100 行，§9.4）——消费者与实现同批落地 | 同上 + Godot 原版 Inspector 交叉验证：**15 个 `GROUP_ENABLE` 组全部显示为组头勾选框**，且被提升的 bool 不在列表里重复出现 |
@@ -1574,6 +1607,32 @@ undo 100% 复用框架；纹理 = 路径字符串；`m_colorSpace` 必修；软/
 | 纪律 | 未 pin 的外部 checkout 上行号会漂——**凡引用外部引擎行号必须同时记 commit**（本次两处失效行号即教训） | 调研文 §1 |
 
 **维持不变的项**：§9.9 驳回结论、§6.4 的 RTT+按需回读+限频方案、§6.4.3 三态哨兵契约、§6.4.5 预览场景配方、§6.1 dock 形态——全部复核后确认成立。
+
+### 11.9 复用形态裁决：vendor 副本切分，不动上游（2026-09-03，用户亲自裁定）
+
+| 议题 | 裁决 | 落点 |
+|---|---|---|
+| `AtomToolsFramework` 复用形态 | **用户明确要求：拷贝后切分，不动原来的 Atom 模块的代码**（包括不做上游 CMake 切分）。推翻本文 §3.5 原"否决 vendoring"裁决——其论据（同仓第一方 / 上游修 bug 收不到 / C3 判例 3）作为历史存档，不再承重。S1–S9 全部改动施加于 CEE 内副本 `MaterialEditor/Vendor/AtomToolsFramework/` | §3.5 / §10 P0 |
+| 代价管理：三条纪律 | ① **副本完整自洽**：§3.1 Core 清单 + 其被引用依赖（`Debug/TraceRecorder.*`、`Inspector/Icons/*`、`Inspector/PropertyWidgets/*`）一并拷贝并整体进 `crossengineeditor_files.cmake`；② **来源可追溯**：副本头部注释记录上游来源 commit；③ **漂移可检测**：护栏新增"副本↔上游 diff 白名单"断言——实质差异仅允许 S1–S9 清单，超出即报警；上游升级时以该 diff 为人工同步锚点 | §3.5 / §3.6 |
+| P0 回归门口径 | 上游零改动 ⇒ "三官方 Atom 工具照常构建"恒成立、无需执行；P0 出口改为**副本可编译（含 moc/qrc 路径）+ diff 白名单 PASS + check_no_atom.ps1 对 CEE target 三层 PASS** | §10 P0 |
+| 与旧"R1 退路"的关系 | 原退路触发条件（"若上游切分受阻"）不再有意义——形态由用户直接裁定，非受阻后的退让 | §3.5 |
+| 实施现状（2026-09-03） | 审查（`review_material_editor_glm.md`）发现裁决**执行不到位**：三组依赖未拷贝、副本未进 files.cmake、清单外出现无注释私改（`GetRecentFilePaths` 签名）、§3.6 护栏未同步——属执行缺口，非裁决缺陷；修复清单见该 review §8 | review §6/§8 |
+
+### 11.10 本地实现状态复核（2026-09-07）
+
+本节只记录当前工作区的实现状态，不改变前述架构裁决。状态分为：**已编译**（profile target 成功编译链接）、**已接线**（代码路径存在但尚未完成对应运行时验收）、**待验证**（需要真实引擎/交互测试，不能仅凭静态编译宣称通过）。
+
+- **构建门：已编译。** `CrossEngineEditor` profile target 已成功生成 `CrossEngineEditor.exe`；AutoMoc、vendor 属性控件路径、文档系统接线和 Godot/Rbfx 条件编译均已通过当前构建。
+- **契约与框架：已接线。** `IMaterialSource` 仍为 8 个纯虚方法 + 2 个哨兵；vendor 文档系统、DynamicProperty、Inspector、Undo/Redo、单文档 toolbar 和 dock 预览面板已接入。编译通过不等于六把验收尺全部通过。
+- **编辑/撤销/预览刷新：已接线，待验证。** Failed edit 的 UI 回滚、undo/redo 后重建与通知、文档修改触发 preview dirty、Godot `VIEWPORT_UPDATE_ONCE` 的下一帧读回顺序已接入。需要 Null/Godot 实机操作验证，尤其是动态 schema 重建期间的 inspector 生命周期。
+- **Godot 纹理：已接线，待运行时验证。** Object 类型纹理读取已尝试转换为 `resource_path`；写入侧保留路径字符串到 Godot resource 的边缘转换。当前必须用真实 `.tres` 和可加载 `Texture2D` 验证 ResourceLoader、空纹理、失败路径三种情况，不能把静态编译视为双向读写验收通过。
+- **Godot 组头 toggle：部分接线，待运行时验证。** `GROUP_ENABLE` 属性不再被 schema 丢弃，组头 checkbox 有初始状态与编辑事务路径；普通属性行隐藏、动态可见性重建、15 个开关逐项交互仍需用 Godot 原版材质实测确认。
+- **Schema：部分接线。** Schema 重复加载清理、字符串/纹理错误默认值的 `monostate` 处理、嵌套 group 的文档树递归和 UInt/Enum 范围类型映射已补齐。嵌套 group 的 JSON values 覆盖和完整 round-trip 仍应通过专门往返测试确认。
+- **rbfx：参数数据路径已接线，预览仍未实现。** shader 参数通用 Variant 分派、Vector3/Vector4 参数、`Texture2D` 加载失败保护、项目 schema 路径和 `Unsupported` 预览哨兵已处理。`SceneRendererToTexture` 场景创建、GPU 渲染和像素回读尚未落地，因此当前 rbfx 材质预览明确为 **Unsupported**，§7.2/§10 的 rbfx 预览验收条件尚未通过。
+- **Toolbar/入口：已接线，待验证。** 文档新建、文档列表刷新、切换时 Undo/Redo 状态、关闭未保存材质提示已接入；新建入口当前使用后端注册的类型名 `DemoPBR`，多材质类型/路径过滤和 AssetBrowser 的 `.xml` 模型/材质歧义仍需交互验证。
+- **修改指示器与默认折叠：未宣称通过。** 默认折叠 override 已存在，但 schema 的 `m_defaultCollapsed` 仍需要从真实 schema 完整传递并验证用户持久化选择优先级。修改指示器接口已保持构建安全，但当前不把所有属性的 changed icon 视为已验收功能，后续应基于真实 `InstanceDataNode` 子节点结构补充值比较。
+
+因此，当前六把验收尺的准确口径是：**构建门和契约静态门已通过；视觉等价、无损往返、完整 undo 交互、rbfx 预览和交互性能仍未全部通过。** 后续报告必须区分“编译成功”“代码已接线”和“引擎运行时验收通过”，不得将三者混为一谈。
 
 ---
 

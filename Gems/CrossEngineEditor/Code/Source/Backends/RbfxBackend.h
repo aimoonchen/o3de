@@ -27,9 +27,11 @@
 #include <BackendAPI/IAssetSource.h>
 #include <BackendAPI/IEngineBackend.h>
 #include <BackendAPI/IEntityMirror.h>
+#include <BackendAPI/IMaterialSource.h>
 #include <BackendAPI/ISceneRenderer.h>
 #include <Framework/EngineTransformConverter.h>
 #include <Framework/EngineProperty.h>
+#include <MaterialEditor/RbfxMaterialSource.h>
 
 #include <AzCore/Math/Matrix4x4.h>
 #include <AzCore/std/containers/unordered_map.h>
@@ -87,6 +89,7 @@ namespace CrossEngineEditor
         ISceneRenderer& GetSceneRenderer() override { return m_sceneRenderer; }
         IEntityMirror& GetEntityMirror() override { return m_entityMirror; }
         IAssetSource& GetAssetSource() override { return m_assetSource; }
+        IMaterialSource& GetMaterialSource() override { return m_materialSource; }
 
         //! Engine-specific editor commands (editor_polish.md P1-13 / M1): the one rbfx-only
         //! workflow today is exporting a node subtree to the engine's own prefab XML
@@ -172,14 +175,6 @@ namespace CrossEngineEditor
             AZStd::vector<AZ::u8> SerializeNodes(const AZStd::vector<AZ::EntityId>& entityIds) override;
             bool PasteNodes(const AZStd::vector<AZ::u8>& data, AZ::EntityId parentId) override;
 
-            // Migration 批次 2 精简 (rbfx_migration.md §3.1).
-            bool SaveResource(
-                const AZStd::string& type, const AZStd::string& path) override;
-            bool ReadResourceProperties(
-                const AZStd::string& type, const AZStd::string& path, PropertyBag& out) override;
-            bool WriteResourceProperties(
-                const AZStd::string& type, const AZStd::string& path, const PropertyBag& bag) override;
-
         private:
             //! Build (or reuse) a mirror entity for one rbfx node and recurse its children.
             //! parentId is the mirror entity of the rbfx parent (invalid for the root).
@@ -238,5 +233,6 @@ namespace CrossEngineEditor
         RbfxSceneRenderer m_sceneRenderer{ m_state };
         RbfxEntityMirror m_entityMirror{ m_state };
         RbfxAssetSource m_assetSource{ m_state };
+        RbfxMaterialSource m_materialSource{ m_state.m_context };
     };
 } // namespace CrossEngineEditor

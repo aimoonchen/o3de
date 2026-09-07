@@ -5,7 +5,6 @@
  */
 
 #include <Window/CeeAssetBrowserPanel.h>
-#include <Window/ResourcePropertiesPanel.h>
 
 #include <Application/EntityMirrorBridge.h>
 
@@ -19,6 +18,9 @@
 #include <AzToolsFramework/AssetBrowser/AssetBrowserFilterModel.h>
 #include <AzToolsFramework/AssetBrowser/Views/AssetBrowserTreeView.h>
 #include <AzToolsFramework/UI/UICore/QTreeViewStateSaver.hxx>
+
+// Vendor: AtomToolsFramework Document system request bus
+#include "MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentSystemRequestBus.h"
 
 #include <QHBoxLayout>
 #include <QToolButton>
@@ -315,22 +317,16 @@ namespace CrossEngineEditor
             }
             return;
         }
-        // Resource-type double-click = open the generic resource panel (rbfx original:
-        // double-click opens the resource editor; drag-onto-selection assigns instead).
+        // Material double-click opens the document (AtomToolsDocumentSystemRequestBus).
         if (azstricmp(extension.c_str(), "mat") == 0 || azstricmp(extension.c_str(), "material") == 0)
         {
-            if (m_resourcePanel)
-            {
-                m_resourcePanel->OpenResource("Material", path);
-            }
+            AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Broadcast(
+                &AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Events::OpenDocument, path);
             return;
         }
         if (azstricmp(extension.c_str(), "ani") == 0)
         {
-            if (m_resourcePanel)
-            {
-                m_resourcePanel->OpenResource("Animation", path);
-            }
+            // TODO: Animation document (v2).
             return;
         }
 

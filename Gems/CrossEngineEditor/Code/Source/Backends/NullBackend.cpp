@@ -141,24 +141,6 @@ namespace CrossEngineEditor
         return false;
     }
 
-    bool NullBackend::NullEntityMirror::SaveResource(
-        const AZStd::string& /*type*/, const AZStd::string& /*path*/)
-    {
-        return false;
-    }
-
-    bool NullBackend::NullEntityMirror::ReadResourceProperties(
-        const AZStd::string& /*type*/, const AZStd::string& /*path*/, PropertyBag& /*out*/)
-    {
-        return false;
-    }
-
-    bool NullBackend::NullEntityMirror::WriteResourceProperties(
-        const AZStd::string& /*type*/, const AZStd::string& /*path*/, const PropertyBag& /*bag*/)
-    {
-        return false;
-    }
-
     // --- NullAssetSource ---
     //
     // With no engine attached the "asset source" simply exposes the editor project's

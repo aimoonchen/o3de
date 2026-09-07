@@ -10,14 +10,23 @@
 #include <Window/CeePreferences.h>
 #include <Window/CeePreferencesDialog.h>
 #include <Window/CommandPalette.h>
-#include <Window/ResourcePropertiesPanel.h>
 #include <Window/ViewPaneRegistry.h>
 #include <Viewport/GizmoManager.h>
 #include <Viewport/EditorViewportWidget.h>
 #include <Application/EntityMirrorBridge.h>
 #include <BackendAPI/IEngineBackend.h>
 #include <BackendAPI/IEntityMirror.h>
+#include <BackendAPI/IMaterialSource.h>
 #include <Framework/EngineNodeComponent.h>
+#include <MaterialEditor/CeeMaterialDocument.h>
+#include <MaterialEditor/CeeMaterialDocumentInspector.h>
+#include <MaterialEditor/CeeMaterialPreviewPanel.h>
+#include <MaterialEditor/CeeMaterialToolbar.h>
+#include <MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentInspector.h>
+
+// Vendor: AtomToolsFramework Document system request bus
+#include "MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentSystemRequestBus.h"
+#include "MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentRequestBus.h"
 
 #include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzCore/Component/Entity.h>
@@ -99,13 +108,17 @@ namespace
     //! Stable dock names (the ADS lookup keys; the ViewPane registry entries reuse them).
     constexpr const char* k_dockOutliner = "OutlinerDock";
     constexpr const char* k_dockInspector = "InspectorDock";
-    constexpr const char* k_dockResourceInspector = "ResourceInspectorDock";
     constexpr const char* k_dockAssetBrowser = "AssetBrowserDock";
     constexpr const char* k_dockConsole = "ConsoleDock";
+    constexpr const char* k_dockMaterialInspector = "MaterialInspectorDock";
+    constexpr const char* k_dockMaterialPreview = "MaterialPreviewDock";
 } // namespace
 
 namespace CrossEngineEditor
 {
+    // Material document type id for the document system (material_migration_final.md SS6.3).
+    // NOTE: The canonical definition lives in CrossEngineEditorApplication.h as k_ceeMaterialToolId.
+
     EditorMainWindow::EditorMainWindow(EntityMirrorBridge* mirrorBridge, QWidget* parent)
         : AzQtComponents::DockMainWindow(parent)
         , m_mirrorBridge(mirrorBridge)
@@ -130,6 +143,11 @@ namespace CrossEngineEditor
         AzToolsFramework::SetHelpersVisible(m_preferences->m_showViewportHelpers);
 
         BuildDockPanels();
+        EnsureMaterialPreviewPanel();
+
+        // Connect to document notifications so the inspector knows which document is active.
+        AtomToolsFramework::AtomToolsDocumentNotificationBus::Handler::BusConnect(
+            CrossEngineEditor::k_ceeMaterialToolId);
         BuildStatusBar();
 
         // Toast host (P2): floats over this window; repositioned on show/resize.
@@ -159,6 +177,8 @@ namespace CrossEngineEditor
 
     EditorMainWindow::~EditorMainWindow()
     {
+        AtomToolsFramework::AtomToolsDocumentNotificationBus::Handler::BusDisconnect();
+
         // The mirror bridge (application-owned) OUTLIVES this window; drop the dirty callback
         // it holds into us before the window memory goes away (teardown-time mirror events
         // would otherwise call a dead window - review round 1, R3).
@@ -223,12 +243,6 @@ namespace CrossEngineEditor
                                       {
                                           return new AzToolsFramework::EntityPropertyEditor(this);
                                       } });
-        m_paneRegistry.RegisterPane({ QString::fromLatin1(k_dockResourceInspector), QStringLiteral("Resource Inspector"),
-                                      QStringLiteral("Core"), Qt::RightDockWidgetArea, 300,
-                                      [this]
-                                      {
-                                          return new ResourcePropertiesPanel(m_mirrorBridge, this);
-                                      } });
         m_paneRegistry.RegisterPane({ QString::fromLatin1(k_dockAssetBrowser), QStringLiteral("Asset Browser"),
                                       QStringLiteral("Core"), Qt::BottomDockWidgetArea, 400,
                                       [this, backend]
@@ -241,6 +255,105 @@ namespace CrossEngineEditor
         m_paneRegistry.RegisterPane({ QString::fromLatin1(k_dockConsole), QStringLiteral("Console"),
                                       QStringLiteral("Core"), Qt::BottomDockWidgetArea, 500,
                                       consoleFactory });
+
+        // Material Inspector dock (material_migration_final.md SS6.5).
+        auto materialInspectorFactory = [this] -> QWidget*
+        {
+            auto* host = new QWidget();
+            auto* layout = new QVBoxLayout(host);
+            layout->setContentsMargins(0, 0, 0, 0);
+            layout->setSpacing(0);
+
+            // Task 1: toolbar with Save/Close/DocumentSelected signals.
+            auto* toolbar = new CeeMaterialToolbar(host);
+            layout->addWidget(toolbar);
+
+            // Instantiate the real property inspector (material_migration_final.md SS6.5).
+            // Use CRC of the tool id string to match the document system's registration.
+            auto* inspector = new CeeMaterialDocumentInspector(
+                CrossEngineEditor::k_ceeMaterialToolId, host);
+            m_materialInspector = inspector;
+            layout->addWidget(inspector);
+
+            // Task 1: Connect toolbar Save/Close/DocumentSelected to the document system.
+            connect(toolbar, &CeeMaterialToolbar::SaveRequested, this, [this]()
+            {
+                if (m_materialInspector)
+                {
+                    AZ::Uuid docId = m_materialInspector->GetDocumentId();
+                    AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Broadcast(
+                        &AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Events::SaveDocument, docId);
+                }
+            });
+
+            connect(toolbar, &CeeMaterialToolbar::CloseRequested, this, [this]()
+            {
+                if (m_materialInspector)
+                {
+                    AZ::Uuid docId = m_materialInspector->GetDocumentId();
+                    AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Broadcast(
+                        &AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Events::CloseDocument, docId);
+                }
+            });
+
+            connect(toolbar, &CeeMaterialToolbar::DocumentSelected, this, [](const AZStd::string& path)
+            {
+                if (!path.empty())
+                {
+                    AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Broadcast(
+                        &AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Events::OpenDocument, path);
+                }
+            });
+
+            // Undo / Redo
+            connect(toolbar, &CeeMaterialToolbar::UndoRequested, this, [this]()
+            {
+                if (m_materialInspector)
+                {
+                    const AZ::Uuid docId = m_materialInspector->GetDocumentId();
+                    AtomToolsFramework::AtomToolsDocumentRequestBus::Event(
+                        docId, &AtomToolsFramework::AtomToolsDocumentRequests::Undo);
+                }
+            });
+
+            connect(toolbar, &CeeMaterialToolbar::RedoRequested, this, [this]()
+            {
+                if (m_materialInspector)
+                {
+                    const AZ::Uuid docId = m_materialInspector->GetDocumentId();
+                    AtomToolsFramework::AtomToolsDocumentRequestBus::Event(
+                        docId, &AtomToolsFramework::AtomToolsDocumentRequests::Redo);
+                }
+            });
+
+            // Store toolbar pointer so OnDocumentOpened/OnDocumentCleared can refresh it.
+            m_materialToolbar = toolbar;
+
+            connect(toolbar, &CeeMaterialToolbar::NewDocumentRequested, this, []()
+            {
+                AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Broadcast(
+                    &AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Events::CreateDocumentFromTypeName,
+                    AZStd::string("DemoPBR"));
+            });
+
+            return host;
+        };
+
+        // Material Preview dock (material_migration_final.md SS6.4).
+        auto materialPreviewFactory = [this] -> QWidget*
+        {
+            auto* panel = new CeeMaterialPreviewPanel(this);
+            return panel;
+        };
+
+        m_paneRegistry.RegisterPane({ QString::fromLatin1(k_dockMaterialInspector),
+                                      QStringLiteral("Material Inspector"),
+                                      QStringLiteral("Material"), Qt::RightDockWidgetArea, 600,
+                                      materialInspectorFactory });
+        m_paneRegistry.RegisterPane({ QString::fromLatin1(k_dockMaterialPreview),
+                                      QStringLiteral("Material Preview"),
+                                      QStringLiteral("Material"), Qt::RightDockWidgetArea, 610,
+                                      materialPreviewFactory });
 
         // Viewport header bar + surface stacked vertically in the central dock.
         auto* viewportColumn = new QWidget(this);
@@ -260,27 +373,15 @@ namespace CrossEngineEditor
         ads::CDockAreaWidget* centralArea = m_dockManager->setCentralWidget(viewportDock);
         (void)centralArea;
 
-        CeeAssetBrowserPanel* assetBrowser = nullptr;
-        ResourcePropertiesPanel* resourcePanel = nullptr;
         for (const ViewPaneEntry& pane : m_paneRegistry.Entries())
         {
             QWidget* content = pane.m_factory();
-            if (pane.m_name == QLatin1String(k_dockAssetBrowser))
-            {
-                assetBrowser = static_cast<CeeAssetBrowserPanel*>(content);
-            }
-            else if (pane.m_name == QLatin1String(k_dockResourceInspector))
-            {
-                resourcePanel = static_cast<ResourcePropertiesPanel*>(content);
-            }
             AddPanel(pane.m_name, pane.m_title, content, pane.m_area);
-        }
 
-        // Double-click wiring between the Asset Browser and the Resource Inspector panel
-        // (rbfx_migration.md §3.4).
-        if (assetBrowser && resourcePanel)
-        {
-            assetBrowser->SetResourcePropertiesPanel(resourcePanel);
+            if (pane.m_name == QLatin1String(k_dockMaterialPreview))
+            {
+                m_materialPreviewPanel = qobject_cast<CeeMaterialPreviewPanel*>(content);
+            }
         }
     }
 
@@ -616,8 +717,8 @@ namespace CrossEngineEditor
     {
         // editor_polish.md P0-3 / A3: the Inspector's pin button asks the host app to open a
         // second, locked copy of the grid. 100% reuse: another EntityPropertyEditor pinned to
-        // explicit ids (SetOverrideEntityIds - the official locked-selection mechanism, same as
-        // ResourcePropertiesPanel). Hosted in a small tool window parented to this main window.
+        // explicit ids (SetOverrideEntityIds - the official locked-selection mechanism).
+        // Hosted in a small tool window parented to this main window.
         if (entities.empty() || m_pinnedInspectorWindows.size() >= 4)
         {
             return; // nothing to pin, or politely cap runaway pinning at four windows.
@@ -822,6 +923,133 @@ namespace CrossEngineEditor
             m_sceneDirty = false;
             UpdateWindowTitle();
         }
+    }
+
+    CeeMaterialPreviewPanel* EditorMainWindow::FindMaterialPreviewPanel() const
+    {
+        if (m_materialPreviewPanel)
+        {
+            return m_materialPreviewPanel;
+        }
+
+        if (auto* content = DockContent(QString::fromLatin1(k_dockMaterialPreview)))
+        {
+            return qobject_cast<CeeMaterialPreviewPanel*>(content);
+        }
+        return nullptr;
+    }
+
+    void EditorMainWindow::EnsureMaterialPreviewPanel()
+    {
+        m_materialPreviewPanel = FindMaterialPreviewPanel();
+    }
+
+    void EditorMainWindow::OnDocumentOpened(const AZ::Uuid& documentId)
+    {
+        m_activeDocumentId = documentId;
+
+        if (m_materialInspector)
+        {
+            m_materialInspector->SetDocumentId(documentId);
+        }
+
+        // Add the document to the toolbar combo.
+        AZStd::string absPath;
+        AtomToolsFramework::AtomToolsDocumentRequestBus::EventResult(
+            absPath, documentId, &AtomToolsFramework::AtomToolsDocumentRequests::GetAbsolutePath);
+        if (m_materialToolbar)
+        {
+            m_materialToolbar->AddDocument(documentId, absPath);
+        }
+
+        // Update undo/redo button state for the newly opened document.
+        bool canUndo = false;
+        bool canRedo = false;
+        AtomToolsFramework::AtomToolsDocumentRequestBus::EventResult(
+            canUndo, documentId, &AtomToolsFramework::AtomToolsDocumentRequests::CanUndo);
+        AtomToolsFramework::AtomToolsDocumentRequestBus::EventResult(
+            canRedo, documentId, &AtomToolsFramework::AtomToolsDocumentRequests::CanRedo);
+        if (m_materialToolbar)
+        {
+            m_materialToolbar->UpdateUndoRedoState(canUndo, canRedo);
+        }
+
+        // Bind the live material handle to the preview panel.
+        // We know the document system created a CeeMaterialDocument for this uuid.
+        // Query its absolute path through the request bus, then cast down to get the handle.
+        AtomToolsFramework::AtomToolsDocumentRequests* docRequests = AtomToolsFramework::AtomToolsDocumentRequestBus::FindFirstHandler(documentId);
+        if (auto* ceeDoc = static_cast<CeeMaterialDocument*>(docRequests))
+        {
+            if (auto* backend = AZ::Interface<IEngineBackend>::Get())
+            {
+                backend->GetMaterialSource().SetPreviewMaterial(ceeDoc->GetHandle());
+            }
+            if (m_materialPreviewPanel)
+            {
+                m_materialPreviewPanel->MarkDirty();
+            }
+        }
+    }
+
+    void EditorMainWindow::OnDocumentCleared([[maybe_unused]] const AZ::Uuid& documentId)
+    {
+        if (m_materialInspector)
+        {
+            m_materialInspector->Reset();
+        }
+
+        // Unbind preview when document closes.
+        if (auto* backend = AZ::Interface<IEngineBackend>::Get())
+        {
+            backend->GetMaterialSource().SetPreviewMaterial(0);
+        }
+        if (m_materialPreviewPanel)
+        {
+            m_materialPreviewPanel->MarkDirty();
+        }
+
+        // Disable undo/redo buttons when no document is active.
+        if (m_materialToolbar)
+        {
+            m_materialToolbar->UpdateUndoRedoState(false, false);
+        }
+
+        // Remove the document from the toolbar combo.
+        if (m_materialToolbar)
+        {
+            m_materialToolbar->RemoveDocument(documentId);
+        }
+    }
+
+    void EditorMainWindow::OnDocumentModified(const AZ::Uuid& documentId)
+    {
+        // Update undo/redo button state whenever a document is modified.
+        bool canUndo = false;
+        bool canRedo = false;
+        AtomToolsFramework::AtomToolsDocumentRequestBus::EventResult(
+            canUndo, documentId, &AtomToolsFramework::AtomToolsDocumentRequests::CanUndo);
+        AtomToolsFramework::AtomToolsDocumentRequestBus::EventResult(
+            canRedo, documentId, &AtomToolsFramework::AtomToolsDocumentRequests::CanRedo);
+        if (m_materialToolbar)
+        {
+            m_materialToolbar->UpdateUndoRedoState(canUndo, canRedo);
+        }
+
+        // Refresh the material preview only for the active material document so edits
+        // elsewhere do not thrash the preview widget.
+        if (m_activeDocumentId == documentId && m_materialPreviewPanel)
+        {
+            m_materialPreviewPanel->MarkDirty();
+        }
+    }
+
+    void EditorMainWindow::RefreshMaterialToolbar()
+    {
+        if (!m_materialToolbar)
+        {
+            return;
+        }
+        m_materialToolbar->RefreshDocumentList();
     }
 
     void EditorMainWindow::UpdateWindowTitle()
@@ -1265,6 +1493,36 @@ namespace CrossEngineEditor
 
     void EditorMainWindow::closeEvent(QCloseEvent* event)
     {
+        // Material documents first (material_migration_final.md SS6.3).
+        // If the active material document has unsaved changes, prompt before closing.
+        if (m_materialInspector)
+        {
+            const AZ::Uuid docId = m_materialInspector->GetDocumentId();
+            bool isModified = false;
+            AtomToolsFramework::AtomToolsDocumentRequestBus::EventResult(
+                isModified, docId, &AtomToolsFramework::AtomToolsDocumentRequests::IsModified);
+            if (isModified)
+            {
+                const QMessageBox::StandardButton answer = QMessageBox::question(
+                    this, tr("Unsaved Material Changes"),
+                    tr("There are unsaved material changes. Save before closing?"),
+                    QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+                if (answer == QMessageBox::Cancel)
+                {
+                    event->ignore();
+                    return;
+                }
+                if (answer == QMessageBox::Save)
+                {
+                    AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Broadcast(
+                        &AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Events::SaveDocument, docId);
+                }
+            }
+
+            AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Broadcast(
+                &AtomToolsFramework::AtomToolsDocumentSystemRequestBus::Events::CloseAllDocuments);
+        }
+
         // Migration L1 (rbfx_migration.md §3.4) + dirty tracking (editor_polish.md P2 / A6):
         // only ask about saving when there ARE unsaved changes - the old "always ask" flow was
         // the v1 stand-in for a dirty flag, not a feature. Closing the box (X/Escape) resolves

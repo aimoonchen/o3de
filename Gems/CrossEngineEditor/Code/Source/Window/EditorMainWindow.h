@@ -9,6 +9,10 @@
 #if !defined(Q_MOC_RUN)
 #include <Window/ViewPaneRegistry.h>
 
+#include <MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentInspector.h>
+#include <MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentNotificationBus.h>
+#include <MaterialEditor/CeeMaterialDocumentInspector.h>
+
 #include <AzCore/Component/EntityId.h>
 #include <AzCore/std/containers/vector.h>
 #include <AzCore/std/smart_ptr/unique_ptr.h>
@@ -46,6 +50,9 @@ namespace ads
 
 namespace CrossEngineEditor
 {
+    class CeeMaterialDocument;
+    class CeeMaterialPreviewPanel;
+    class CeeMaterialToolbar;
     class CeePreferences;
     class EditorViewportWidget;
     class EntityMirrorBridge;
@@ -63,7 +70,9 @@ namespace CrossEngineEditor
     //! (CeeActionsHandler registers and binds everything); this class only builds the panels
     //! (through the ViewPane registry), the viewport header bar, the main toolbar, the status
     //! bar and the toast host, and owns the workflow operations every menu delegates to.
-    class EditorMainWindow : public AzQtComponents::DockMainWindow
+    class EditorMainWindow
+        : public AzQtComponents::DockMainWindow
+        , public AtomToolsFramework::AtomToolsDocumentNotificationBus::Handler
     {
         Q_OBJECT
     public:
@@ -140,6 +149,17 @@ namespace CrossEngineEditor
         void MarkSceneDirty();
         void ClearSceneDirty();
 
+        //! Docked material preview widget kept in sync with the application readback loop.
+        [[nodiscard]] CeeMaterialPreviewPanel* FindMaterialPreviewPanel() const;
+
+        // AtomToolsDocumentNotificationBus::Handler — SetDocumentId on document open.
+        void OnDocumentOpened(const AZ::Uuid& documentId) override;
+        void OnDocumentModified(const AZ::Uuid& documentId) override;
+        void OnDocumentCleared(const AZ::Uuid& documentId) override;
+
+        //! Refresh the material toolbar combo from the document system's open documents.
+        void RefreshMaterialToolbar();
+
         //! Show a toast notification in the bottom-right corner of this window.
         void ShowToast(AzQtComponents::ToastType type, const QString& title, const QString& description);
 
@@ -214,6 +234,9 @@ namespace CrossEngineEditor
         //! (Re)start the autosave timer from the current preferences.
         void ApplyAutosaveSettings();
 
+        //! Resolve the docked material preview panel widget once from the ADS layout.
+        void EnsureMaterialPreviewPanel();
+
         //! Capture the Outliner's expansion state before a full re-mirror and restore it after
         //! (editor_polish.md P2, clears rbfx_migration.md §3.6 v2 backlog with the stock
         //! TreeViewState helper - the trees are framework-owned so they cannot be rebased onto
@@ -267,6 +290,16 @@ namespace CrossEngineEditor
         QTimer* m_autosaveTimer = nullptr;
         QString m_sceneDisplayName;
         bool m_sceneDirty = false;
+
+        //! Docked material preview panel resolved once from ADS on first use.
+        CeeMaterialPreviewPanel* m_materialPreviewPanel = nullptr;
+        CeeMaterialDocumentInspector* m_materialInspector = nullptr;
+
+        //! Active material document currently bound to the inspector/preview.
+        AZ::Uuid m_activeDocumentId;
+
+        //! Material toolbar combo for open documents (task 2).
+        CeeMaterialToolbar* m_materialToolbar = nullptr;
 
         //! Outliner expansion snapshot for RefreshFromEngineKeepingState.
         AZStd::unique_ptr<AzToolsFramework::TreeViewState> m_outlinerTreeState;

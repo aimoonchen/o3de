@@ -26,6 +26,7 @@
 //! only the scene renderer is Diligent-specific here.
 
 #include <BackendAPI/IEngineBackend.h>
+#include <BackendAPI/IMaterialSource.h>
 #include <BackendAPI/ISceneRenderer.h>
 
 #include <Backends/NullBackend.h>
@@ -60,6 +61,7 @@ namespace CrossEngineEditor
         ISceneRenderer& GetSceneRenderer() override { return m_sceneRenderer; }
         IEntityMirror& GetEntityMirror() override { return m_null.GetEntityMirror(); }
         IAssetSource& GetAssetSource() override { return m_null.GetAssetSource(); }
+        IMaterialSource& GetMaterialSource() override { return m_null.GetMaterialSource(); }
 
     private:
         //! Diligent scene renderer bound to the viewport native surface.
@@ -113,7 +115,9 @@ namespace CrossEngineEditor
         };
 
         DiligentSceneRenderer m_sceneRenderer;
-        //! Provides the entity-mirror + asset-source contracts until a real engine scene exists.
+        // Diligent backend: entity-mirror + asset-source + material-source are all delegated
+        // to the NullBackend until a real engine scene exists. Only the scene renderer is
+        // Diligent-specific.
         NullBackend m_null;
     };
 } // namespace CrossEngineEditor

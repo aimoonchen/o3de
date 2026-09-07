@@ -95,8 +95,8 @@ namespace CrossEngineEditor
         }
     };
 
-    //! Resolved GDExtension entry points + helpers. One instance, owned by the backend, shared by
-    //! every sub-service. Valid only after Bind() succeeds (returns false otherwise).
+    // Resolved GDExtension entry points + helpers. One instance, owned by the backend, shared by
+    // every sub-service. Valid only after Bind() succeeds (returns false otherwise).
     class GodotApi
     {
     public:
@@ -165,6 +165,8 @@ namespace CrossEngineEditor
                 getProc("packed_vector3_array_operator_index"));
             m_packedColorIndex = reinterpret_cast<GDExtensionInterfacePackedColorArrayOperatorIndex>(
                 getProc("packed_color_array_operator_index"));
+            m_packedByteIndex = reinterpret_cast<GDExtensionInterfacePackedByteArrayOperatorIndex>(
+                getProc("packed_byte_array_operator_index"));
             m_variantGetInternalGetter = reinterpret_cast<GDExtensionInterfaceVariantGetPtrInternalGetter>(
                 getProc("variant_get_ptr_internal_getter"));
 
@@ -484,6 +486,13 @@ namespace CrossEngineEditor
                 m_variantGetInternalGetter && m_fromType && m_toType;
         }
 
+        //! True if the packed_byte_array_operator_index entry point resolved. Allows bulk readback
+        //! of PackedByteArray variants without per-byte GDExtension calls.
+        bool PackedByteReady() const
+        {
+            return m_packedByteIndex && m_variantGetInternalGetter;
+        }
+
         //! Godot Mesh array-slot layout (scene/resources/mesh.h): sized to ARRAY_MAX; vertices at
         //! ARRAY_VERTEX, colors at ARRAY_COLOR. ARRAY_MAX is 13 on Godot 4.3+ (was 11 on 4.0-4.2);
         //! oversizing on an older runtime only leaves unused slots, so 13 is safe for our target.
@@ -554,9 +563,8 @@ namespace CrossEngineEditor
             return v;
         }
 
-        //! Pointer to a Variant's INTERNAL builtin value, for in-place mutation (no CoW copy). The
-        //! per-type getter is resolved once and returns e.g. the internal PackedVector3Array* whose
-        //! operator_index then yields the writable data buffer.
+    public:
+        //! Pointer to a packed array's internal storage for bulk readback.
         void* InternalPtr(const GodotVariant& v, GDExtensionVariantType type) const
         {
             if (auto getter = m_variantGetInternalGetter(type))
@@ -637,8 +645,23 @@ namespace CrossEngineEditor
         GDExtensionInterfaceVariantSetIndexed m_variantSetIndexed = nullptr;
         GDExtensionInterfacePackedVector3ArrayOperatorIndex m_packedV3Index = nullptr;
         GDExtensionInterfacePackedColorArrayOperatorIndex m_packedColorIndex = nullptr;
+        GDExtensionInterfacePackedByteArrayOperatorIndex m_packedByteIndex = nullptr;
         GDExtensionInterfaceVariantGetPtrInternalGetter m_variantGetInternalGetter = nullptr;
 
+    public:
+        //! Direct access to packed_byte_array internal data pointer for bulk readback.
+        //! Returns the raw data pointer from a PackedByteArray's internal buffer.
+        const void* PackedByteData(void* internalPtr) const
+        {
+            if (m_packedByteIndex && internalPtr)
+            {
+                // operator_index returns a pointer to the byte at index 0 (the start of the buffer).
+                return m_packedByteIndex(internalPtr, 0);
+            }
+            return nullptr;
+        }
+
+    private:
         bool m_valid = false;
     };
 } // namespace CrossEngineEditor

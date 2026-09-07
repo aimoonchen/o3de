@@ -176,38 +176,6 @@ namespace CrossEngineEditor
         RefreshFromEngine();
     }
 
-    bool EntityMirrorBridge::ReadResourceProperties(
-        const AZStd::string& type, const AZStd::string& path, PropertyBag& out)
-    {
-        auto* backend = GetBackend();
-        if (!backend)
-        {
-            return false;
-        }
-        return backend->GetEntityMirror().ReadResourceProperties(type, path, out);
-    }
-
-    bool EntityMirrorBridge::WriteResourceProperties(
-        const AZStd::string& type, const AZStd::string& path, const PropertyBag& bag)
-    {
-        auto* backend = GetBackend();
-        if (!backend)
-        {
-            return false;
-        }
-        return backend->GetEntityMirror().WriteResourceProperties(type, path, bag);
-    }
-
-    bool EntityMirrorBridge::SaveResource(const AZStd::string& type, const AZStd::string& path)
-    {
-        auto* backend = GetBackend();
-        if (!backend)
-        {
-            return false;
-        }
-        return backend->GetEntityMirror().SaveResource(type, path);
-    }
-
     void EntityMirrorBridge::OnEntityTransformChanged(const AzToolsFramework::EntityIdList& entityIds)
     {
         auto* backend = GetBackend();

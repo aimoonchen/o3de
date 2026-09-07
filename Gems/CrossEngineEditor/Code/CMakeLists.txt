@@ -28,6 +28,7 @@ ly_add_target(
     NAME CrossEngineEditor APPLICATION
     NAMESPACE Gem
     AUTOMOC
+    AUTOUIC
     AUTORCC
     FILES_CMAKE
         crossengineeditor_files.cmake
@@ -100,9 +101,12 @@ if(CEE_HAVE_RBFX)
     target_sources(CrossEngineEditor PRIVATE
         Source/Backends/RbfxBackend.h
         Source/Backends/RbfxBackend.cpp
+        Source/MaterialEditor/RbfxMaterialSource.h
+        Source/MaterialEditor/RbfxMaterialSource.cpp
     )
     set_source_files_properties(
         Source/Backends/RbfxBackend.cpp
+        Source/MaterialEditor/RbfxMaterialSource.cpp
         PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON
     )
     # rbfx public headers pull in rapidjson, which trips C5054 (operator '|' between different
@@ -124,9 +128,12 @@ if(CEE_HAVE_GODOT)
     target_sources(CrossEngineEditor PRIVATE
         Source/Backends/GodotBackend.h
         Source/Backends/GodotBackend.cpp
+        Source/Backends/GodotMaterialSource.h
+        Source/Backends/GodotMaterialSource.cpp
     )
     set_source_files_properties(
         Source/Backends/GodotBackend.cpp
+        Source/Backends/GodotMaterialSource.cpp
         PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON
     )
 

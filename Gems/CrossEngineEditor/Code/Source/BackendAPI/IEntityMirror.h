@@ -180,25 +180,5 @@ namespace CrossEngineEditor
             AZ::Vector3& outHitPoint,
             AZ::Vector3& outHitNormal) const = 0;
 
-        // ----- Migration 批次 2 精简 (rbfx_migration.md §3.1) ----------------------------
-        //! Editor -> engine: persist an edited resource to its source file. The panel already
-        //! pushed the edits into the cached resource via WriteResourceProperties; the backend
-        //! serializes the cached object in its native format (rbfx: Material::Save). Returns
-        //! false when the resource cannot be resolved or has no editable surface.
-        virtual bool SaveResource(
-            const AZStd::string& type, const AZStd::string& path) = 0;
-
-        //! Engine -> editor: reflect an engine resource's editable values into a PropertyBag
-        //! for the generic resource property panel (rbfx_migration.md §3.3). Returns false when
-        //! the resource cannot be resolved or the type has no editable surface. The bag takes
-        //! ownership.
-        virtual bool ReadResourceProperties(
-            const AZStd::string& type, const AZStd::string& path, PropertyBag& out) = 0;
-
-        //! Editor -> engine: push the panel's edited values back (name-matched; unknown names
-        //! ignored). Returns false when nothing was written (unresolvable / no editable
-        //! surface / all names unknown).
-        virtual bool WriteResourceProperties(
-            const AZStd::string& type, const AZStd::string& path, const PropertyBag& bag) = 0;
     };
 } // namespace CrossEngineEditor

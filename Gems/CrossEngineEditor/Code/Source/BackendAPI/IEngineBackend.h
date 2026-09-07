@@ -27,6 +27,7 @@ namespace CrossEngineEditor
     class ISceneRenderer;
     class IEntityMirror;
     class IAssetSource;
+    class IMaterialSource;
 
     class IEngineBackend
     {
@@ -46,6 +47,7 @@ namespace CrossEngineEditor
         virtual ISceneRenderer& GetSceneRenderer() = 0;
         virtual IEntityMirror& GetEntityMirror() = 0;
         virtual IAssetSource& GetAssetSource() = 0;
+        virtual IMaterialSource& GetMaterialSource() = 0;
 
         //! Engine-specific editor commands for the ActionManager (editor_polish.md P1-13 / M1).
         //! Default: none (a sentinel-style default keeps the pure-virtual surface unchanged -

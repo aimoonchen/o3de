@@ -13,6 +13,9 @@
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
 #include <AzToolsFramework/Application/ToolsApplication.h>
 
+// Vendor: AtomToolsFramework Core types for material editor stack
+#include "MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentSystem.h"
+
 #include <chrono>
 
 namespace AzQtComponents
@@ -29,11 +32,15 @@ namespace AzToolsFramework
 namespace CrossEngineEditor
 {
     class CeeActionsHandler;
+    class CeeMaterialPreviewPanel;
     class EditorMainWindow;
     class EntityMirrorBridge;
     class IEngineBackend;
 
-    //! Cross-engine editor application (Plan §B1-§B4).
+    //! Material document system tool id (material_migration_final.md SS6.3).
+    inline constexpr AZ::Crc32 k_ceeMaterialToolId = AZ_CRC_CE("CEE_MaterialEditor");
+
+    //! Cross-engine editor application (Plan SSB1-SSB4).
     //!
     //! Combines the Qt application (AzQtApplication) with the AZ tools application
     //! (ToolsApplication) so that the editor gets the EditorEntityContext, Prefab
@@ -113,6 +120,10 @@ namespace CrossEngineEditor
         //! the CEE action pool and the three context menus when TriggerRegistrationNotifications
         //! runs. Owned here so it dies with (and before) the main window it points at.
         AZStd::unique_ptr<CeeActionsHandler> m_actionsHandler;
+
+        //! Material document system (material_migration_final.md SS6.3).
+        //! Created after backend registration so GetMaterialSource() is available.
+        AtomToolsFramework::AtomToolsDocumentSystem* m_materialDocumentSystem = nullptr;
 
         //! Last time the engine backend was stepped. The idle loop spins fast (~1 ms) to keep O3DE's
         //! system tick / Qt events responsive, but the backend (which renders a whole engine frame

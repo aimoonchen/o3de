@@ -1415,27 +1415,6 @@ namespace CrossEngineEditor
         return false;
     }
 
-    bool GodotBackend::GodotEntityMirror::SaveResource(
-        const AZStd::string& /*type*/, const AZStd::string& /*path*/)
-    {
-        // TODO 批次 2 stub: rbfx-first.
-        return false;
-    }
-
-    bool GodotBackend::GodotEntityMirror::ReadResourceProperties(
-        const AZStd::string& /*type*/, const AZStd::string& /*path*/, PropertyBag& /*out*/)
-    {
-        // TODO 批次 2 stub: rbfx-first.
-        return false;
-    }
-
-    bool GodotBackend::GodotEntityMirror::WriteResourceProperties(
-        const AZStd::string& /*type*/, const AZStd::string& /*path*/, const PropertyBag& /*bag*/)
-    {
-        // TODO 批次 2 stub: rbfx-first.
-        return false;
-    }
-
     // =====================================================================================
     // GodotAssetSource  (godot_migration.md §2)
     // =====================================================================================

@@ -29,8 +29,6 @@ set(FILES
     Source/Window/CeePreferences.cpp
     Source/Window/CeePreferencesDialog.h
     Source/Window/CeePreferencesDialog.cpp
-    Source/Window/ResourcePropertiesPanel.h
-    Source/Window/ResourcePropertiesPanel.cpp
     Source/Window/CommandPalette.h
     Source/Window/CommandPalette.cpp
     Source/Viewport/EditorViewportWidget.h
@@ -60,7 +58,57 @@ set(FILES
     Source/BackendAPI/ISceneRenderer.h
     Source/BackendAPI/IEntityMirror.h
     Source/BackendAPI/IAssetSource.h
+    Source/BackendAPI/IMaterialSource.h
     Source/BackendAPI/IViewportTick.h
+    Source/MaterialEditor/NullMaterialSource.h
+    Source/MaterialEditor/NullMaterialSource.cpp
+    Source/MaterialEditor/CeeInspectorGroupHeaderWidget.h
+    Source/MaterialEditor/CeeInspectorGroupHeaderWidget.cpp
+    Source/MaterialEditor/CeeMaterialDocument.h
+    Source/MaterialEditor/CeeMaterialDocument.cpp
+    Source/MaterialEditor/CeeMaterialDocumentInspector.h
+    Source/MaterialEditor/CeeMaterialDocumentInspector.cpp
+    Source/MaterialEditor/CeeMaterialPreviewPanel.h
+    Source/MaterialEditor/CeeMaterialPreviewPanel.cpp
+    Source/MaterialEditor/CeeMaterialToolbar.h
+    Source/MaterialEditor/CeeMaterialToolbar.cpp
+    Source/MaterialEditor/MaterialSchema.h
+    Source/MaterialEditor/MaterialSchema.cpp
+    # Vendor: AtomToolsFramework (vendored subset, material_migration_final.md SS3.1)
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Debug/TraceRecorder.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Debug/TraceRecorder.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocument.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocument.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentInspector.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentInspector.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentNotificationBus.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentObjectInfo.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentRequestBus.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentSystem.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentSystem.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentSystemRequestBus.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentTypeInfo.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocumentTypeInfo.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/DynamicProperty/DynamicProperty.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/DynamicProperty/DynamicProperty.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/DynamicProperty/DynamicPropertyGroup.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/DynamicProperty/DynamicPropertyGroup.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorGroupHeaderWidget.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorGroupHeaderWidget.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorGroupWidget.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorGroupWidget.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorNotificationBus.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorPropertyGroupWidget.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorPropertyGroupWidget.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorRequestBus.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorWidget.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorWidget.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorWidget.ui
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/InspectorWidget.qrc
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/PropertyWidgets/PropertyStringBrowseEditCtrl.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/PropertyWidgets/PropertyStringBrowseEditCtrl.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Util/Util.h
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Util/Util.cpp
 )
 
 # QFileIconProvider/QFileInfo pull in the legacy <winsock.h>, which clashes with the
@@ -71,4 +119,5 @@ set(FILES
 set(SKIP_UNITY_BUILD_INCLUSION_FILES
     Source/Backends/NullBackend.cpp
     Source/Window/CeeAssetBrowserPanel.cpp
+    Source/MaterialEditor/Vendor/AtomToolsFramework/Inspector/PropertyWidgets/PropertyStringBrowseEditCtrl.cpp
 )

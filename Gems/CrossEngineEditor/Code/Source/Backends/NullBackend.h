@@ -16,7 +16,9 @@
 #include <BackendAPI/IAssetSource.h>
 #include <BackendAPI/IEngineBackend.h>
 #include <BackendAPI/IEntityMirror.h>
+#include <BackendAPI/IMaterialSource.h>
 #include <BackendAPI/ISceneRenderer.h>
+#include <MaterialEditor/NullMaterialSource.h>
 
 namespace CrossEngineEditor
 {
@@ -32,6 +34,7 @@ namespace CrossEngineEditor
         ISceneRenderer& GetSceneRenderer() override { return m_sceneRenderer; }
         IEntityMirror& GetEntityMirror() override { return m_entityMirror; }
         IAssetSource& GetAssetSource() override { return m_assetSource; }
+        IMaterialSource& GetMaterialSource() override { return m_materialSource; }
 
     private:
         class NullSceneRenderer final : public ISceneRenderer
@@ -79,14 +82,6 @@ namespace CrossEngineEditor
             bool AssignAnimation(AZ::EntityId entityId, const AZStd::string& assetPath) override;
             AZStd::vector<AZ::u8> SerializeNodes(const AZStd::vector<AZ::EntityId>& entityIds) override;
             bool PasteNodes(const AZStd::vector<AZ::u8>& data, AZ::EntityId parentId) override;
-
-            // Migration 批次 2 精简 (rbfx_migration.md §3.1).
-            bool SaveResource(
-                const AZStd::string& type, const AZStd::string& path) override;
-            bool ReadResourceProperties(
-                const AZStd::string& type, const AZStd::string& path, PropertyBag& out) override;
-            bool WriteResourceProperties(
-                const AZStd::string& type, const AZStd::string& path, const PropertyBag& bag) override;
         };
 
         class NullAssetSource final : public IAssetSource
@@ -99,5 +94,6 @@ namespace CrossEngineEditor
         NullSceneRenderer m_sceneRenderer;
         NullEntityMirror m_entityMirror;
         NullAssetSource m_assetSource;
+        NullMaterialSource m_materialSource;
     };
 } // namespace CrossEngineEditor
