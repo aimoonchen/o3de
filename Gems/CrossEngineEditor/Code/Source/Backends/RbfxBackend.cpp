@@ -96,29 +96,13 @@ namespace CrossEngineEditor
             return Urho3D::Color(c.GetR(), c.GetG(), c.GetB(), c.GetA());
         }
 
-        //! Normalize an absolute editor-side asset path to an rbfx resource name (relative to
-        //! the resource dirs). If the path sits under the project root, strip that prefix so the
-        //! engine resolves it through the resource cache; otherwise pass it through unchanged.
-        //! Used by the batch-1 assign/spawn paths.
-        AZStd::string ToResourceName(const AZStd::string& assetPath, const AZStd::string& projectRoot)
-        {
-            if (!projectRoot.empty() && assetPath.compare(0, projectRoot.size(), projectRoot) == 0)
-            {
-                AZStd::string name = assetPath.substr(projectRoot.size());
-                while (!name.empty() && (name.front() == '/' || name.front() == '\\'))
-                {
-                    name.erase(name.begin());
-                }
-                return name;
-            }
-            return assetPath;
-        }
-
         //! Attributes that duplicate what the editor already owns via the standard
         //! TransformComponent (world transform) or the AZ::Entity name, or the enabled flag the
         //! Outliner manages. Mirroring them into the property bag would create a second, unsynced
         //! editing path that fights the gizmo/Outliner, so they are skipped (Plan §B4: the
         //! transform is edited via the gizmo and must not be duplicated).
+        //! "Is Enabled" is duplicated on both Node and component classes (e.g. StaticModel,
+        //! Light) — skip it everywhere to avoid a second editing path for the Outliner toggle.
         bool IsShadowedByEditor(const ea::string& attrName)
         {
             return attrName == "Position" || attrName == "Rotation" || attrName == "Scale" ||
@@ -444,6 +428,8 @@ namespace CrossEngineEditor
 
         if (!m_state.m_engine->Initialize(params, {}))
         {
+            AZ_Warning("CrossEngineEditor", false, "rbfx: Engine::Initialize failed for project '%s'.",
+                m_state.m_projectPath.c_str());
             m_state.m_engine.Reset();
             m_state.m_context.Reset();
             return;
@@ -679,7 +665,8 @@ namespace CrossEngineEditor
         if (!engineBox.Defined())
         {
             // Non-visual node (no Drawable): NOT ray-pickable - return null so PickEntity skips it
-            // (see IEntityMirror::GetWorldBounds). Still selectable via its editor icon / the Outliner.
+            // (see IEntityMirror::GetWorldBounds). Still selectable via its wireframe gizmo (P0-6)
+            // or the Outliner.
             return AZ::Aabb::CreateNull();
         }
 
@@ -724,7 +711,8 @@ namespace CrossEngineEditor
         const Urho3D::Ray rbfxRay(rbfxOrigin, rbfxDir);
 
         // Gather the node's own drawables, applying the same environment exclusions as GetWorldBounds
-        // (Skybox / Zone / Light are never ray-picked; they are selected via their editor icon).
+        // (Skybox / Zone / Light are never ray-picked; they are selected via their wireframe gizmo
+        // (P0-6) or the Outliner).
         ea::vector<Urho3D::Drawable*> drawables;
         node->FindComponents<Urho3D::Drawable>(drawables, Urho3D::ComponentSearchFlag::SelfDerived);
 
@@ -780,24 +768,52 @@ namespace CrossEngineEditor
 
     void RbfxBackend::RbfxEntityMirror::ReadProperties(Urho3D::Node* node, PropertyBag& outBag) const
     {
+        // Read node-level attributes (Position/Rotation/Scale/Name are shadowed by the editor).
         const ea::vector<Urho3D::AttributeInfo>* attrs = node->GetAttributes();
-        if (!attrs)
+        if (attrs)
         {
-            return;
+            for (unsigned i = 0; i < attrs->size(); ++i)
+            {
+                const Urho3D::AttributeInfo& info = attrs->at(i);
+                if (IsShadowedByEditor(info.name_))
+                {
+                    continue;
+                }
+                if (EngineProperty* prop = MakeProperty(info, node->GetAttribute(i)))
+                {
+                    prop->m_category = node->GetTypeName().c_str();
+                    outBag.m_items.push_back(prop);
+                }
+            }
         }
-        for (unsigned i = 0; i < attrs->size(); ++i)
+
+        // Read component-level attributes (StaticModel, Light, etc.). Component inherits
+        // Serializable, so GetAttributes()/GetAttribute(i) work the same way. The component
+        // type name becomes the Inspector category (e.g. "StaticModel", "Light").
+        const auto& components = node->GetComponents();
+        for (const auto& comp : components)
         {
-            const Urho3D::AttributeInfo& info = attrs->at(i);
-            // Skip attributes the editor already owns (world transform via the gizmo, entity name),
-            // so there is no second, unsynced editing path (Plan §B4).
-            if (IsShadowedByEditor(info.name_))
+            if (!comp)
             {
                 continue;
             }
-            if (EngineProperty* prop = MakeProperty(info, node->GetAttribute(i)))
+            const ea::vector<Urho3D::AttributeInfo>* compAttrs = comp->GetAttributes();
+            if (!compAttrs)
             {
-                prop->m_category = node->GetTypeName().c_str();
-                outBag.m_items.push_back(prop);
+                continue;
+            }
+            for (unsigned i = 0; i < compAttrs->size(); ++i)
+            {
+                const Urho3D::AttributeInfo& info = compAttrs->at(i);
+                if (IsShadowedByEditor(info.name_))
+                {
+                    continue;
+                }
+                if (EngineProperty* prop = MakeProperty(info, comp->GetAttribute(i)))
+                {
+                    prop->m_category = comp->GetTypeName().c_str();
+                    outBag.m_items.push_back(prop);
+                }
             }
         }
     }
@@ -925,26 +941,62 @@ namespace CrossEngineEditor
             return;
         }
 
+        // Write back node-level attributes.
         const ea::vector<Urho3D::AttributeInfo>* attrs = node->GetAttributes();
-        if (!attrs)
+        if (attrs)
         {
-            return;
+            for (unsigned i = 0; i < attrs->size(); ++i)
+            {
+                const Urho3D::AttributeInfo& info = attrs->at(i);
+                if (IsShadowedByEditor(info.name_))
+                {
+                    continue;
+                }
+                const AZStd::string name(info.name_.c_str());
+                if (EngineProperty* prop = nodeComponent->FindProperty(name))
+                {
+                    if (prop->m_readOnly)
+                    {
+                        continue;
+                    }
+                    WriteProperty(node, i, info, prop);
+                }
+            }
         }
-        for (unsigned i = 0; i < attrs->size(); ++i)
+
+        // Write back component-level attributes. Match by (category, name) to disambiguate
+        // properties with the same name on different components (e.g. "Is Enabled" on both
+        // Node and StaticModel).
+        const auto& components = node->GetComponents();
+        for (const auto& comp : components)
         {
-            const Urho3D::AttributeInfo& info = attrs->at(i);
-            if (IsShadowedByEditor(info.name_))
+            if (!comp)
             {
                 continue;
             }
-            const AZStd::string name(info.name_.c_str());
-            if (EngineProperty* prop = nodeComponent->FindProperty(name))
+            const ea::vector<Urho3D::AttributeInfo>* compAttrs = comp->GetAttributes();
+            if (!compAttrs)
             {
-                if (prop->m_readOnly)
+                continue;
+            }
+            const AZStd::string compCategory(comp->GetTypeName().c_str());
+            for (unsigned i = 0; i < compAttrs->size(); ++i)
+            {
+                const Urho3D::AttributeInfo& info = compAttrs->at(i);
+                if (IsShadowedByEditor(info.name_))
                 {
-                    continue; // never push read-only attributes back to the engine.
+                    continue;
                 }
-                WriteProperty(node, i, info, prop);
+                const AZStd::string propName(info.name_.c_str());
+                // Find the matching property by iterating (category+name disambiguation).
+                for (EngineProperty* prop : nodeComponent->GetProperties().m_items)
+                {
+                    if (prop && !prop->m_readOnly && prop->m_name == propName && prop->m_category == compCategory)
+                    {
+                        WriteProperty(comp.Get(), i, info, prop);
+                        break;
+                    }
+                }
             }
         }
     }
@@ -974,10 +1026,10 @@ namespace CrossEngineEditor
             auto* cache = m_state.m_context->GetSubsystem<Urho3D::ResourceCache>();
             if (cache)
             {
-                const AZStd::string resourceName = ToResourceName(spec.m_assetPath, m_state.m_projectPath);
                 // GetResource returns cache-owned raw pointers in this rbfx build (not SharedPtr).
+                // Pass the absolute path directly — rbfx's VFS canonicalize handles path resolution.
                 Urho3D::Model* model =
-                    cache->GetResource<Urho3D::Model>(ea::string(resourceName.c_str()), false);
+                    cache->GetResource<Urho3D::Model>(ea::string(spec.m_assetPath.c_str()), false);
                 if (model)
                 {
                     auto* staticModel = node->CreateComponent<Urho3D::StaticModel>();
@@ -986,7 +1038,7 @@ namespace CrossEngineEditor
                 else
                 {
                     Urho3D::XMLFile* prefab =
-                        cache->GetResource<Urho3D::XMLFile>(ea::string(resourceName.c_str()), false);
+                        cache->GetResource<Urho3D::XMLFile>(ea::string(spec.m_assetPath.c_str()), false);
                     if (prefab && prefab->GetRoot().NotNull())
                     {
                         Urho3D::Node* content = m_state.m_scene->InstantiateXML(
@@ -1104,7 +1156,7 @@ namespace CrossEngineEditor
         return true;
     }
 
-    // ------------------------------------------------- migration 批次 1 (rbfx_migration.md §3.1)
+    // ------------------------------------------------- Migration batch 1 (rbfx_migration.md §3.1)
 
     void RbfxBackend::RbfxEntityMirror::EnumerateObjectTypes(AZStd::vector<ObjectTypeInfo>& out)
     {
@@ -1204,7 +1256,7 @@ namespace CrossEngineEditor
         const AZStd::vector<AZ::EntityId>& entityIds,
         const AZStd::string& path)
     {
-        // v1 (简): export the first selected node's subtree as an engine-native prefab (XML),
+        // v1 (simplified): export the first selected node's subtree as an engine-native prefab (XML),
         // matching the rbfx editor's single-node export.
         if (entityIds.empty() || path.empty())
         {
@@ -1246,10 +1298,10 @@ namespace CrossEngineEditor
         {
             return false;
         }
-        const AZStd::string resourceName = ToResourceName(assetPath, m_state.m_projectPath);
         // GetResource returns a cache-owned raw pointer in this rbfx build (not SharedPtr).
+        // Pass the absolute path directly — rbfx's VFS canonicalize handles path resolution.
         Urho3D::Material* material =
-            cache->GetResource<Urho3D::Material>(ea::string(resourceName.c_str()));
+            cache->GetResource<Urho3D::Material>(ea::string(assetPath.c_str()));
         if (!material)
         {
             AZ_Warning("CrossEngineEditor", false, "rbfx AssignMaterial: could not load %s.", assetPath.c_str());
@@ -1277,8 +1329,8 @@ namespace CrossEngineEditor
 
         // AnimationParameters resolves the animation through the resource cache by name; a
         // failed load leaves GetAnimation() null.
-        const AZStd::string resourceName = ToResourceName(assetPath, m_state.m_projectPath);
-        Urho3D::AnimationParameters params(m_state.m_context.Get(), ea::string(resourceName.c_str()));
+        // Pass the absolute path directly — rbfx's VFS canonicalize handles path resolution.
+        Urho3D::AnimationParameters params(m_state.m_context.Get(), ea::string(assetPath.c_str()));
         if (!params.GetAnimation())
         {
             AZ_Warning("CrossEngineEditor", false, "rbfx AssignAnimation: could not load %s.", assetPath.c_str());
@@ -1306,7 +1358,7 @@ namespace CrossEngineEditor
     AZStd::vector<AZ::u8> RbfxBackend::RbfxEntityMirror::SerializeNodes(
         const AZStd::vector<AZ::EntityId>& entityIds)
     {
-        // v1 (简): serialize the first selected node's subtree to XML bytes, matching the rbfx
+        // v1 (simplified): serialize the first selected node's subtree to XML bytes, matching the rbfx
         // editor's own single-node clipboard.
         if (entityIds.empty())
         {

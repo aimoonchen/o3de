@@ -99,7 +99,7 @@ namespace CrossEngineEditor
     {
     }
 
-    // --- migration 批次 1 stubs (rbfx-first; Null backend has no engine scene to operate on) ---
+    // --- Migration batch 1 stubs (rbfx-first; Null backend has no engine scene to operate on) ---
 
     bool NullBackend::NullEntityMirror::RaycastScene(
         const AZ::Vector3& /*rayOrigin*/,

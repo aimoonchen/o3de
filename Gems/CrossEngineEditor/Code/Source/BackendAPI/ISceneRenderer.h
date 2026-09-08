@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Scene rendering surface and immediate-mode overlay primitives (Plan §A6 C4 渲染面 / §B2).
+//! Scene rendering surface and immediate-mode overlay primitives (Plan §A6 C4 rendering face / §B2).
 //!
 //! Rendering/compositing model (Plan §B2, revised for the QWindow native-surface
 //! design): the backend owns a swapchain bound to the viewport's native window surface

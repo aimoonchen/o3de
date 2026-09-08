@@ -323,7 +323,7 @@ namespace CrossEngineEditor
 
         // One-shot start() after creation: brings the main loop up and loads the project's main
         // scene (or the requested --scene). Done here (not in OnSurfaceCreated) so the first
-        // iteration follows immediately (Plan §B3 单循环).
+        // iteration follows immediately (Plan §B3 single-loop).
         if (!m_state.m_started)
         {
 #if defined(CEE_GODOT_HEADER_VERSION_MAJOR) && defined(CEE_GODOT_HEADER_VERSION_MINOR)
@@ -381,7 +381,7 @@ namespace CrossEngineEditor
         // also applies the deferred scene change, after which get_current_scene resolves and the
         // surface is reported ready so the shell mirrors the scene into the Outliner (one-shot).
         // NOTE: iteration() runs Godot's whole frame incl. present, the prime suspect for the
-        // camera-roam / post-selection stutter (Progress.md 修复11/修复13) - keep it in its own zone.
+        // camera-roam / post-selection stutter (Progress.md fix-11/fix-13) - keep it in its own zone.
         GodotVariant quit;
         {
             CEE_PROFILE_SCOPE("Godot.iteration(present)");
@@ -429,7 +429,7 @@ namespace CrossEngineEditor
     }
 
     // =====================================================================================
-    // GodotSceneRenderer  (godot_migration.md §2: 视口嵌入 + ArrayMesh overlay)
+    // GodotSceneRenderer  (godot_migration.md §2: viewport embedding + ArrayMesh overlay)
     // =====================================================================================
     void GodotBackend::GodotSceneRenderer::OnSurfaceCreated(void* nativeWindowHandle, uint32_t width, uint32_t height)
     {
@@ -543,7 +543,7 @@ namespace CrossEngineEditor
             // gizmo/grid primitives. ArrayMesh + add_surface_from_arrays is Godot's own editor
             // gizmo path (EditorNode3DGizmo::add_vertices) and lets us submit each surface in a
             // single GDExtension call instead of the per-vertex ImmediateMesh churn that
-            // Progress.md 修复13 measured as the pick-then-orbit stall (plan-aligned fix 1).
+            // Progress.md fix-13 measured as the pick-then-orbit stall (plan-aligned fix 1).
             m_state.m_overlayMesh = api.ConstructObject("MeshInstance3D");
             m_state.m_overlayArrayMesh = api.ConstructObject("ArrayMesh");
             if (m_state.m_overlayMesh && m_state.m_overlayArrayMesh)
@@ -591,6 +591,35 @@ namespace CrossEngineEditor
                     GodotVariant enV = api.MakeBool(true);
                     const GodotVariant a[2] = { AZStd::move(flagV), AZStd::move(enV) };
                     api.Call(mat, "set_flag", a, 2);
+                }
+            }
+
+            // Depth-off material: same as above but with FLAG_DISABLE_DEPTH_TEST so overlay
+            // geometry (gizmo handles, selection outlines) draws over scene geometry.
+            // FLAG_DISABLE_DEPTH_TEST = 0 (material.h Flags enum first member).
+            m_state.m_overlayMaterialDepthOff = api.ConstructObject("StandardMaterial3D");
+            if (m_state.m_overlayMaterialDepthOff)
+            {
+                GDExtensionObjectPtr matOff = m_state.m_overlayMaterialDepthOff;
+                GodotVariant shadeArg = api.MakeInt(0); // SHADING_MODE_UNSHADED
+                api.Call(matOff, "set_shading_mode", &shadeArg, 1);
+                {
+                    GodotVariant flagV = api.MakeInt(0); // FLAG_DISABLE_DEPTH_TEST
+                    GodotVariant enV = api.MakeBool(true);
+                    const GodotVariant a[2] = { AZStd::move(flagV), AZStd::move(enV) };
+                    api.Call(matOff, "set_flag", a, 2);
+                }
+                {
+                    GodotVariant flagV = api.MakeInt(1); // FLAG_ALBEDO_FROM_VERTEX_COLOR
+                    GodotVariant enV = api.MakeBool(true);
+                    const GodotVariant a[2] = { AZStd::move(flagV), AZStd::move(enV) };
+                    api.Call(matOff, "set_flag", a, 2);
+                }
+                {
+                    GodotVariant flagV = api.MakeInt(2); // FLAG_SRGB_VERTEX_COLOR
+                    GodotVariant enV = api.MakeBool(true);
+                    const GodotVariant a[2] = { AZStd::move(flagV), AZStd::move(enV) };
+                    api.Call(matOff, "set_flag", a, 2);
                 }
             }
         }
@@ -742,9 +771,20 @@ namespace CrossEngineEditor
     void GodotBackend::GodotSceneRenderer::SetDepthTest(bool enabled)
     {
         m_depthTest = enabled;
-        // v1: overlay uses the ArrayMesh's default material. A depth-test-disabled material
-        // for the SetDepthTest(false) pass is a later polish item (Plan §B2); the visual result
-        // matches rbfx's depth-tested overlay for the common case.
+        // Switch the overlay mesh's material between depth-on and depth-off variants so
+        // overlay geometry (gizmo handles, selection outlines) draws over scene geometry
+        // when depth test is disabled. This matches rbfx's DebugRenderer depthTest parameter.
+        GodotApi& api = m_state.m_api;
+        if (!m_state.m_overlayMesh || !api.IsValid())
+        {
+            return;
+        }
+        GDExtensionObjectPtr mat = enabled ? m_state.m_overlayMaterial : m_state.m_overlayMaterialDepthOff;
+        if (mat)
+        {
+            GodotVariant matV = api.MakeObject(mat);
+            api.Call(m_state.m_overlayMesh, "set_material_override", &matV, 1);
+        }
     }
 
     void GodotBackend::GodotSceneRenderer::EndOverlayFrame()
@@ -754,7 +794,7 @@ namespace CrossEngineEditor
     }
 
     // =====================================================================================
-    // GodotEntityMirror  (godot_migration.md §2: 镜像 / 属性 / 创建删除)
+    // GodotEntityMirror  (godot_migration.md §2: mirror / properties / create-destroy)
     // =====================================================================================
     GDExtensionObjectPtr GodotBackend::GodotEntityMirror::ResolveNode(AZ::EntityId entityId) const
     {
@@ -887,6 +927,7 @@ namespace CrossEngineEditor
         constexpr int64_t kUsageGroup = 1 << 6;
         constexpr int64_t kUsageCategory = 1 << 7;
         constexpr int64_t kUsageSubgroup = 1 << 8;
+        constexpr int64_t kUsageInternal = 1 << 10;
         constexpr int64_t kUsageReadOnly = 1 << 28;
         constexpr int64_t kHintEnum = 2;
 
@@ -924,7 +965,12 @@ namespace CrossEngineEditor
                 continue;
             }
             // Must be both editor-visible and storable, and never the "name" (already added).
-            if (!((usage & kUsageEditor) && (usage & kUsageStorage)) || propName == "name")
+            // Skip INTERNAL properties (Godot engine internals not meant for user editing).
+            if (usage & kUsageInternal || propName == "name")
+            {
+                continue;
+            }
+            if (!((usage & kUsageEditor) && (usage & kUsageStorage)))
             {
                 continue;
             }
@@ -1320,7 +1366,18 @@ namespace CrossEngineEditor
         // Crash-safe save (editor_polish.md P0-8 / M2, same dance as the rbfx backend): write to
         // a temp path, then atomically promote it over the target with the previous version kept
         // as .bak. A crash mid-save can only lose the temp file, never corrupt the scene file.
-        const AZStd::string tmpPath = targetPath + ".tmp";
+        // IMPORTANT: Godot's ResourceSaver matches format by file extension (.tscn/.scn/.res/.tres),
+        // so the temp file MUST preserve the original extension. Insert ".cee_tmp" before it.
+        const size_t dotPos = targetPath.rfind('.');
+        AZStd::string tmpPath;
+        if (dotPos != AZStd::string::npos)
+        {
+            tmpPath = targetPath.substr(0, dotPos) + ".cee_tmp" + targetPath.substr(dotPos);
+        }
+        else
+        {
+            tmpPath = targetPath + ".cee_tmp";
+        }
         const AZStd::string bakPath = targetPath + ".bak";
 
         GodotVariant args[3];
@@ -1347,8 +1404,14 @@ namespace CrossEngineEditor
         }
         if (!AZ::IO::SystemFile::Rename(tmpPath.c_str(), targetPath.c_str(), /*overwrite=*/true))
         {
-            // Promote failed and the original was already moved away: restore it.
-            AZ::IO::SystemFile::Rename(bakPath.c_str(), targetPath.c_str(), /*overwrite=*/true);
+            // Promote failed and the original was already moved away: restore it. If even the
+            // restore fails the only complete copy is stranded in the .bak - say so loudly.
+            if (!AZ::IO::SystemFile::Rename(bakPath.c_str(), targetPath.c_str(), /*overwrite=*/true))
+            {
+                AZ_Warning("CrossEngineEditor", false,
+                    "Godot SaveScene: promote AND restore failed; the intact scene is stranded at %s.",
+                    bakPath.c_str());
+            }
             AZ_Warning("CrossEngineEditor", false, "Godot SaveScene: could not promote %s.", targetPath.c_str());
             AZ::IO::SystemFile::Delete(tmpPath.c_str());
             return false;
@@ -1358,14 +1421,14 @@ namespace CrossEngineEditor
         return true;
     }
 
-    // ------------------------------------------------- migration 批次 1 stubs (rbfx-first)
+    // ------------------------------------------------- Migration batch 1 stubs (rbfx-first)
     // Contract rule C4: every contract change stubs ALL backends in the same change. These are
     // pure virtual on IEntityMirror so they must exist to compile; they return "unsupported"
     // until the Godot backend gets its own migration pass (rbfx_migration.md §3.1).
 
     void GodotBackend::GodotEntityMirror::EnumerateObjectTypes(AZStd::vector<ObjectTypeInfo>& /*out*/)
     {
-        // TODO 批次 1 stub: rbfx-first. Godot side would walk the ClassDB for Node types.
+        // TODO rbfx-first stub. Godot side would walk the ClassDB for Node types.
     }
 
     bool GodotBackend::GodotEntityMirror::RaycastScene(
@@ -1374,7 +1437,7 @@ namespace CrossEngineEditor
         AZ::Vector3& /*outHitPoint*/,
         AZ::Vector3& /*outHitNormal*/) const
     {
-        // TODO 批次 1 stub: rbfx-first. Godot side would use PhysicsDirectSpaceState3D::intersect_ray.
+        // TODO rbfx-first stub. Godot side would use PhysicsDirectSpaceState3D::intersect_ray.
         return false;
     }
 
@@ -1382,21 +1445,21 @@ namespace CrossEngineEditor
         const AZStd::vector<AZ::EntityId>& /*entityIds*/,
         const AZStd::string& /*path*/)
     {
-        // TODO 批次 1 stub: rbfx-first. Godot side would pack a PackedScene like SaveScene.
+        // TODO rbfx-first stub. Godot side would pack a PackedScene like SaveScene.
         return false;
     }
 
     bool GodotBackend::GodotEntityMirror::AssignMaterial(
         AZ::EntityId /*entityId*/, const AZStd::string& /*assetPath*/, int /*slot*/)
     {
-        // TODO 批次 1 stub: rbfx-first. Godot side would set surface_material_override on the MeshInstance3D.
+        // TODO rbfx-first stub. Godot side would set surface_material_override on the MeshInstance3D.
         return false;
     }
 
     bool GodotBackend::GodotEntityMirror::AssignAnimation(
         AZ::EntityId /*entityId*/, const AZStd::string& /*assetPath*/)
     {
-        // TODO 批次 1 stub: rbfx-first. Godot side would add an AnimationPlayer and assign the
+        // TODO rbfx-first stub. Godot side would add an AnimationPlayer and assign the
         // library (no auto-play - same contract rule as rbfx).
         return false;
     }
@@ -1404,14 +1467,14 @@ namespace CrossEngineEditor
     AZStd::vector<AZ::u8> GodotBackend::GodotEntityMirror::SerializeNodes(
         const AZStd::vector<AZ::EntityId>& /*entityIds*/)
     {
-        // TODO 批次 1 stub: rbfx-first. Godot side would duplicate() nodes in memory instead of bytes.
+        // TODO rbfx-first stub. Godot side would duplicate() nodes in memory instead of bytes.
         return {};
     }
 
     bool GodotBackend::GodotEntityMirror::PasteNodes(
         const AZStd::vector<AZ::u8>& /*data*/, AZ::EntityId /*parentId*/)
     {
-        // TODO 批次 1 stub: rbfx-first.
+        // TODO rbfx-first stub.
         return false;
     }
 

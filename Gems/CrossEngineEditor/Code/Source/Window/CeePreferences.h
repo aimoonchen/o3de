@@ -12,7 +12,7 @@
 //! registry (queryable like any O3DE setting) and round-trip through a JSON file next to the
 //! executable (cee_preferences.setreg). The Preferences dialog edits this object through a
 //! ReflectedPropertyEditor, so no bespoke settings framework exists - only the reflected
-//! struct. Every field has a live consumer (零死条目): autosave drives the timer, helpers
+//! struct. Every field has a live consumer (zero dead entries): autosave drives the timer, helpers
 //! visibility feeds AzToolsFramework::SetHelpersVisible (read per frame by EditorHelpers),
 //! the default gizmo style seeds GizmoManager on startup.
 

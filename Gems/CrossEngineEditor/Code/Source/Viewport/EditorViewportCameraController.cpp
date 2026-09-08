@@ -227,10 +227,18 @@ namespace CrossEngineEditor
         const float radius = AZStd::max(bounds.GetExtents().GetLength() * 0.5f, 0.1f);
 
         const AZ::Vector3 forward = cameraState.m_forward.GetNormalizedSafe();
-        // Spherical fit against the vertical FOV (radians), with a 20% breathing margin; also
-        // respect the near clip so tiny objects (an empty node's box) don't end up inside it.
-        const float fovRadians = AZStd::max(cameraState.VerticalFovRadian(), 0.1f);
-        const float distance = AZStd::max(radius / sin(fovRadians * 0.5f) * 1.2f, cameraState.m_nearClip * 10.0f);
+        // Spherical fit: compute the distance needed along both the vertical and horizontal FOV,
+        // then take the larger one so the bounds never clip on the wider axis. A 20% breathing
+        // margin keeps the selection from touching the viewport edges; also respect the near clip
+        // so tiny objects (an empty node's box) don't end up inside it.
+        const float vFovRadians = AZStd::max(cameraState.VerticalFovRadian(), 0.1f);
+        const float aspect = cameraState.m_viewportSize.m_height > 0
+            ? static_cast<float>(cameraState.m_viewportSize.m_width) / static_cast<float>(cameraState.m_viewportSize.m_height)
+            : 1.0f;
+        const float hFovRadians = 2.0f * AZStd::atan(AZStd::tan(vFovRadians * 0.5f) * aspect);
+        const float distanceV = radius / AZStd::sin(vFovRadians * 0.5f);
+        const float distanceH = radius / AZStd::sin(hFovRadians * 0.5f);
+        const float distance = AZStd::max(AZStd::max(distanceV, distanceH) * 1.2f, cameraState.m_nearClip * 10.0f);
         const AZ::Vector3 position = center - forward * distance;
 
         m_targetCamera.m_pivot = center;

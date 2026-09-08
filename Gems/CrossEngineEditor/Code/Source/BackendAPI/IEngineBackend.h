@@ -10,11 +10,11 @@
 //!
 //! Exactly one backend is registered at startup via AZ::Interface<IEngineBackend>.
 //! The editor shell only ever talks to this abstraction, never to a concrete engine.
-//! Sub-contracts (Plan §A6 C4: 契约禁引擎专属语义; 渲染面/编辑面/资产面 三子契约):
-//!   - ISceneRenderer  (渲染面: 表面生命周期 + overlay 3 原语)
-//!   - IEntityMirror   (编辑面: 19 方法 = 15 纯虚 + 4 哨兵默认)
-//!   - IAssetSource    (资产面: 2 枚举纯虚)
-//! Camera / viewport interaction / picking reuse existing O3DE buses (框架发起, Plan §B5b).
+//! Sub-contracts (Plan §A6 C4: engine-specific semantics forbidden; rendering/editing/asset faces):
+//!   - ISceneRenderer  (rendering: surface lifecycle + overlay 3 primitives)
+//!   - IEntityMirror   (editing: 19 methods = 15 pure-virtual + 4 sentinel defaults)
+//!   - IAssetSource    (assets: 2 enumeration pure-virtual)
+//! Camera / viewport interaction / picking reuse existing O3DE buses (framework-initiated, Plan §B5b).
 
 #include <BackendAPI/BackendTypes.h>
 
@@ -41,7 +41,7 @@ namespace CrossEngineEditor
         //! Tear the engine runtime down.
         virtual void Shutdown() = 0;
 
-        //! Advance the engine one editor frame (Plan §B3 单循环). Driven from the editor idle tick.
+        //! Advance the engine one editor frame (Plan §B3 single-loop). Driven from the editor idle tick.
         virtual void Tick(float deltaSeconds) = 0;
 
         virtual ISceneRenderer& GetSceneRenderer() = 0;

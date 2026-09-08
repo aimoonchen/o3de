@@ -98,7 +98,8 @@ namespace CrossEngineEditor
             GDExtensionObjectPtr m_editorCamera = nullptr; //!< Camera3D we own to view the scene.
             GDExtensionObjectPtr m_overlayMesh = nullptr;  //!< MeshInstance3D holding the ArrayMesh.
             GDExtensionObjectPtr m_overlayArrayMesh = nullptr; //!< ArrayMesh: gizmo/grid geometry, bulk-submitted per frame.
-            GDExtensionObjectPtr m_overlayMaterial = nullptr; //!< StandardMaterial3D: unshaded + albedo-from-vertex-color.
+            GDExtensionObjectPtr m_overlayMaterial = nullptr; //!< StandardMaterial3D: unshaded + albedo-from-vertex-color (depth-on).
+            GDExtensionObjectPtr m_overlayMaterialDepthOff = nullptr; //!< Same but with FLAG_DISABLE_DEPTH_TEST for overlay pass 2.
         };
 
     private:

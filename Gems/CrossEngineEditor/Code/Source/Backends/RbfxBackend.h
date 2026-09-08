@@ -193,7 +193,7 @@ namespace CrossEngineEditor
             Urho3D::Node* ResolveNode(AZ::EntityId entityId) const;
 
             //! Resolve an engine resource by StringHash type name + resource name through the
-            //! cache (shared by the 批次 2 resource operations), or nullptr. path resolves via
+            //! cache (shared by the batch 2 resource operations), or nullptr. path resolves via
             //! ToResourceName (project-root strip), so AssetBrowser paths and resource names
             //! both work.
             Urho3D::Resource* ResolveResource(const AZStd::string& type, const AZStd::string& path) const;

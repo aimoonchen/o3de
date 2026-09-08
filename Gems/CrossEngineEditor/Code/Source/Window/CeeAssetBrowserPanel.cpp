@@ -289,7 +289,7 @@ namespace CrossEngineEditor
 
     void CeeAssetBrowserPanel::OpenOrAssignEntry(const QModelIndex& index)
     {
-        // Migration L1 (rbfx_migration.md §3.4 双击打开). The official index -> entry
+        // Migration L1 (rbfx_migration.md §3.4 double-click open). The official index -> entry
         // pattern is internalPointer on the SOURCE index (AssetBrowserTreeView.cpp:716).
         const QModelIndex sourceIndex = m_filterModel->mapToSource(index);
         const auto* entry = sourceIndex.isValid()

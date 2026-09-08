@@ -39,7 +39,7 @@ namespace CrossEngineEditor
     };
 
     //! One creatable object type, enumerated for the editor's Create menu
-    //! (migration 批次 1 补充, rbfx_migration.md §3.1 Create-menu data source).
+    //! (Migration batch 1 addition, rbfx_migration.md §3.1 Create-menu data source).
     struct ObjectTypeInfo
     {
         AZStd::string m_category;    //!< Menu group (engine object category).
@@ -64,7 +64,7 @@ namespace CrossEngineEditor
         virtual void FinishSync() {}
 
         //! Engine -> editor: list the creatable object types for the editor's Create menu
-        //! (migration 批次 1 补充, rbfx_migration.md §3.1 Create-menu data source).
+        //! (Migration batch 1 addition, rbfx_migration.md §3.1 Create-menu data source).
         virtual void EnumerateObjectTypes(AZStd::vector<ObjectTypeInfo>& out) = 0;
 
         //! Editor -> engine: a manipulator moved a mirrored entity.
@@ -88,13 +88,13 @@ namespace CrossEngineEditor
         //! or the format isn't supported). Default: unsupported (returns false).
         virtual bool SaveScene(const AZStd::string& path) { (void)path; return false; }
 
-        // ----- Migration 批次 1 (rbfx_migration.md §3.1) ----------------------------
+        // ----- Migration batch 1 (rbfx_migration.md §3.1) ----------------------------
         // These are the L0 closed-loop operations. They are pure virtual so a backend that
         // misses them fails at compile time (contract rule C4); every contract change stubs
         // all backends in the same change.
 
         //! Editor -> engine: export the selected mirror entities as an engine-native prefab file.
-        //! path is an absolute file path. v1 (简) writes the first entity's node subtree to the
+        //! path is an absolute file path. v1 (simplified) writes the first entity's node subtree to the
         //! engine's own prefab format, matching the rbfx editor's single-node export. Returns
         //! false on failure or when nothing is selected.
         virtual bool CreatePrefabFromNodes(
@@ -108,12 +108,12 @@ namespace CrossEngineEditor
 
         //! Editor -> engine: assign an animation asset to the entity's AnimationController
         //! (created if absent) WITHOUT playing it. Editor assignment must not start playback,
-        //! so animated bounds stay static while editing (Plan §B5b bounds 缓存). Returns false
+        //! so animated bounds stay static while editing (Plan §B5b bounds cache). Returns false
         //! when the asset cannot be loaded or the entity does not resolve.
         virtual bool AssignAnimation(AZ::EntityId entityId, const AZStd::string& assetPath) = 0;
 
         //! Editor -> engine: serialize the selected mirror entities to a backend-native byte
-        //! stream for the editor clipboard. v1 (简) serializes the first entity's node subtree,
+        //! stream for the editor clipboard. v1 (simplified) serializes the first entity's node subtree,
         //! matching the rbfx editor's own single-node clipboard. Empty vector = nothing to
         //! serialize or unsupported.
         virtual AZStd::vector<AZ::u8> SerializeNodes(const AZStd::vector<AZ::EntityId>& entityIds) = 0;
@@ -169,7 +169,7 @@ namespace CrossEngineEditor
         }
 
         //! Editor -> engine: scene-wide precise raycast for asset-drop ground placement
-        //! (migration 批次 1 补充 - the D&D spawn path needs a scene ray, not a per-node one).
+        //! (Migration batch 1 addition - the D&D spawn path needs a scene ray, not a per-node one).
         //! Same O3DE-space ray convention as RaycastNode. Fills outHitPoint / outHitNormal
         //! (world, O3DE convention); returns true on a hit, false on miss or when unsupported.
         //! Backends must skip editor-owned drawables (debug/grid overlay) so the drop lands on

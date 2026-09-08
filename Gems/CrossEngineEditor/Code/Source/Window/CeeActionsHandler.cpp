@@ -150,33 +150,13 @@ namespace CrossEngineEditor
 
     void CeeActionsHandler::OnActionContextRegistrationHook()
     {
-        // Same context set as the native EditorActionsHandler::OnActionContextRegistrationHook.
-        // The main window context is the one the shortcut upstream bridge targets
-        // (editor_polish.md P0-2); the other three exist so framework widgets that
-        // self-assign (EntityPropertyEditor does, EntityPropertyEditor.cpp) resolve.
-        {
-            AzToolsFramework::ActionContextProperties contextProperties;
-            contextProperties.m_name = "Cross-Engine Editor";
-            m_actionManagerInterface->RegisterActionContext(
-                AZStd::string(EditorIdentifiers::MainWindowActionContextIdentifier), contextProperties);
-
-            // Installing the ActionContextWidgetWatcher on the main window is what makes
-            // registered shortcuts fire: the watcher matches ShortcutOverride events that reach
-            // the main window (natively they bubble from the focused child; from the viewport
-            // they arrive via the upstream bridge).
-            m_hotKeyManagerInterface->AssignWidgetToActionContext(
-                AZStd::string(EditorIdentifiers::MainWindowActionContextIdentifier), m_mainWindow);
-        }
-
-        for (const AZStd::string_view contextId :
-             { EditorIdentifiers::EditorAssetBrowserActionContextIdentifier,
-               EditorIdentifiers::EditorConsoleActionContextIdentifier,
-               EditorIdentifiers::EditorEntityPropertyEditorActionContextIdentifier })
-        {
-            AzToolsFramework::ActionContextProperties contextProperties;
-            contextProperties.m_name = "Cross-Engine Editor";
-            m_actionManagerInterface->RegisterActionContext(AZStd::string(contextId), contextProperties);
-        }
+        // The four action contexts are already registered in StartCommon before the main window
+        // is constructed (see CrossEngineEditorApplication.cpp), so that framework controls
+        // (EntityPropertyEditor, AssetBrowserTreeView, ConsoleTextEdit) can successfully
+        // self-assign to their context during their constructors.
+        // Here we only install the main-window widget watcher for shortcut resolution.
+        m_hotKeyManagerInterface->AssignWidgetToActionContext(
+            AZStd::string(EditorIdentifiers::MainWindowActionContextIdentifier), m_mainWindow);
     }
 
     void CeeActionsHandler::OnActionUpdaterRegistrationHook()

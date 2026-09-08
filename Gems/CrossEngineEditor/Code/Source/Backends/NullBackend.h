@@ -11,7 +11,7 @@
 //! Lets the editor shell run end-to-end with no engine attached: every contract is
 //! satisfied with an empty implementation. It is also the reference every real backend
 //! (rbfx / Godot / in-house) is measured against - if the editor works on NullBackend, the
-//! decoupling holds (Plan §A6 C2 可移除性验收).
+//! decoupling holds (Plan §A6 C2 removability verification).
 
 #include <BackendAPI/IAssetSource.h>
 #include <BackendAPI/IEngineBackend.h>

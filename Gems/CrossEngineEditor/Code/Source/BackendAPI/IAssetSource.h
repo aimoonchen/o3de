@@ -7,12 +7,12 @@
 #pragma once
 
 //! Asset data source feeding the reused AzToolsFramework AssetBrowser
-//! (Plan §A6 C4 资产面 / C5 接入成本: 仅 2 枚举纯虚).
+//! (Plan §A6 C4 asset face / C5 integration cost: 2 enumeration pure-virtual only).
 //!
 //! The consumer (Window/CeeAssetBrowserPanel) builds AssetBrowserEntry trees in
 //! memory from the enumerations below and injects them into the official
 //! AssetBrowserModel / AssetBrowserFilterModel / AssetBrowserTreeView stack.
-//! Wiring and verified API ledger: rbfx_migration.md §2 (复用路径, §2.1 接线配方).
+//! Wiring and verified API ledger: rbfx_migration.md §2 (reuse path, §2.1 wiring recipe).
 //! The engine backend only has to enumerate its own project files; tree icons are
 //! resolved editor-side through the official AssetBrowser interaction bus by
 //! extension (CeeAssetBrowserIconProvider, rbfx_migration.md §2.3) — the contract

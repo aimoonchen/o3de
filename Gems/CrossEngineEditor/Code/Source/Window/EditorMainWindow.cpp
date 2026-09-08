@@ -677,7 +677,7 @@ namespace CrossEngineEditor
     {
         // Blender-style duplicate: serialize + paste without touching the clipboard. v1 keeps
         // the same "under the first selected mirror" placement as paste (a duplicate of a node
-        // pasted under itself lands as its child - documented v1 简 simplification).
+        // pasted under itself lands as its child - documented v1 simplification).
         IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get();
         if (!backend)
         {
@@ -770,6 +770,8 @@ namespace CrossEngineEditor
         {
             ownership->CreateNewLevelPrefab("NewLevel.prefab", "");
         }
+        SetSceneDisplayName(QStringLiteral("NewLevel.prefab"));
+        ClearSceneDirty();
     }
 
     void EditorMainWindow::OpenLevel()
@@ -1061,7 +1063,7 @@ namespace CrossEngineEditor
         }
         if (m_sceneDirty)
         {
-            title += QStringLiteral(" [*]");
+            title += QStringLiteral("*");
         }
         setWindowTitle(title);
     }
@@ -1191,10 +1193,23 @@ namespace CrossEngineEditor
             for (const QString& id : settings.allKeys())
             {
                 const QString binding = settings.value(id).toString();
-                if (!binding.isEmpty() && actionManagerInternal->GetAction(AZStd::string(id.toUtf8().constData())) != nullptr)
+                if (actionManagerInternal->GetAction(AZStd::string(id.toUtf8().constData())) != nullptr)
                 {
-                    hotKeyManager->SetActionHotKey(
-                        AZStd::string(id.toUtf8().constData()), AZStd::string(binding.toUtf8().constData()));
+                    if (binding.isEmpty())
+                    {
+                        // Empty binding = user cleared this shortcut in the Preferences dialog.
+                        // Apply the cleared state so the action keeps its shortcut empty across
+                        // restarts (otherwise it reverts to the registered default).
+                        if (QAction* action = actionManagerInternal->GetAction(AZStd::string(id.toUtf8().constData())))
+                        {
+                            action->setShortcut(QKeySequence());
+                        }
+                    }
+                    else
+                    {
+                        hotKeyManager->SetActionHotKey(
+                            AZStd::string(id.toUtf8().constData()), AZStd::string(binding.toUtf8().constData()));
+                    }
                 }
             }
             settings.endGroup();

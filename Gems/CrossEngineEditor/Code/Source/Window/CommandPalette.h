@@ -9,9 +9,8 @@
 //! VSCode/Blender-style command palette (Plan §B5).
 //!
 //! A lightweight modal popup that fuzzy-filters a flat list of QActions (the editor's
-//! commands) and triggers the chosen one. The data source is simply the actions already
-//! present on the menus, so no separate command registry is needed - this is the KISS
-//! path to a discoverable command surface until a full ActionManager phase lands.
+//! commands) and triggers the chosen one. The data source is the generated menu bar
+//! (ActionManager-registered) plus the three registered context menus.
 
 #if !defined(Q_MOC_RUN)
 #include <QDialog>

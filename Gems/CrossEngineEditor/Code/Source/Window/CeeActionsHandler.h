@@ -52,7 +52,7 @@ namespace CrossEngineEditor
         void OnPostActionManagerRegistrationHook() override;
 
         // AzToolsFramework::ToolsApplicationNotificationBus::Handler...
-        //! Keep the selection-sensitive entries' enable state honest (尺子2).
+        //! Keep the selection-sensitive entries' enable state honest (Ruler 2).
         void AfterEntitySelectionChanged(
             const AzToolsFramework::EntityIdList& newlySelectedEntities,
             const AzToolsFramework::EntityIdList& newlyDeselectedEntities) override;

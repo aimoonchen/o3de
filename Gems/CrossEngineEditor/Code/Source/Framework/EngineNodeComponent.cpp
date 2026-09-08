@@ -234,7 +234,7 @@ namespace CrossEngineEditor
         // Transform-invalidated cache: return the memoised world AABB unless a transform change has
         // marked it dirty. During camera orbit over a static selection this hits every frame, so the
         // per-frame selection-outline + pick queries stop crossing the GDExtension boundary to
-        // recompute an unchanged box (Progress.md 修复13 fix 3; consistent with Plan §B5b - nothing stale
+        // recompute an unchanged box (Progress.md fix-13 fix 3; consistent with Plan §B5b - nothing stale
         // is held because only a transform change alters a world AABB, and that invalidates here).
         if (m_boundsCacheValid)
         {

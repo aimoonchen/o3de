@@ -153,7 +153,7 @@ namespace CrossEngineEditor
             m_objectFromId = reinterpret_cast<GDExtensionInterfaceObjectGetInstanceFromId>(
                 getProc("object_get_instance_from_id"));
 
-            // Bulk overlay geometry (Progress.md 修复13 fix 1): build PackedVector3Array/PackedColorArray
+            // Bulk overlay geometry (Progress.md fix-13 fix 1): build PackedVector3Array/PackedColorArray
             // + Array once per surface and fill them with raw pointer writes, matching Godot's own
             // editor gizmo path (ArrayMesh::add_surface_from_arrays). These entry points are optional:
             // if any is missing the backend falls back to the per-vertex ImmediateMesh path.
@@ -202,7 +202,7 @@ namespace CrossEngineEditor
         //! Return a pointer to a cached StringName built once from utf8. Method/property names are
         //! constant string literals reused every frame, so caching removes the per-call StringName
         //! construction (a heap-interning round-trip across the DLL boundary) that Progress.md
-        //! 修复13 measured as a hot spot inside GodotApi::Call. The returned buffer is owned by the cache
+        //! fix-13 measured as a hot spot inside GodotApi::Call. The returned buffer is owned by the cache
         //! (released in ReleaseCaches); callers must NOT destruct it.
         const void* CachedStringName(const char* utf8) const
         {

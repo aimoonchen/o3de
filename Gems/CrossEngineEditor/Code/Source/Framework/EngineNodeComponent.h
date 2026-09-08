@@ -78,7 +78,7 @@ namespace CrossEngineEditor
 
         //! Local-space extent of the wireframe (the pick / visibility box for a non-renderable
         //! node). Only valid when GetWireKind() != None. Draw + pick share this so the clickable
-        //! box is exactly the visible wire - no invisible boxes stealing clicks (the 修复8 rule).
+        //! box is exactly the visible wire - no invisible boxes stealing clicks (the fix-8 rule).
         [[nodiscard]] AZ::Aabb GetLocalWireBounds() const;
 
         //! Opaque engine-side node handle (rbfx Node* / Godot ObjectID). Reflected in-memory only.
@@ -149,9 +149,9 @@ namespace CrossEngineEditor
         //! Invalidate the cached world bounds when THIS entity's transform changes (gizmo drag,
         //! parent move, engine sync). Camera orbit does NOT fire this, so while a static object is
         //! selected the cache stays valid and the per-frame selection-outline / pick queries no
-        //! longer cross the GDExtension boundary to recompute an unchanged box (Progress.md 修复13
+        //! longer cross the GDExtension boundary to recompute an unchanged box (Progress.md fix-13
         //! fix 3). This is a transform-invalidated cache, not the always-live component AABB the
-        //! plan rejected (Plan §B5b: 按需现算 + transform 失效): it holds nothing stale because
+        //! plan rejected (Plan §B5b: compute on demand + transform-invalidate cache): it holds nothing stale because
         //! the only thing that changes a world
         //! AABB (short of geometry edits, which re-sync) is the transform we listen to here.
         void OnTransformChanged(const AZ::Transform& local, const AZ::Transform& world) override;

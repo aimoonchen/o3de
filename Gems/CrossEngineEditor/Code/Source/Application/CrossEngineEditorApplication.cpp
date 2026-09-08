@@ -30,6 +30,8 @@
 #include <AzCore/Settings/SettingsRegistryMergeUtils.h>
 
 #include <AzToolsFramework/ActionManager/ActionManagerSystemComponent.h>
+#include <AzToolsFramework/ActionManager/Action/ActionManagerInterface.h>
+#include <AzToolsFramework/Editor/ActionManagerIdentifiers/EditorContextIdentifiers.h>
 #include <Window/CeePreferences.h>
 #include <AzToolsFramework/Entity/EditorEntityContextBus.h>
 #include <AzToolsFramework/Entity/PrefabEditorEntityOwnershipInterface.h>
@@ -184,6 +186,29 @@ namespace CrossEngineEditor
         // (Plan §B4 / A6 C6). Connects to the standard transform/property buses.
         m_mirrorBridge = AZStd::make_unique<EntityMirrorBridge>();
 
+        // Register the action contexts BEFORE the main window and its child widgets are constructed.
+        // Framework controls (EntityPropertyEditor, AssetBrowserTreeView, ConsoleTextEdit) self-assign
+        // to their context in their constructors (AssignWidgetToActionContextHelper), which requires
+        // the context to already exist (HotKeyManager.cpp:41-47: watcher lookup fails silently
+        // otherwise). The full CeeActionsHandler registration (including AssignWidgetToActionContext
+        // for the main window) still runs later via TriggerRegistrationNotifications.
+        {
+            auto* actionManager = AZ::Interface<AzToolsFramework::ActionManagerInterface>::Get();
+            if (actionManager)
+            {
+                for (const AZStd::string_view contextId :
+                     { EditorIdentifiers::MainWindowActionContextIdentifier,
+                       EditorIdentifiers::EditorAssetBrowserActionContextIdentifier,
+                       EditorIdentifiers::EditorConsoleActionContextIdentifier,
+                       EditorIdentifiers::EditorEntityPropertyEditorActionContextIdentifier })
+                {
+                    AzToolsFramework::ActionContextProperties contextProperties;
+                    contextProperties.m_name = "Cross-Engine Editor";
+                    actionManager->RegisterActionContext(AZStd::string(contextId), contextProperties);
+                }
+            }
+        }
+
         m_mainWindow = new EditorMainWindow(m_mirrorBridge.get());
 
         // Wrap the main window like the native O3DE editor does (CryEdit.cpp:1537-1543). Without
@@ -280,6 +305,9 @@ namespace CrossEngineEditor
         }
         // The actions handler points at the main window and its registered actions parent
         // their QActions to ActionManager-owned storage - drop it before the window dies.
+        // Order matters: ActionManagerSystemComponent::Destroy() runs during
+        // ToolsApplication::Destroy() and tears down the action/menu managers; the handler's
+        // dtor disconnects from buses those managers own, so it must die first.
         m_actionsHandler.reset();
 
         // Material document system: close all documents before tearing down.
