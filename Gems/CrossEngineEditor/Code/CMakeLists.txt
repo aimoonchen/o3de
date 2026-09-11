@@ -118,6 +118,40 @@ if(CEE_HAVE_RBFX)
     endif()
 endif()
 
+if(CEE_HAVE_FILAMENT)
+    target_link_libraries(CrossEngineEditor PRIVATE CrossEngine::Filament)
+    target_compile_definitions(CrossEngineEditor PRIVATE CEE_HAVE_FILAMENT=1)
+    # Filament's headers self-include as <math/...>, <utils/...>, <stb_image.h> - bare names
+    # that rbfx's INTERFACE include paths ALSO satisfy (embree's math/, rbfx's vendored
+    # stb), and rbfx is linked first so it wins the search order. Force Filament's roots to
+    # the FRONT for this target so its headers (and the stb ABI its libs were built against)
+    # resolve to the Filament checkout. Keep in sync with the facade list in
+    # External/CMakeLists.txt (CrossEngine_Filament target_include_directories).
+    target_include_directories(CrossEngineEditor BEFORE PRIVATE
+        ${CEE_FILAMENT_ROOT}/filament/include
+        ${CEE_FILAMENT_ROOT}/filament/backend/include
+        ${CEE_FILAMENT_ROOT}/libs/gltfio/include
+        ${CEE_FILAMENT_ROOT}/libs/filabridge/include
+        ${CEE_FILAMENT_ROOT}/libs/math/include
+        ${CEE_FILAMENT_ROOT}/libs/utils/include
+        ${CEE_FILAMENT_PREBUILT}/libs/gltfio
+        ${CEE_FILAMENT_ROOT}/third_party/cgltf
+        ${CEE_FILAMENT_ROOT}/third_party/robin-map/include
+        ${CEE_FILAMENT_ROOT}/third_party/stb)
+    # Filament headers define many macros/enums that clash when merged into unity chunks.
+    target_sources(CrossEngineEditor PRIVATE
+        Source/Backends/FilamentBackend.h
+        Source/Backends/FilamentBackend.cpp
+        Source/MaterialEditor/FilamentMaterialSource.h
+        Source/MaterialEditor/FilamentMaterialSource.cpp
+    )
+    set_source_files_properties(
+        Source/Backends/FilamentBackend.cpp
+        Source/MaterialEditor/FilamentMaterialSource.cpp
+        PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON
+    )
+endif()
+
 if(CEE_HAVE_GODOT)
     # Godot is embedded via the libgodot DLL loaded at RUNTIME (LoadLibrary), so there is no
     # build-time link dependency — only the header-only facade exposing Godot's include roots.

@@ -288,6 +288,11 @@ if(CEE_ENABLE_RBFX AND EXISTS ${CEE_RBFX_ROOT}/CMakeLists.txt)
     string(REGEX REPLACE "/W4( |$)" " " CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
     string(REGEX REPLACE "/we[0-9]+( |$)" " " CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     string(REGEX REPLACE "/we[0-9]+( |$)" " " CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+    # Embree forces /Ox on its perf-critical targets even in Debug, which MSVC rejects
+    # combined with O3DE's Debug runtime checks (/RTCsu, D8016). Drop the checks for the
+    # rbfx subtree only (third-party code; O3DE first-party Debug keeps them).
+    string(REGEX REPLACE "/RTC[sum1]+( |$)" " " CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    string(REGEX REPLACE "/RTC[sum1]+( |$)" " " CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
     if(MSVC)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W0 /WX-")
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W0 /WX-")
@@ -328,6 +333,214 @@ else()
             "CrossEngineEditor will build without the rbfx backend.")
     endif()
     set(CEE_HAVE_RBFX FALSE PARENT_SCOPE)
+endif()
+
+# =======================================================================================
+# Filament (PBR rendering engine) - optional real engine backend, PREBUILT consumption.
+#
+# Filament is a rendering-only library (no scene serialization, no game logic). It is built
+# STANDALONE (its own CMake tree, e.g. G:/o3de/build/filament-standalone) and consumed here
+# through an INTERFACE facade. add_subdirectory is NOT possible: Filament's flat target
+# namespace (math, gtest, meshoptimizer, glslang, spirv-*) collides with targets that already
+# exist in this O3DE build (O3DE's FetchContent gtest/meshoptimizer, rbfx's vendored
+# embree math + glslang) - the collision audit gate failed, so the out-of-tree pattern
+# (same family as the Godot scons build) is the honest fallback.
+#
+# One-time bootstrap (MSVC, /MD to match O3DE):
+#   cmake -E env --unset=MSYSTEM cmake -S I:/filament -B <prebuilt> -G "Visual Studio 18 2026" ^
+#     -DUSE_STATIC_CRT=OFF -DFILAMENT_SKIP_SAMPLES=ON -DFILAMENT_SKIP_SDL2=ON ^
+#     -DFILAMENT_SUPPORTS_VULKAN=OFF -DFILAMENT_ENABLE_MATDBG=OFF ^
+#     -DFILAMENT_SHORTEN_MSVC_COMPILATION=OFF  (else Debug libs bake
+#     _ITERATOR_DEBUG_LEVEL=0, root CMakeLists.txt:328, and MSVC refuses to link them
+#     into the editor's IDL-2 binary: LNK2038)
+#   cmake --build <prebuilt> --config Debug --target filament gltfio_core uberarchive stb ^
+#     matc resgen filaflat filabridge math utils backend geometry image imageio ktxreader bluegl ^
+#     basis_transcoder mikktspace
+#   (then repeat --config RelWithDebInfo for the same targets: the editor's Profile/Release
+#    links those; editor Debug links the Debug libs - see the CONFIG pair below)
+# (--unset=MSYSTEM: Filament rejects MSYS2 environments on sight; Git Bash sets it.)
+# =======================================================================================
+option(CEE_ENABLE_FILAMENT "Build the Filament rendering engine backend for CrossEngineEditor" ON)
+set(CEE_FILAMENT_ROOT "I:/filament" CACHE PATH "Path to the Filament source checkout (headers)")
+set(CEE_FILAMENT_PREBUILT "G:/o3de/build/filament-standalone" CACHE PATH "Prebuilt standalone Filament build tree (see bootstrap above)")
+# Editor Debug links filament Debug; editor Profile/Release link filament RelWithDebInfo
+# (both release-CRT /MD, so no _ITERATOR_DEBUG_LEVEL clash). Bootstrap both configs once.
+set(CEE_FILAMENT_CONFIG_DEBUG "Debug" CACHE STRING "Filament config paired with editor Debug")
+set(CEE_FILAMENT_CONFIG_OPT "RelWithDebInfo" CACHE STRING "Filament config paired with editor Profile/Release")
+
+if(CEE_ENABLE_FILAMENT AND EXISTS ${CEE_FILAMENT_ROOT}/filament/include/filament/Engine.h AND EXISTS ${CEE_FILAMENT_PREBUILT})
+    # Build-log provenance (same pattern as rbfx).
+    execute_process(COMMAND git -C ${CEE_FILAMENT_ROOT} describe --tags --always --dirty
+        OUTPUT_VARIABLE _cee_filament_desc OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_cee_filament_desc)
+        message(STATUS "CrossEngineEditor: filament backend = ${_cee_filament_desc} (${CEE_FILAMENT_ROOT}, prebuilt ${CEE_FILAMENT_PREBUILT} ${CEE_FILAMENT_CONFIG_OPT})")
+    else()
+        message(STATUS "CrossEngineEditor: filament backend at ${CEE_FILAMENT_ROOT} (prebuilt ${CEE_FILAMENT_PREBUILT})")
+    endif()
+
+    # Locate a prebuilt artifact (.lib / .exe) by name under the standalone tree. VS
+    # multi-config default layout puts each target's output at a target-dir of varying
+    # depth (filament/, libs/gltfio/, third_party/stb/tnt/...), so glob everything once
+    # and filter by /<Config>/<name><ext>.
+    file(GLOB_RECURSE _cee_filament_artifacts
+        "${CEE_FILAMENT_PREBUILT}/*.lib" "${CEE_FILAMENT_PREBUILT}/*.exe")
+    function(_cee_find_filament_artifact out name ext config)
+        set(_cee_matches ${_cee_filament_artifacts})
+        list(FILTER _cee_matches INCLUDE REGEX "/${config}/${name}${ext}$")
+        list(SORT _cee_matches)
+        if(_cee_matches)
+            list(GET _cee_matches 0 _cee_first)
+            set(${out} ${_cee_first} PARENT_SCOPE)
+        else()
+            set(${out} "" PARENT_SCOPE)
+        endif()
+    endfunction()
+
+    # Static-lib closure needed by the editor backend (gltfio_core pulls ktxreader /
+    # basis_transcoder / dracodec / meshoptimizer; geometry pulls mikktspace; filament
+    # pulls backend+bluegl, filaflat, filabridge; uberarchive + stb for the ubershader
+    # provider and image decoding). Resolved per config; generator expressions pick the
+    # matching list for the editor config being linked.
+    set(_cee_filament_lib_names filament backend bluegl math utils filaflat filabridge
+        gltfio_core uberarchive stb ktxreader basis_transcoder mikktspace dracodec
+        meshoptimizer webpdecoder uberzlib image imageio geometry astcenc smol fusion
+        jpeg png zlib_static tinyexr)
+
+    set(_cee_filament_debug_libs "")
+    set(_cee_filament_opt_libs "")
+    foreach(_cee_lib ${_cee_filament_lib_names})
+        _cee_find_filament_artifact(_cee_dbg ${_cee_lib} ".lib" "${CEE_FILAMENT_CONFIG_DEBUG}")
+        if(_cee_dbg)
+            list(APPEND _cee_filament_debug_libs ${_cee_dbg})
+        endif()
+        _cee_find_filament_artifact(_cee_opt ${_cee_lib} ".lib" "${CEE_FILAMENT_CONFIG_OPT}")
+        if(_cee_opt)
+            list(APPEND _cee_filament_opt_libs ${_cee_opt})
+        endif()
+    endforeach()
+    # Configure-time closure check: everything the editor links must exist, in BOTH paired
+    # configs. A half-built Debug tree fails here instead of as LNK2019 at editor-Debug link
+    # time; no Debug libs at all is legal for Profile/Release-only workflows (warn once).
+    set(_cee_filament_required filament backend bluegl math utils filaflat filabridge
+        gltfio_core uberarchive stb geometry image imageio ktxreader basis_transcoder
+        mikktspace dracodec meshoptimizer)
+    foreach(_cee_required ${_cee_filament_required})
+        _cee_find_filament_artifact(_cee_path ${_cee_required} ".lib" "${CEE_FILAMENT_CONFIG_OPT}")
+        if(NOT _cee_path)
+            message(FATAL_ERROR
+                "CrossEngineEditor: prebuilt Filament tree ${CEE_FILAMENT_PREBUILT} "
+                "(${CEE_FILAMENT_CONFIG_OPT}) is missing: ${_cee_required}. "
+                "Run the bootstrap build documented in External/CMakeLists.txt.")
+        endif()
+    endforeach()
+    if(_cee_filament_debug_libs)
+        foreach(_cee_required ${_cee_filament_required})
+            _cee_find_filament_artifact(_cee_path ${_cee_required} ".lib" "${CEE_FILAMENT_CONFIG_DEBUG}")
+            if(NOT _cee_path)
+                message(FATAL_ERROR
+                    "CrossEngineEditor: prebuilt Filament tree ${CEE_FILAMENT_PREBUILT} "
+                    "(${CEE_FILAMENT_CONFIG_DEBUG}) is missing: ${_cee_required}. "
+                    "Run the bootstrap build for both configs (External/CMakeLists.txt).")
+            endif()
+        endforeach()
+    else()
+        message(WARNING
+            "CrossEngineEditor: no ${CEE_FILAMENT_CONFIG_DEBUG} filament libs found in "
+            "${CEE_FILAMENT_PREBUILT}; editor Debug will not link (LNK2038 iterator-level "
+            "mismatch). Build filament Debug (bootstrap above) or use Profile/Release.")
+    endif()
+
+    _cee_find_filament_artifact(CEE_MATC_EXE matc ".exe" "${CEE_FILAMENT_CONFIG_OPT}")
+    _cee_find_filament_artifact(CEE_RESGEN_EXE resgen ".exe" "${CEE_FILAMENT_CONFIG_OPT}")
+    if(NOT CEE_MATC_EXE OR NOT CEE_RESGEN_EXE)
+        message(FATAL_ERROR
+            "CrossEngineEditor: prebuilt Filament tree ${CEE_FILAMENT_PREBUILT} is missing "
+            "the matc/resgen tools. Build them (see bootstrap in External/CMakeLists.txt).")
+    endif()
+
+    # Facade target - editor links this single name. Debug editor picks the filament Debug
+    # libs, Profile/Release pick RelWithDebInfo (CRT/iterator ABI has to match).
+    add_library(CrossEngine_Filament INTERFACE)
+    add_library(CrossEngine::Filament ALIAS CrossEngine_Filament)
+    if(_cee_filament_debug_libs)
+        target_link_libraries(CrossEngine_Filament INTERFACE
+            $<$<CONFIG:Debug>:${_cee_filament_debug_libs}>)
+    endif()
+    target_link_libraries(CrossEngine_Filament INTERFACE
+        $<$<NOT:$<CONFIG:Debug>>:${_cee_filament_opt_libs}>)
+    # Keep this include list in sync with the BEFORE PRIVATE copy in Code/CMakeLists.txt
+    # (that copy exists to outrank rbfx's INTERFACE include order; both must name the same
+    # filament roots).
+    target_include_directories(CrossEngine_Filament INTERFACE
+        ${CEE_FILAMENT_ROOT}/filament/include
+        ${CEE_FILAMENT_ROOT}/filament/backend/include
+        ${CEE_FILAMENT_ROOT}/libs/gltfio/include
+        ${CEE_FILAMENT_ROOT}/libs/filabridge/include
+        ${CEE_FILAMENT_ROOT}/libs/math/include
+        ${CEE_FILAMENT_ROOT}/libs/utils/include
+        ${CEE_FILAMENT_PREBUILT}/libs/gltfio   # generated materials/uberarchive.h
+        ${CEE_FILAMENT_ROOT}/third_party/cgltf
+        ${CEE_FILAMENT_ROOT}/third_party/robin-map/include
+        ${CEE_FILAMENT_ROOT}/third_party/stb)
+    target_compile_definitions(CrossEngine_Filament INTERFACE CEE_HAVE_FILAMENT=1)
+
+    # Keep O3DE's runtime-dependency walker out of the prebuilt static-lib graph.
+    cee_mark_third_party_subtree_cached(CrossEngine_Filament)
+
+    # --- CEE material pipeline: .mat -> matc -> .filamat -> resgen -> embedded blob -------
+    # matc and the engine libs come from the same checkout + build, so the .filamat version
+    # lock (M5) holds. resgen invocation mirrors filament's get_resgen_vars Windows branch:
+    # -qcx <dir> -p <prefix> emits <dir>/<prefix>.c + <prefix>.h with
+    # <PREFIX>_<STEM>_DATA/SIZE macros (root CMakeLists.txt:874-900).
+    set(CEE_FILAMENT_ASSETS "${CMAKE_CURRENT_LIST_DIR}/../Assets/Filament")
+    set(CEE_RESOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/filament_resources")
+    file(MAKE_DIRECTORY "${CEE_RESOURCE_DIR}")
+
+    set(CEE_FILAMAT_BINS "")
+    foreach(_cee_mat cee_overlay cee_lit_opaque)
+        set(_cee_filamat "${CEE_RESOURCE_DIR}/${_cee_mat}.filamat")
+        add_custom_command(
+            OUTPUT ${_cee_filamat}
+            COMMAND ${CEE_MATC_EXE} -o ${_cee_filamat} ${CEE_FILAMENT_ASSETS}/${_cee_mat}.mat
+            DEPENDS ${CEE_MATC_EXE} ${CEE_FILAMENT_ASSETS}/${_cee_mat}.mat
+            COMMENT "CEE: compiling ${_cee_mat}.mat"
+        )
+        list(APPEND CEE_FILAMAT_BINS ${_cee_filamat})
+    endforeach()
+
+    set(CEE_RESGEN_HEADER "${CEE_RESOURCE_DIR}/cee_filamat.h")
+    set(CEE_RESGEN_SOURCE "${CEE_RESOURCE_DIR}/cee_filamat.c")
+    add_custom_command(
+        OUTPUT ${CEE_RESGEN_HEADER} ${CEE_RESGEN_SOURCE} "${CEE_RESOURCE_DIR}/cee_filamat.bin"
+        COMMAND ${CEE_RESGEN_EXE} -qcx ${CEE_RESOURCE_DIR} -p cee_filamat ${CEE_FILAMAT_BINS}
+        DEPENDS ${CEE_RESGEN_EXE} ${CEE_FILAMAT_BINS}
+        COMMENT "CEE: embedding Filament material blobs"
+    )
+
+    # dummy.c content is constant - write it at configure time (a `>` redirect inside
+    # add_custom_command only works when the generator routes through a shell; Ninja does not).
+    set(CEE_DUMMY_SRC "${CEE_RESOURCE_DIR}/dummy.c")
+    file(WRITE ${CEE_DUMMY_SRC} "//\n")
+
+    add_library(cee_filamat_resources STATIC ${CEE_DUMMY_SRC} ${CEE_RESGEN_SOURCE})
+    set_target_properties(cee_filamat_resources PROPERTIES FOLDER Libs/CrossEngine)
+    if(MSVC)
+        target_compile_options(cee_filamat_resources PRIVATE /WX-)
+    endif()
+    target_include_directories(cee_filamat_resources PUBLIC ${CEE_RESOURCE_DIR})
+
+    target_link_libraries(CrossEngine_Filament INTERFACE cee_filamat_resources)
+
+    set(CEE_HAVE_FILAMENT TRUE PARENT_SCOPE)
+else()
+    if(CEE_ENABLE_FILAMENT)
+        message(WARNING
+            "Filament prebuilt not found (source ${CEE_FILAMENT_ROOT}, prebuilt "
+            "${CEE_FILAMENT_PREBUILT}). Build Filament standalone once - see the bootstrap "
+            "comment in External/CMakeLists.txt. CrossEngineEditor will build without the "
+            "Filament backend.")
+    endif()
+    set(CEE_HAVE_FILAMENT FALSE PARENT_SCOPE)
 endif()
 
 # =======================================================================================

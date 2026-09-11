@@ -249,7 +249,7 @@ namespace CrossEngineEditor
 
         // AtomToolsDocument provides AddUndoRedoHistory(UndoRedoFunction, UndoRedoFunction).
         // Undo replay: suppress repeated schema rebuilds by accumulating a dirty flag and
-        // rebuilding once after the whole value batch is applied (material_migration_final.md SS5.3).
+        // rebuilding once after the whole value batch is applied (material_migration.md SS5.3).
         // m_undoRebuildPending is a member to avoid dangling references from stack captures.
         auto undoFn = [this, undoValues = AZStd::move(undoValues)]() mutable
         {
@@ -430,7 +430,7 @@ namespace CrossEngineEditor
         {
         case SetResult::Applied:
             // Value applied; no schema change. The RPE already shows the new value,
-            // no rebuild needed (material_migration_final.md SS4.6).
+            // no rebuild needed (material_migration.md SS4.6).
             break;
 
         case SetResult::AppliedSchemaChanged:

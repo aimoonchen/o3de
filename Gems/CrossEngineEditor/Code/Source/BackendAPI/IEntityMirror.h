@@ -89,39 +89,10 @@ namespace CrossEngineEditor
         virtual bool SaveScene(const AZStd::string& path) { (void)path; return false; }
 
         // ----- Migration batch 1 (rbfx_migration.md §3.1) ----------------------------
-        // These are the L0 closed-loop operations. They are pure virtual so a backend that
-        // misses them fails at compile time (contract rule C4); every contract change stubs
-        // all backends in the same change.
-
-        //! Editor -> engine: export the selected mirror entities as an engine-native prefab file.
-        //! path is an absolute file path. v1 (simplified) writes the first entity's node subtree to the
-        //! engine's own prefab format, matching the rbfx editor's single-node export. Returns
-        //! false on failure or when nothing is selected.
-        virtual bool CreatePrefabFromNodes(
-            const AZStd::vector<AZ::EntityId>& entityIds,
-            const AZStd::string& path) = 0;
-
-        //! Editor -> engine: assign a material asset to a slot of the entity's model component
-        //! (created if absent). Returns false when the asset cannot be loaded or the entity
-        //! does not resolve.
-        virtual bool AssignMaterial(AZ::EntityId entityId, const AZStd::string& assetPath, int slot) = 0;
-
-        //! Editor -> engine: assign an animation asset to the entity's AnimationController
-        //! (created if absent) WITHOUT playing it. Editor assignment must not start playback,
-        //! so animated bounds stay static while editing (Plan §B5b bounds cache). Returns false
-        //! when the asset cannot be loaded or the entity does not resolve.
-        virtual bool AssignAnimation(AZ::EntityId entityId, const AZStd::string& assetPath) = 0;
-
-        //! Editor -> engine: serialize the selected mirror entities to a backend-native byte
-        //! stream for the editor clipboard. v1 (simplified) serializes the first entity's node subtree,
-        //! matching the rbfx editor's own single-node clipboard. Empty vector = nothing to
-        //! serialize or unsupported.
-        virtual AZStd::vector<AZ::u8> SerializeNodes(const AZStd::vector<AZ::EntityId>& entityIds) = 0;
-
-        //! Editor -> engine: recreate the node subtree from SerializeNodes bytes under parentId
-        //! (invalid = scene root), at the parent's world position. The editor mirror is refreshed
-        //! by the shell via SyncToEditor afterwards. Returns false on failure.
-        virtual bool PasteNodes(const AZStd::vector<AZ::u8>& data, AZ::EntityId parentId) = 0;
+        // CreatePrefabFromNodes / AssignMaterial / AssignAnimation / SerializeNodes /
+        // PasteNodes were slimmed off this surface (E2, filament_migration.md §7.1): they are
+        // engine-extension operations, not shared editing value, so backends expose them (when
+        // supported) through IEngineBackend::InvokeCustom instead of pure virtuals.
 
         //! Editor -> engine: world-space selection bounds for a mirror entity, in the O3DE
         //! convention (Z-up RH metres). This is the sole engine-side input to O3DE's picking:

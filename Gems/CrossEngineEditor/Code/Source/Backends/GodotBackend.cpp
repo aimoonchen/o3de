@@ -1441,42 +1441,9 @@ namespace CrossEngineEditor
         return false;
     }
 
-    bool GodotBackend::GodotEntityMirror::CreatePrefabFromNodes(
-        const AZStd::vector<AZ::EntityId>& /*entityIds*/,
-        const AZStd::string& /*path*/)
-    {
-        // TODO rbfx-first stub. Godot side would pack a PackedScene like SaveScene.
-        return false;
-    }
-
-    bool GodotBackend::GodotEntityMirror::AssignMaterial(
-        AZ::EntityId /*entityId*/, const AZStd::string& /*assetPath*/, int /*slot*/)
-    {
-        // TODO rbfx-first stub. Godot side would set surface_material_override on the MeshInstance3D.
-        return false;
-    }
-
-    bool GodotBackend::GodotEntityMirror::AssignAnimation(
-        AZ::EntityId /*entityId*/, const AZStd::string& /*assetPath*/)
-    {
-        // TODO rbfx-first stub. Godot side would add an AnimationPlayer and assign the
-        // library (no auto-play - same contract rule as rbfx).
-        return false;
-    }
-
-    AZStd::vector<AZ::u8> GodotBackend::GodotEntityMirror::SerializeNodes(
-        const AZStd::vector<AZ::EntityId>& /*entityIds*/)
-    {
-        // TODO rbfx-first stub. Godot side would duplicate() nodes in memory instead of bytes.
-        return {};
-    }
-
-    bool GodotBackend::GodotEntityMirror::PasteNodes(
-        const AZStd::vector<AZ::u8>& /*data*/, AZ::EntityId /*parentId*/)
-    {
-        // TODO rbfx-first stub.
-        return false;
-    }
+    // Prefab export / material+animation assignment / node clipboard were slimmed off the
+    // mirror surface (E2, filament_migration.md §7.1); Godot does not implement them, so the
+    // IEngineBackend::InvokeCustom default ("unsupported") stands in for the former stubs.
 
     // =====================================================================================
     // GodotAssetSource  (godot_migration.md §2)

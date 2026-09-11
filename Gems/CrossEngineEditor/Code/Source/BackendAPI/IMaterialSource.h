@@ -7,7 +7,7 @@
 #pragma once
 
 //! Material data source feeding the reused AtomToolsFramework document + inspector stack
-//! (material_migration_final.md SS2, SS4). Fourth sub-contract on IEngineBackend.
+//! (material_migration.md SS2, SS4). Fourth sub-contract on IEngineBackend.
 //!
 //! Two-layer model: the backend owns the LIVE material instance (the only source of truth
 //! for values) and hands the editor a schema plus a value map. The editor turns that into

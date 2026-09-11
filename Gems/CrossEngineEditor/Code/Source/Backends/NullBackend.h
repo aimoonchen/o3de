@@ -75,13 +75,6 @@ namespace CrossEngineEditor
                 const AZ::Vector3& rayDirection,
                 AZ::Vector3& outHitPoint,
                 AZ::Vector3& outHitNormal) const override;
-            bool CreatePrefabFromNodes(
-                const AZStd::vector<AZ::EntityId>& entityIds,
-                const AZStd::string& path) override;
-            bool AssignMaterial(AZ::EntityId entityId, const AZStd::string& assetPath, int slot) override;
-            bool AssignAnimation(AZ::EntityId entityId, const AZStd::string& assetPath) override;
-            AZStd::vector<AZ::u8> SerializeNodes(const AZStd::vector<AZ::EntityId>& entityIds) override;
-            bool PasteNodes(const AZStd::vector<AZ::u8>& data, AZ::EntityId parentId) override;
         };
 
         class NullAssetSource final : public IAssetSource

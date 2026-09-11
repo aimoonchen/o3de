@@ -74,7 +74,7 @@ set(FILES
     Source/MaterialEditor/CeeMaterialToolbar.cpp
     Source/MaterialEditor/MaterialSchema.h
     Source/MaterialEditor/MaterialSchema.cpp
-    # Vendor: AtomToolsFramework (vendored subset, material_migration_final.md SS3.1)
+    # Vendor: AtomToolsFramework (vendored subset, material_migration.md SS3.1)
     Source/MaterialEditor/Vendor/AtomToolsFramework/Debug/TraceRecorder.h
     Source/MaterialEditor/Vendor/AtomToolsFramework/Debug/TraceRecorder.cpp
     Source/MaterialEditor/Vendor/AtomToolsFramework/Document/AtomToolsDocument.h

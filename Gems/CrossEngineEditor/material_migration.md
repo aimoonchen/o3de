@@ -1,13 +1,13 @@
-# 跨引擎材质编辑器 —— 终稿设计方案（四方裁决合并稿）
+# 跨引擎材质编辑器 —— 设计方案（四方裁决合并稿）
 
-> 状态：2026-08-25 定稿。本文 = CEE 材质编辑器跨引擎化的**唯一当前方案**。
+> 状态：2026-08-25 定稿；**2026-09-11 由 `material_migration_final.md` 改名为 `material_migration.md`**（filament 材质接入落地后三后端材质方案归一）。
+> 本文 = CEE 材质编辑器跨引擎化的**唯一当前方案**，覆盖 rbfx / Godot / Filament 三后端（§7.2 / §7.3 / §7.4）。
 >
 > 成稿过程（按用户指定的两阶段流程）：
 > **阶段一** —— 在**未阅读**其余三份方案的前提下，基于对 O3DE·Atom / rbfx / Filament / Godot / Blender 五套材质系统的
 > 一手源码调研独立完成初稿。
-> **阶段二** —— 阅读 `material_migration.md`（deepseek，下称 A 稿）、`material_migration_opus.md`（opus，B 稿）、
-> `material_migration_kimi.md`（kimi，C 稿），逐条吸收/驳回并升级为本文。**四方裁决记录 = §11**。
-> 三稿 + opus review 已按用户指示彻底删除（工作区与 git 历史均不留档）；
+> **阶段二** —— 阅读 deepseek/opus/kimi 三稿（A/B/C 稿），逐条吸收/驳回并升级为本文。**四方裁决记录 = §11**。
+> 三稿 + opus review 已按用户指示彻底删除（工作区与 git 历史均不留档；A 稿原文件名恰为 `material_migration.md`，与本文现名同名不同物）；
 > §11 为自含裁决记录，可独立追溯。
 >
 > 权威关系：愿景硬规则与顶层边界 = `Plan.md` §A0 / §A6（C1–C7）/ §B12；总路线 = `rbfx_migration.md` §4；
@@ -375,7 +375,7 @@ C1 的实质是"渲染类模块不进依赖图"，第 3 层断言精确覆盖了
 #pragma once
 
 //! Material data source feeding the reused AtomToolsFramework document + inspector stack
-//! (material_migration_final.md SS2, SS4). Fourth sub-contract on IEngineBackend.
+//! (material_migration.md SS2, SS4). Fourth sub-contract on IEngineBackend.
 //!
 //! Two-layer model: the backend owns the LIVE material instance (the only source of truth
 //! for values) and hands the editor a schema plus a value map. The editor turns that into
@@ -1124,24 +1124,30 @@ rbfx 是最好的第一后端：材质模型最简单，且 `RbfxBackend` 已有
 - **`ShaderMaterial` 也免费支持**（v2）：其 `_get_property_list`（`material.cpp:247-357`）把 shader uniform 反射成
   `shader_parameter/xxx` 属性，走同一条路。
 
-### 7.4 Filament（v2 PoC，用于契约证伪）
+### 7.4 Filament（已落地 2026-09-10，源 = `Source/MaterialEditor/FilamentMaterialSource.{h,cpp}`）
 
-Filament 目前**不是 CEE 后端**（`Backends/` 下只有 Null/Diligent/Rbfx/Godot），接入它 = 新写 `ISceneRenderer` +
-窗口/Swapchain + 构建集成，工作量主体不在材质。但调研确认契约对它成立：
+Filament 后端本身已接入（`--backend filament`，后端方案 = `filament_migration.md`）；材质面 v1 全部落地，
+二轮双复审修复已吸收（预览球创建/贴图所有权/析构清扫，2026-09-11）。
 
-- **不重编译即可改 PBR 参数：成立。** `libs/gltfio` 的 **ubershader** 预编译 19 个变体（`libs/gltfio/CMakeLists.txt`
-  的 `build_ubershader()`），运行时 `UbershaderProvider` 查表取 Material + `MaterialInstance::setParameter` 设全部参数，零编译。
-  **v1 策略：只预编译 3 blending × 2 doubleSided 的子集，产物提交仓库，用户不跑 matc。**
-- **参数全集**：`libs/gltfio/materials/base.mat.in:1-178`（`baseColorFactor/Map/Index/UvMatrix`、`metallicFactor`、
-  `roughnessFactor`、`normalScale`、`aoStrength`、`emissiveFactor/Strength`、`clearCoat*`、`reflectance`…）。
-- ⚠️ **Filament 的反射只给 name / type / precision，没有任何 UI 元数据**（`MaterialParser.cpp:116-156`）。
-  → schema 必须是 CEE 侧手写的 JSON sidecar，`Material::getParameters()`（`Material.h:97-116`）用作**交叉校验**
-  （名字/类型对不上就告警），防 schema 与 `.filamat` 漂移。
-- **保存**：Filament 没有"材质实例文件"格式。后端自定义一个参数值 JSON（引用 `.filamat`），
-  gltfio 的 extras 是官方先例。**这是 Filament 唯一的真实缺口。**
-- ⚠️ `.filamat` 有 `MATERIAL_VERSION` 版本锁 → matc 必须与引擎库同源构建，写进接入 checklist。
-- 运行时编译 `.mat` 也可行（`MaterialBuilder::init()` 是公开 API，`JitShaderProvider.cpp:93-97` 是官方用法），
-  但那是 MaterialCanvas 级别的能力，不在本方案。
+- **类型 = CEE 自编译 `.filamat` 模板**，不走 gltfio ubershader 的 19 变体：`.mat` 源（`Assets/Filament/cee_lit_opaque.mat`）
+  经 **matc → resgen 内嵌** 为 `CEE_FILAMAT_CEE_LIT_OPAQUE_DATA/SIZE`（管线在 `External/CMakeLists.txt`）；
+  matc 与引擎库同一预构建树产出 → M5 版本锁结构性成立。v1 只有 **LitOpaque** 一个类型。
+- **schema = 策展 JSON sidecar**（`TestAssets/MaterialTypes/filament/LitOpaque.json`）——§7.1 策展派；
+  M3 已核实 filament 反射**无 UI 元数据**，`Material::hasParameter` 做**交叉校验**：schema 里 `.filamat` 没有的参数
+  告警 + 隐藏（防漂移）。
+- **文档 = `MaterialSchema` 两层值 JSON**（schema + values，rbfx 同构），扩展名 `.fmat.json`。
+  Filament 无材质实例文件格式，sidecar 是唯一无损容器（**唯一的真实缺口**，与初稿判断一致）。
+- **值**：filament **无参数读回 API** → 值表条目侧自持（`m_values`）；写 = `MaterialInstance::setParameter`
+  （`baseColor` 走 `RgbType::LINEAR`，`metallic`/`roughness` 标量，`baseColorMap` sampler）。
+  贴图 = stb 加载 → `SRGB8_A8`；未设槽绑 1×1 白纹理；条目自持 `m_texture` 所有权（换绑即毁旧，零泄漏）。
+- **保存** = `MaterialSchema::SaveToFile`（值出 JSON；`.filamat` 模板不变）。
+- **预览（§6.4.2 的第三形态：离屏 RT + 异步回读，零停顿）**：离屏 `RenderTarget`（512²，COLOR+`BLIT_SRC`+DEPTH24）
+  + 独立 Scene/View/Camera + SUN 灯；渲染挂在主帧 `beginFrame/endFrame` 内（零额外 present）；
+  `Renderer::readPixels` 异步回调（主线程着陆，GL 底向上翻行）→ **原生三态**（pending=`Unchanged`，回调=`Updated`，稳态零调用），
+  与 §6.4.3 契约严丝合缝。预览球 = 手写经长 UV 球带解析 TBN 四元数（S11：filament 无图元库）。
+  `SetPreviewModel` v1 哨兵 false（固定球；盒/面为 v1.5）。IBL = P3（cmgen 一次性资产，`filament_migration.md` §12）。
+- **初稿两条担心均已消解**：运行时改 PBR 参数零重编译（预编译模板 + `setParameter` 全覆盖）；
+  运行时编译 `.mat`（M6/M7 glslang 依赖）不在 v1，维持驳回。
 
 ### 7.5 Null / Diligent
 
@@ -1156,7 +1162,7 @@ Diligent 不实现材质面（无引擎场景语义，维持现状不扩张）�
 | **Null**（P1） | 内置 Demo PBR | ~2 天 | 0（no-op ≠ stub） |
 | **rbfx**（P2） | 策展 JSON（~80 行数据） | ~1.5 周 | 0 |
 | **Godot**（P3） | 运行时反射，零手写 | **~1 周（最低）** | 0 |
-| **Filament**（P5，P3 后触发） | JSON sidecar + `getParameters()` 交叉校验 | PoC（P3 后评估） | 0 |
+| **Filament**（已落地 2026-09-10） | 策展 JSON + `hasParameter` 交叉校验 | 已实施（§7.4） | 0 |
 | **Diligent** | 不实现 | 0 | — |
 
 **接一个新引擎的材质面 = `IMaterialSource` 8 纯虚 + 1 份 schema。**

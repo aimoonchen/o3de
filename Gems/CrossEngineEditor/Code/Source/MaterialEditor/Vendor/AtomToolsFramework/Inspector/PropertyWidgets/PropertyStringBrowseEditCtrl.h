@@ -6,7 +6,7 @@
  *
  */
 
-// Vendored from AtomToolsFramework (material_migration_final.md SS3.1).
+// Vendored from AtomToolsFramework (material_migration.md SS3.1).
 // Only the StringFilePath and StringBrowseEdit property handlers are needed;
 // the multi-string and multiline handlers are included for completeness since
 // they live in the same source file.

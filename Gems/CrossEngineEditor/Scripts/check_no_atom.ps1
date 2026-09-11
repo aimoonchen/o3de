@@ -43,7 +43,7 @@ $exitCode = 0
 
 # ------------------------------------------------------------ 1. Source layer
 # Forbid Atom RENDERING modules, not AtomToolsFramework which is legitimately
-# vendored (material_migration_final.md SS11.9, vendor copy per SS3.5/SS11.9).
+# vendored (material_migration.md SS11.9, vendor copy per SS3.5/SS11.9).
 $forbidden = @(
     'Atom/RPI', 'Atom/RHI', 'Atom/Feature', 'Atom/Bootstrap',
     'Atom/ImageProcessing', 'Atom/Component', 'AtomLyIntegration',
@@ -124,10 +124,29 @@ else {
     Write-Warning "IMaterialSource.h not found; skipping contract assertion"
 }
 
+# IEntityMirror pure virtual count must be exactly 7 after the E2 slimming
+# (filament_migration.md SS7.1 / Ruler 3): SyncToEditor, EnumerateObjectTypes,
+# OnEditorTransformChanged, OnEditorPropertyChanged, CreateObject, DestroyObject,
+# RaycastScene. Engine-extension operations live on IEngineBackend::InvokeCustom.
+$entityMirrorFile = Join-Path $gemRoot "Code/Source/BackendAPI/IEntityMirror.h"
+if (Test-Path $entityMirrorFile) {
+    $virtualCount = (Select-String -Path $entityMirrorFile -Pattern '= 0;' | Measure-Object).Count
+    if ($virtualCount -ne 7) {
+        Write-Error "IEntityMirror has $virtualCount pure virtuals (expected 7 after E2 slimming)"
+        $exitCode = 1
+    }
+    else {
+        Write-Host "check_no_atom: IEntityMirror pure virtual count = 7 (contract OK)" -ForegroundColor Green
+    }
+}
+else {
+    Write-Warning "IEntityMirror.h not found; skipping contract assertion"
+}
+
 # --------------------------------------------------- 5. Vendor diff whitelist
 # Files under MaterialEditor/Vendor/AtomToolsFramework/ should only differ from
 # upstream AtomToolsFramework by the S1-S9 modifications documented in
-# material_migration_final.md SS4. This is an informational check; a full diff
+# material_migration.md SS4. This is an informational check; a full diff
 # requires the upstream checkout to be available.
 $vendorDir = Join-Path $gemRoot "Code/Source/MaterialEditor/Vendor/AtomToolsFramework"
 if (Test-Path $vendorDir) {

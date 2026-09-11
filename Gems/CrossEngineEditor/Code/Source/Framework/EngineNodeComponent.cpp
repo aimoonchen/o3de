@@ -308,21 +308,22 @@ namespace CrossEngineEditor
     {
         // Exact-name classification against the known engine classes. rbfx has ONE Light
         // class (Light.h:183 - PointLight/SpotLight variants do not exist there; light type
-        // is a property), Godot splits DirectionalLight3D / OmniLight3D / SpotLight3D.
-        // Exact matching keeps user-defined class names containing these substrings out
-        // (review round 1, R8). Unknown classes render nothing (WireKind::None) and keep the
-        // pre-wireframe pick behaviour.
-        if (m_className == "SpotLight3D")
+        // is a property), Godot splits DirectionalLight3D / OmniLight3D / SpotLight3D, and
+        // the Filament backend mirrors glTF light types as PointLight / SpotLight /
+        // DirectionalLight. Exact matching keeps user-defined class names containing these
+        // substrings out (review round 1, R8). Unknown classes render nothing (WireKind::None)
+        // and keep the pre-wireframe pick behaviour.
+        if (m_className == "SpotLight3D" || m_className == "SpotLight")
         {
             return WireKind::SpotLight;
         }
-        if (m_className == "DirectionalLight3D")
+        if (m_className == "DirectionalLight3D" || m_className == "DirectionalLight")
         {
             return WireKind::DirectionalLight;
         }
-        if (m_className == "Light" || m_className == "OmniLight3D")
+        if (m_className == "Light" || m_className == "OmniLight3D" || m_className == "PointLight")
         {
-            return WireKind::PointLight; // rbfx single Light class / Godot point light.
+            return WireKind::PointLight; // rbfx single Light class / Godot / Filament point.
         }
         if (m_className == "Camera" || m_className == "Camera3D")
         {

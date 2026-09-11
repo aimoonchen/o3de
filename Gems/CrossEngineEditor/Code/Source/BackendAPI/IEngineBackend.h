@@ -57,5 +57,26 @@ namespace CrossEngineEditor
         {
             return {};
         }
+
+        //! Engine-extension command escape hatch (E2 contract slimming, filament_migration.md
+        //! §7.1). The operations that are not shared editing value live here instead of on the
+        //! mirror's pure-virtual surface; a backend opts in by command name, everything else
+        //! falls through to the "unsupported" default. Known commands and their arg layout:
+        //!   "CreatePrefabFromNodes"  args = { entityId, ..., path }     payload unused
+        //!   "AssignMaterial"         args = { entityId, assetPath, slotIndex }  payload unused
+        //!   "AssignAnimation"        args = { entityId, assetPath }    payload unused
+        //!   "SerializeNodes"         args = { entityId, ... }          payload = out bytes
+        //!   "PasteNodes"             args = { parentId }               payload = in bytes
+        //! (an invalid parent id is passed as the empty string = scene root). Returns false
+        //! when the backend does not support the command or the command failed.
+        virtual bool InvokeCustom(
+            const AZStd::string& command, const AZStd::vector<AZStd::string>& args,
+            AZStd::vector<AZ::u8>& payload)
+        {
+            (void)command;
+            (void)args;
+            (void)payload;
+            return false;
+        }
     };
 } // namespace CrossEngineEditor

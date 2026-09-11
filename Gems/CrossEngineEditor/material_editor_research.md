@@ -8,8 +8,8 @@
 > 「你的结论是他们都是采用 RTT 方式进行材质编辑器的渲染？请再次确认（不要臆想，源码中调研）。
 > 为什么不是给一个独立的窗口句柄给引擎进行渲染呢？QT 的窗口也是可以获取窗口句柄给引擎渲染的吧。」
 >
-> **用途**：复核 `material_migration_final.md` §6.4 / §9.9「预览走 RTT + 按需回读，不给第二个 OS 表面」
-> 这组裁决的事实基础。§7 的订正清单**已全部实施**于 `material_migration_final.md`
+> **用途**：复核 `material_migration.md` §6.4 / §9.9「预览走 RTT + 按需回读，不给第二个 OS 表面」
+> 这组裁决的事实基础。§7 的订正清单**已全部实施**于 `material_migration.md`
 > （落点 §6.4.1/§6.4.2/§6.4.4/§6.4.5/§9.9/§11.8，并修正两处失效行号）。
 >
 > **纪律**：每条事实带 `文件:行号`，全部由本次 grep/read 实际命中；与终稿冲突的明写「订正」；
@@ -559,7 +559,7 @@ platform/windows/display_server_windows.cpp:8094 / :8291   （DisplayServer 构�
 
 ## §6 裁决：终稿结论维持
 
-**`material_migration_final.md` §9.9「预览不开第二个 OS 表面」的驳回结论维持不变。**
+**`material_migration.md` §9.9「预览不开第二个 OS 表面」的驳回结论维持不变。**
 §6.4 的「RTT + 按需回读 + 限频（10~15 Hz、≤512² clamp、`isVisible()` 门）」方案**不受影响**。
 
 **但承重论据必须替换**：
@@ -572,7 +572,7 @@ platform/windows/display_server_windows.cpp:8094 / :8291   （DisplayServer 构�
 
 ---
 
-## §7 对 `material_migration_final.md` 的订正清单（**已全部实施，落点见末列**）
+## §7 对 `material_migration.md` 的订正清单（**已全部实施，落点见末列**）
 
 | # | 位置 | 现状 | 订正 | 性质 |
 |---|---|---|---|---|

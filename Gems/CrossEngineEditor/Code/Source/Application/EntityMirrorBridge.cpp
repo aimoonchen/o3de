@@ -145,15 +145,22 @@ namespace CrossEngineEditor
             return false;
         }
 
-        IEntityMirror& mirror = backend->GetEntityMirror();
+        // Engine-extension assignment commands go through the backend's InvokeCustom escape
+        // hatch (E2 slimming); backends without the capability report "unsupported".
+        AZStd::vector<AZStd::string> args;
+        args.reserve(3);
+        args.push_back(target.ToString());
+        args.push_back(assetPath);
+        AZStd::vector<AZ::u8> payload;
         if (azstricmp(extension.c_str(), ".mat") == 0
             || azstricmp(extension.c_str(), ".material") == 0)
         {
-            return mirror.AssignMaterial(target, assetPath, 0);
+            args.push_back("0");
+            return backend->InvokeCustom("AssignMaterial", args, payload);
         }
         if (azstricmp(extension.c_str(), ".ani") == 0)
         {
-            return mirror.AssignAnimation(target, assetPath);
+            return backend->InvokeCustom("AssignAnimation", args, payload);
         }
         return false;
     }

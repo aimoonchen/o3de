@@ -17,6 +17,9 @@
 #if defined(CEE_HAVE_GODOT)
 #include <Backends/GodotBackend.h>
 #endif
+#if defined(CEE_HAVE_FILAMENT)
+#include <Backends/FilamentBackend.h>
+#endif
 #include <BackendAPI/IEngineBackend.h>
 #include <BackendAPI/IMaterialSource.h>
 #include <BackendAPI/IViewportTick.h>
@@ -276,7 +279,7 @@ namespace CrossEngineEditor
         m_actionsHandler = AZStd::make_unique<CeeActionsHandler>(m_mainWindow);
         AzToolsFramework::ActionManagerSystemComponent::TriggerRegistrationNotifications();
 
-        // Material document system bootstrap (material_migration_final.md SS6.3).
+        // Material document system bootstrap (material_migration.md SS6.3).
         // Create the document system and register the material document type.
         // This is positioned after backend registration so GetMaterialSource() is available.
         m_materialDocumentSystem = new AtomToolsFramework::AtomToolsDocumentSystem(k_ceeMaterialToolId);
@@ -361,6 +364,12 @@ namespace CrossEngineEditor
         if (choice == "godot")
         {
             return AZStd::make_unique<GodotBackend>();
+        }
+#endif
+#if defined(CEE_HAVE_FILAMENT)
+        if (choice == "filament")
+        {
+            return AZStd::make_unique<FilamentBackend>();
         }
 #endif
 #if defined(CEE_HAVE_DILIGENT)
@@ -601,7 +610,7 @@ namespace CrossEngineEditor
                     m_engineSynced = true;
                 }
 
-                // Material preview readback (material_migration_final.md SS6.4.4).
+                // Material preview readback (material_migration.md SS6.4.4).
                 // Called after backend->Tick() so the preview frame is ready.
                 // Throttled to 10-15 Hz by the dock preview panel's dirty flag + timestamp.
                 auto* previewDock = m_mainWindow ? m_mainWindow->FindMaterialPreviewPanel() : nullptr;

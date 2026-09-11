@@ -110,37 +110,6 @@ namespace CrossEngineEditor
         return false;
     }
 
-    bool NullBackend::NullEntityMirror::CreatePrefabFromNodes(
-        const AZStd::vector<AZ::EntityId>& /*entityIds*/,
-        const AZStd::string& /*path*/)
-    {
-        return false;
-    }
-
-    bool NullBackend::NullEntityMirror::AssignMaterial(
-        AZ::EntityId /*entityId*/, const AZStd::string& /*assetPath*/, int /*slot*/)
-    {
-        return false;
-    }
-
-    bool NullBackend::NullEntityMirror::AssignAnimation(
-        AZ::EntityId /*entityId*/, const AZStd::string& /*assetPath*/)
-    {
-        return false;
-    }
-
-    AZStd::vector<AZ::u8> NullBackend::NullEntityMirror::SerializeNodes(
-        const AZStd::vector<AZ::EntityId>& /*entityIds*/)
-    {
-        return {};
-    }
-
-    bool NullBackend::NullEntityMirror::PasteNodes(
-        const AZStd::vector<AZ::u8>& /*data*/, AZ::EntityId /*parentId*/)
-    {
-        return false;
-    }
-
     // --- NullAssetSource ---
     //
     // With no engine attached the "asset source" simply exposes the editor project's

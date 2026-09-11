@@ -37,7 +37,7 @@ namespace CrossEngineEditor
     class EntityMirrorBridge;
     class IEngineBackend;
 
-    //! Material document system tool id (material_migration_final.md SS6.3).
+    //! Material document system tool id (material_migration.md SS6.3).
     inline constexpr AZ::Crc32 k_ceeMaterialToolId = AZ_CRC_CE("CEE_MaterialEditor");
 
     //! Cross-engine editor application (Plan SSB1-SSB4).
@@ -121,7 +121,7 @@ namespace CrossEngineEditor
         //! runs. Owned here so it dies with (and before) the main window it points at.
         AZStd::unique_ptr<CeeActionsHandler> m_actionsHandler;
 
-        //! Material document system (material_migration_final.md SS6.3).
+        //! Material document system (material_migration.md SS6.3).
         //! Created after backend registration so GetMaterialSource() is available.
         AtomToolsFramework::AtomToolsDocumentSystem* m_materialDocumentSystem = nullptr;
 

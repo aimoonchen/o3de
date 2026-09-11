@@ -53,7 +53,9 @@ namespace CrossEngineEditor
     struct BackendInitParams
     {
         AZStd::string m_projectPath;   //!< Root path of the engine project to edit.
-        AZStd::string m_scenePath;     //!< Optional engine scene to open on start (resource-relative).
+        AZStd::string m_scenePath;     //!< Optional engine scene to open on start. Path convention is
+                                       //!< backend-defined: rbfx resolves resource-relative via its VFS,
+                                       //!< filament opens an OS path directly (no VFS).
         bool m_headless = false;       //!< True for automated tests (no window surface).
     };
 

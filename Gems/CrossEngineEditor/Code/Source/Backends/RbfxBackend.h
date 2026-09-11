@@ -97,6 +97,13 @@ namespace CrossEngineEditor
         //! does not exist - an honest capability surface instead of a menu entry that warns.
         [[nodiscard]] AZStd::vector<EngineActionPattern> GetActionRegistrationPatterns() override;
 
+        //! rbfx engine-extension commands (E2 slimming, filament_migration.md §7.1):
+        //! CreatePrefabFromNodes / AssignMaterial / AssignAnimation / SerializeNodes / PasteNodes.
+        //! Arg layout documented on IEngineBackend::InvokeCustom.
+        bool InvokeCustom(
+            const AZStd::string& command, const AZStd::vector<AZStd::string>& args,
+            AZStd::vector<AZ::u8>& payload) override;
+
     private:
         //! Shared engine state, owned by the backend and referenced by the sub-contracts.
         struct EngineState
@@ -167,13 +174,15 @@ namespace CrossEngineEditor
                 const AZ::Vector3& rayDirection,
                 AZ::Vector3& outHitPoint,
                 AZ::Vector3& outHitNormal) const override;
-            bool CreatePrefabFromNodes(
-                const AZStd::vector<AZ::EntityId>& entityIds,
-                const AZStd::string& path) override;
-            bool AssignMaterial(AZ::EntityId entityId, const AZStd::string& assetPath, int slot) override;
-            bool AssignAnimation(AZ::EntityId entityId, const AZStd::string& assetPath) override;
-            AZStd::vector<AZ::u8> SerializeNodes(const AZStd::vector<AZ::EntityId>& entityIds) override;
-            bool PasteNodes(const AZStd::vector<AZ::u8>& data, AZ::EntityId parentId) override;
+
+            //! Resolve the rbfx node for a mirror entity via the live EngineNodeComponent's
+            //! reflected node handle, or nullptr (warns on miss). This is the single node
+            //! resolution path for every post-sync operation (bounds / transform / property /
+            //! destroy, plus the backend's InvokeCustom commands): the editor entity context
+            //! re-homes mirror entities into its prefab when taking ownership, so an
+            //! entity-id -> node-id map can go stale, whereas the reflected handle survives
+            //! that re-home. One truth source, no silent no-ops.
+            Urho3D::Node* ResolveNode(AZ::EntityId entityId) const;
 
         private:
             //! Build (or reuse) a mirror entity for one rbfx node and recurse its children.
@@ -183,14 +192,6 @@ namespace CrossEngineEditor
 
             //! Read a node's Serializable attributes into a typed PropertyBag.
             void ReadProperties(Urho3D::Node* node, PropertyBag& outBag) const;
-
-            //! Resolve the rbfx node for a mirror entity via the live EngineNodeComponent's
-            //! reflected node handle, or nullptr (warns on miss). This is the single node
-            //! resolution path for every post-sync operation (bounds / transform / property /
-            //! destroy): the editor entity context re-homes mirror entities into its prefab when
-            //! taking ownership, so an entity-id -> node-id map can go stale, whereas the reflected
-            //! handle survives that re-home. One truth source, no silent no-ops.
-            Urho3D::Node* ResolveNode(AZ::EntityId entityId) const;
 
             //! Resolve an engine resource by StringHash type name + resource name through the
             //! cache (shared by the batch 2 resource operations), or nullptr. path resolves via

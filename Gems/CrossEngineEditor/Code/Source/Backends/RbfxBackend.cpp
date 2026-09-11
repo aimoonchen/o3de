@@ -26,6 +26,7 @@
 #include <AzQtComponents/Components/Widgets/FileDialog.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
@@ -391,8 +392,15 @@ namespace CrossEngineEditor
 
             if (IEngineBackend* backend = AZ::Interface<IEngineBackend>::Get())
             {
-                const bool ok = backend->GetEntityMirror().CreatePrefabFromNodes(
-                    selection, AZStd::string(path.toUtf8().constData()));
+                AZStd::vector<AZStd::string> args;
+                args.reserve(selection.size() + 1);
+                for (const AZ::EntityId id : selection)
+                {
+                    args.push_back(id.ToString());
+                }
+                args.emplace_back(path.toUtf8().constData());
+                AZStd::vector<AZ::u8> payload;
+                const bool ok = backend->InvokeCustom("CreatePrefabFromNodes", args, payload);
                 AZ_Warning("CrossEngineEditor", ok, "ExportPrefab failed for %s.", path.toUtf8().constData());
             }
         };
@@ -1252,179 +1260,193 @@ namespace CrossEngineEditor
         return false;
     }
 
-    bool RbfxBackend::RbfxEntityMirror::CreatePrefabFromNodes(
-        const AZStd::vector<AZ::EntityId>& entityIds,
-        const AZStd::string& path)
+    bool RbfxBackend::InvokeCustom(
+        const AZStd::string& command, const AZStd::vector<AZStd::string>& args,
+        AZStd::vector<AZ::u8>& payload)
     {
-        // v1 (simplified): export the first selected node's subtree as an engine-native prefab (XML),
-        // matching the rbfx editor's single-node export.
-        if (entityIds.empty() || path.empty())
+        // Engine-extension commands, slimmed off the mirror surface (E2). The string args
+        // carry entity ids (AZ::EntityId::ToString, which formats as "[id]") + paths; see
+        // IEngineBackend::InvokeCustom.
+        auto entityIdAt = [](const AZStd::vector<AZStd::string>& a, size_t i) -> AZ::EntityId
         {
-            return false;
-        }
-        Urho3D::Node* node = ResolveNode(entityIds.front());
-        if (!node || !m_state.m_context)
+            if (i >= a.size() || a[i].size() < 3 || a[i].front() != '[')
+            {
+                return AZ::EntityId();
+            }
+            return AZ::EntityId(::strtoull(a[i].c_str() + 1, nullptr, 10));
+        };
+
+        if (command == "CreatePrefabFromNodes")
         {
-            return false;
+            // v1 (simplified): export the first selected node's subtree as an engine-native prefab
+            // (XML), matching the rbfx editor's single-node export. Last arg is the target path.
+            if (args.size() < 2 || args.back().empty())
+            {
+                return false;
+            }
+            Urho3D::Node* node = m_entityMirror.ResolveNode(entityIdAt(args, 0));
+            if (!node || !m_state.m_context)
+            {
+                return false;
+            }
+            Urho3D::File file(m_state.m_context, ea::string(args.back().c_str()), Urho3D::FILE_WRITE);
+            if (!file.IsOpen())
+            {
+                AZ_Warning("CrossEngineEditor", false,
+                    "rbfx CreatePrefabFromNodes: could not open %s for write.", args.back().c_str());
+                return false;
+            }
+            const bool ok = node->SaveXML(file);
+            AZ_Warning("CrossEngineEditor", ok, "rbfx CreatePrefabFromNodes: SaveXML failed for %s.",
+                args.back().c_str());
+            return ok;
         }
 
-        Urho3D::File file(m_state.m_context, ea::string(path.c_str()), Urho3D::FILE_WRITE);
-        if (!file.IsOpen())
+        if (command == "AssignMaterial")
         {
-            AZ_Warning("CrossEngineEditor", false,
-                "rbfx CreatePrefabFromNodes: could not open %s for write.", path.c_str());
-            return false;
-        }
-        const bool ok = node->SaveXML(file);
-        AZ_Warning("CrossEngineEditor", ok, "rbfx CreatePrefabFromNodes: SaveXML failed for %s.", path.c_str());
-        if (ok)
-        {
-            AZ_Printf("CrossEngineEditor", "rbfx CreatePrefabFromNodes: wrote %s\n", path.c_str());
-        }
-        return ok;
-    }
-
-    bool RbfxBackend::RbfxEntityMirror::AssignMaterial(
-        AZ::EntityId entityId, const AZStd::string& assetPath, int slot)
-    {
-        Urho3D::Node* node = ResolveNode(entityId);
-        if (!node || !m_state.m_context)
-        {
-            return false;
-        }
-
-        auto* cache = m_state.m_context->GetSubsystem<Urho3D::ResourceCache>();
-        if (!cache)
-        {
-            return false;
-        }
-        // GetResource returns a cache-owned raw pointer in this rbfx build (not SharedPtr).
-        // Pass the absolute path directly — rbfx's VFS canonicalize handles path resolution.
-        Urho3D::Material* material =
-            cache->GetResource<Urho3D::Material>(ea::string(assetPath.c_str()));
-        if (!material)
-        {
-            AZ_Warning("CrossEngineEditor", false, "rbfx AssignMaterial: could not load %s.", assetPath.c_str());
-            return false;
+            if (args.size() < 3)
+            {
+                return false;
+            }
+            Urho3D::Node* node = m_entityMirror.ResolveNode(entityIdAt(args, 0));
+            if (!node || !m_state.m_context)
+            {
+                return false;
+            }
+            auto* cache = m_state.m_context->GetSubsystem<Urho3D::ResourceCache>();
+            if (!cache)
+            {
+                return false;
+            }
+            // GetResource returns a cache-owned raw pointer in this rbfx build (not SharedPtr).
+            // Pass the absolute path directly — rbfx's VFS canonicalize handles path resolution.
+            Urho3D::Material* material =
+                cache->GetResource<Urho3D::Material>(ea::string(args[1].c_str()));
+            if (!material)
+            {
+                AZ_Warning("CrossEngineEditor", false, "rbfx AssignMaterial: could not load %s.",
+                    args[1].c_str());
+                return false;
+            }
+            // The model component is created on demand (the assign flow is what introduces
+            // materials onto plain nodes).
+            auto* model = node->GetComponent<Urho3D::StaticModel>();
+            if (!model)
+            {
+                model = node->CreateComponent<Urho3D::StaticModel>();
+            }
+            const int slot = atoi(args[2].c_str());
+            return model->SetMaterial(slot < 0 ? 0u : static_cast<unsigned>(slot), material);
         }
 
-        // The model component is created on demand (the assign flow is what introduces
-        // materials onto plain nodes).
-        auto* model = node->GetComponent<Urho3D::StaticModel>();
-        if (!model)
+        if (command == "AssignAnimation")
         {
-            model = node->CreateComponent<Urho3D::StaticModel>();
-        }
-        return model->SetMaterial(slot < 0 ? 0u : static_cast<unsigned>(slot), material);
-    }
-
-    bool RbfxBackend::RbfxEntityMirror::AssignAnimation(
-        AZ::EntityId entityId, const AZStd::string& assetPath)
-    {
-        Urho3D::Node* node = ResolveNode(entityId);
-        if (!node || !m_state.m_context)
-        {
-            return false;
-        }
-
-        // AnimationParameters resolves the animation through the resource cache by name; a
-        // failed load leaves GetAnimation() null.
-        // Pass the absolute path directly — rbfx's VFS canonicalize handles path resolution.
-        Urho3D::AnimationParameters params(m_state.m_context.Get(), ea::string(assetPath.c_str()));
-        if (!params.GetAnimation())
-        {
-            AZ_Warning("CrossEngineEditor", false, "rbfx AssignAnimation: could not load %s.", assetPath.c_str());
-            return false;
-        }
-
-        auto* controller = node->GetComponent<Urho3D::AnimationController>();
-        if (!controller)
-        {
-            controller = node->CreateComponent<Urho3D::AnimationController>();
-        }
-        // Assign only - never auto-play in the editor. Playing would invalidate the bounds
-        // cache per animation frame while editing (plan §B5b). AddAnimation registers the
-        // state without starting it (PlayNew* = AddAnimation + play), and replacing the
-        // existing assignment keeps the scene serialization to one animation.
-        for (unsigned i = controller->GetNumAnimations(); i > 0; --i)
-        {
-            controller->RemoveAnimation(i - 1u);
-        }
-        params.Looped(true).Layer(0);
-        controller->AddAnimation(params);
-        return true;
-    }
-
-    AZStd::vector<AZ::u8> RbfxBackend::RbfxEntityMirror::SerializeNodes(
-        const AZStd::vector<AZ::EntityId>& entityIds)
-    {
-        // v1 (simplified): serialize the first selected node's subtree to XML bytes, matching the rbfx
-        // editor's own single-node clipboard.
-        if (entityIds.empty())
-        {
-            return {};
-        }
-        Urho3D::Node* node = ResolveNode(entityIds.front());
-        if (!node)
-        {
-            return {};
+            if (args.size() < 2)
+            {
+                return false;
+            }
+            Urho3D::Node* node = m_entityMirror.ResolveNode(entityIdAt(args, 0));
+            if (!node || !m_state.m_context)
+            {
+                return false;
+            }
+            // AnimationParameters resolves the animation through the resource cache by name; a
+            // failed load leaves GetAnimation() null.
+            Urho3D::AnimationParameters params(m_state.m_context.Get(), ea::string(args[1].c_str()));
+            if (!params.GetAnimation())
+            {
+                AZ_Warning("CrossEngineEditor", false, "rbfx AssignAnimation: could not load %s.",
+                    args[1].c_str());
+                return false;
+            }
+            auto* controller = node->GetComponent<Urho3D::AnimationController>();
+            if (!controller)
+            {
+                controller = node->CreateComponent<Urho3D::AnimationController>();
+            }
+            // Assign only - never auto-play in the editor. Playing would invalidate the bounds
+            // cache per animation frame while editing (plan §B5b). AddAnimation registers the
+            // state without starting it (PlayNew* = AddAnimation + play), and replacing the
+            // existing assignment keeps the scene serialization to one animation.
+            for (unsigned i = controller->GetNumAnimations(); i > 0; --i)
+            {
+                controller->RemoveAnimation(i - 1u);
+            }
+            params.Looped(true).Layer(0);
+            controller->AddAnimation(params);
+            return true;
         }
 
-        Urho3D::VectorBuffer buffer;
-        if (!node->SaveXML(buffer))
+        if (command == "SerializeNodes")
         {
-            AZ_Warning("CrossEngineEditor", false, "rbfx SerializeNodes: SaveXML failed.");
-            return {};
-        }
-        const unsigned char* data = buffer.GetData();
-        const unsigned size = buffer.GetSize();
-        if (!data || size == 0)
-        {
-            return {};
-        }
-        return AZStd::vector<AZ::u8>(data, data + size);
-    }
-
-    bool RbfxBackend::RbfxEntityMirror::PasteNodes(
-        const AZStd::vector<AZ::u8>& data, AZ::EntityId parentId)
-    {
-        if (data.empty() || !m_state.m_scene || !m_state.m_context)
-        {
-            return false;
-        }
-
-        // Parse the clipboard XML into a standalone XMLFile, then let the scene instantiate the
-        // node subtree at the parent's world position; SetParent afterwards re-parents WITHOUT
-        // changing the world transform (Node::SetParent retains the world transform), so the
-        // pasted content keeps the drop placement. An invalid parentId (scene root) passes
-        // through without the ResolveNode warning.
-        Urho3D::XMLFile xml(m_state.m_context.Get());
-        if (!xml.FromString(ea::string(reinterpret_cast<const char*>(data.data()), data.size())) ||
-            !xml.GetRoot().NotNull())
-        {
-            AZ_Warning("CrossEngineEditor", false, "rbfx PasteNodes: clipboard XML did not parse.");
-            return false;
+            // v1 (simplified): serialize the first selected node's subtree to XML bytes, matching
+            // the rbfx editor's own single-node clipboard.
+            if (args.empty())
+            {
+                return false;
+            }
+            Urho3D::Node* node = m_entityMirror.ResolveNode(entityIdAt(args, 0));
+            if (!node)
+            {
+                return false;
+            }
+            Urho3D::VectorBuffer buffer;
+            if (!node->SaveXML(buffer))
+            {
+                AZ_Warning("CrossEngineEditor", false, "rbfx SerializeNodes: SaveXML failed.");
+                return false;
+            }
+            const unsigned char* data = buffer.GetData();
+            const unsigned size = buffer.GetSize();
+            if (!data || size == 0)
+            {
+                return false;
+            }
+            payload.assign(data, data + size);
+            return true;
         }
 
-        Urho3D::Node* parent = nullptr;
-        if (parentId.IsValid())
+        if (command == "PasteNodes")
         {
-            parent = ResolveNode(parentId);
+            if (payload.empty() || !m_state.m_scene || !m_state.m_context)
+            {
+                return false;
+            }
+            // Parse the clipboard XML into a standalone XMLFile, then let the scene instantiate
+            // the node subtree at the parent's world position; SetParent afterwards re-parents
+            // WITHOUT changing the world transform (Node::SetParent retains the world
+            // transform), so the pasted content keeps the drop placement. An invalid parent id
+            // (empty string = scene root) passes through without the ResolveNode warning.
+            Urho3D::XMLFile xml(m_state.m_context.Get());
+            if (!xml.FromString(ea::string(reinterpret_cast<const char*>(payload.data()), payload.size())) ||
+                !xml.GetRoot().NotNull())
+            {
+                AZ_Warning("CrossEngineEditor", false, "rbfx PasteNodes: clipboard XML did not parse.");
+                return false;
+            }
+            Urho3D::Node* parent = nullptr;
+            const AZ::EntityId parentId = entityIdAt(args, 0);
+            if (parentId.IsValid())
+            {
+                parent = m_entityMirror.ResolveNode(parentId);
+            }
+            const Urho3D::Vector3 parentPos =
+                parent ? parent->GetWorldPosition() : Urho3D::Vector3::ZERO;
+            Urho3D::Node* pasted =
+                m_state.m_scene->InstantiateXML(xml.GetRoot(), parentPos, Urho3D::Quaternion::IDENTITY);
+            if (!pasted)
+            {
+                AZ_Warning("CrossEngineEditor", false, "rbfx PasteNodes: InstantiateXML failed.");
+                return false;
+            }
+            if (parent)
+            {
+                pasted->SetParent(parent);
+            }
+            return true;
         }
-        Urho3D::Vector3 parentPos = parent ? parent->GetWorldPosition() : Urho3D::Vector3::ZERO;
 
-        Urho3D::Node* pasted =
-            m_state.m_scene->InstantiateXML(xml.GetRoot(), parentPos, Urho3D::Quaternion::IDENTITY);
-        if (!pasted)
-        {
-            AZ_Warning("CrossEngineEditor", false, "rbfx PasteNodes: InstantiateXML failed.");
-            return false;
-        }
-        if (parent)
-        {
-            pasted->SetParent(parent);
-        }
-        return true;
+        return false;
     }
 
     // ------------------------------------------------------------- RbfxAssetSource

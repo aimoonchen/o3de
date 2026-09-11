@@ -33,25 +33,26 @@ namespace CrossEngineEditor
     //! Target engine coordinate conventions handled by the converter.
     enum class EngineSpace
     {
-        Rbfx,  //!< Y-up, left-handed, +Z forward.
-        Godot, //!< Y-up, right-handed, -Z forward.
+        Rbfx,    //!< Y-up, left-handed, +Z forward.
+        Godot,   //!< Y-up, right-handed, -Z forward.
+        Filament //!< Y-up, right-handed, -Z forward (same as Godot).
     };
 
     class EngineTransformConverter
     {
     public:
-        //! O3DE position -> engine position. Both engines swap Y and Z; Godot also
-        //! negates the (now) Z-forward so O3DE +Y forward maps to Godot -Z.
+        //! O3DE position -> engine position. Both engines swap Y and Z; Godot/Filament also
+        //! negates the (now) Z-forward so O3DE +Y forward maps to Godot/Filament -Z.
         static AZ::Vector3 PositionToEngine(EngineSpace space, const AZ::Vector3& p)
         {
-            const float z = (space == EngineSpace::Godot) ? -p.GetY() : p.GetY();
+            const float z = (space == EngineSpace::Godot || space == EngineSpace::Filament) ? -p.GetY() : p.GetY();
             return AZ::Vector3(p.GetX(), p.GetZ(), z);
         }
 
         //! Inverse of PositionToEngine (engine position -> O3DE position).
         static AZ::Vector3 PositionFromEngine(EngineSpace space, const AZ::Vector3& p)
         {
-            const float y = (space == EngineSpace::Godot) ? -p.GetZ() : p.GetZ();
+            const float y = (space == EngineSpace::Godot || space == EngineSpace::Filament) ? -p.GetZ() : p.GetZ();
             return AZ::Vector3(p.GetX(), y, p.GetY());
         }
 
@@ -174,7 +175,7 @@ namespace CrossEngineEditor
             AZ::Matrix3x3 c = AZ::Matrix3x3::CreateZero();
             c.SetElement(0, 0, 1.0f);                                     // x' =  x
             c.SetElement(1, 2, 1.0f);                                     // y' =  z
-            c.SetElement(2, 1, (space == EngineSpace::Godot) ? -1.0f : 1.0f); // z' = -y (Godot) / y (rbfx)
+            c.SetElement(2, 1, (space == EngineSpace::Godot || space == EngineSpace::Filament) ? -1.0f : 1.0f); // z' = -y (Godot/Filament) / y (rbfx)
             return c;
         }
 

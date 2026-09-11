@@ -116,7 +116,7 @@ namespace
 
 namespace CrossEngineEditor
 {
-    // Material document type id for the document system (material_migration_final.md SS6.3).
+    // Material document type id for the document system (material_migration.md SS6.3).
     // NOTE: The canonical definition lives in CrossEngineEditorApplication.h as k_ceeMaterialToolId.
 
     EditorMainWindow::EditorMainWindow(EntityMirrorBridge* mirrorBridge, QWidget* parent)
@@ -256,7 +256,7 @@ namespace CrossEngineEditor
                                       QStringLiteral("Core"), Qt::BottomDockWidgetArea, 500,
                                       consoleFactory });
 
-        // Material Inspector dock (material_migration_final.md SS6.5).
+        // Material Inspector dock (material_migration.md SS6.5).
         auto materialInspectorFactory = [this] -> QWidget*
         {
             auto* host = new QWidget();
@@ -268,7 +268,7 @@ namespace CrossEngineEditor
             auto* toolbar = new CeeMaterialToolbar(host);
             layout->addWidget(toolbar);
 
-            // Instantiate the real property inspector (material_migration_final.md SS6.5).
+            // Instantiate the real property inspector (material_migration.md SS6.5).
             // Use CRC of the tool id string to match the document system's registration.
             auto* inspector = new CeeMaterialDocumentInspector(
                 CrossEngineEditor::k_ceeMaterialToolId, host);
@@ -339,7 +339,7 @@ namespace CrossEngineEditor
             return host;
         };
 
-        // Material Preview dock (material_migration_final.md SS6.4).
+        // Material Preview dock (material_migration.md SS6.4).
         auto materialPreviewFactory = [this] -> QWidget*
         {
             auto* panel = new CeeMaterialPreviewPanel(this);
@@ -622,8 +622,14 @@ namespace CrossEngineEditor
         AzToolsFramework::EntityIdList selection;
         AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
             selection, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
-        const AZStd::vector<AZ::u8> bytes = backend->GetEntityMirror().SerializeNodes(selection);
-        if (bytes.empty())
+        AZStd::vector<AZStd::string> args;
+        args.reserve(selection.size());
+        for (const AZ::EntityId id : selection)
+        {
+            args.push_back(id.ToString());
+        }
+        AZStd::vector<AZ::u8> bytes;
+        if (!backend->InvokeCustom("SerializeNodes", args, bytes) || bytes.empty())
         {
             return;
         }
@@ -660,12 +666,13 @@ namespace CrossEngineEditor
         {
             return;
         }
-        const AZStd::vector<AZ::u8> bytes(raw.cbegin(), raw.cend());
+        AZStd::vector<AZ::u8> bytes(raw.cbegin(), raw.cend());
 
         // v1: paste under the first selected mirror entity, else the scene root (PasteNodes
-        // treats an invalid parent id as the root and bypasses ResolveNode warnings).
-        backend->GetEntityMirror().PasteNodes(
-            bytes, m_mirrorBridge ? m_mirrorBridge->FirstSelectedMirrorId() : AZ::EntityId());
+        // treats an empty parent-id string as the root and bypasses ResolveNode warnings).
+        const AZ::EntityId parent = m_mirrorBridge ? m_mirrorBridge->FirstSelectedMirrorId() : AZ::EntityId();
+        backend->InvokeCustom("PasteNodes",
+            AZStd::vector<AZStd::string>{ parent.IsValid() ? parent.ToString() : AZStd::string() }, bytes);
         if (m_mirrorBridge)
         {
             RefreshFromEngineKeepingState();
@@ -687,14 +694,21 @@ namespace CrossEngineEditor
         AzToolsFramework::EntityIdList selection;
         AzToolsFramework::ToolsApplicationRequestBus::BroadcastResult(
             selection, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
-        const AZStd::vector<AZ::u8> bytes = backend->GetEntityMirror().SerializeNodes(selection);
-        if (bytes.empty())
+        AZStd::vector<AZStd::string> args;
+        args.reserve(selection.size());
+        for (const AZ::EntityId id : selection)
+        {
+            args.push_back(id.ToString());
+        }
+        AZStd::vector<AZ::u8> bytes;
+        if (!backend->InvokeCustom("SerializeNodes", args, bytes) || bytes.empty())
         {
             return;
         }
 
-        backend->GetEntityMirror().PasteNodes(
-            bytes, m_mirrorBridge ? m_mirrorBridge->FirstSelectedMirrorId() : AZ::EntityId());
+        const AZ::EntityId parent = m_mirrorBridge ? m_mirrorBridge->FirstSelectedMirrorId() : AZ::EntityId();
+        backend->InvokeCustom("PasteNodes",
+            AZStd::vector<AZStd::string>{ parent.IsValid() ? parent.ToString() : AZStd::string() }, bytes);
         if (m_mirrorBridge)
         {
             RefreshFromEngineKeepingState();
@@ -1508,7 +1522,7 @@ namespace CrossEngineEditor
 
     void EditorMainWindow::closeEvent(QCloseEvent* event)
     {
-        // Material documents first (material_migration_final.md SS6.3).
+        // Material documents first (material_migration.md SS6.3).
         // If the active material document has unsaved changes, prompt before closing.
         if (m_materialInspector)
         {

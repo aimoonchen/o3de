@@ -177,7 +177,7 @@ ProgressShield（0.3）· 主题化对话框（`FileDialog`/`MessageBox`/`InputD
 | `Plan.md` §B1 | 编辑器壳「工具栏…全部复用 O3DE 框架」 | 工具栏实为手写裸 QToolBar + 文字按钮 | 改"待接入 ActionManager + addMainToolBarStyle" |
 | `Plan.md` §B5 | 命令面板「模糊搜索全部已注册动作」 | 实为遍历 `menuBar()` ~20 项 | P1-11 后修正措辞 |
 | `Plan.md` §B11 | 「不做框选」 | `EditorBoxSelect` 是独立、回调驱动、Atom-free 的 ① 级 stock（经 `DebugDisplayRequests` 绘制，CEE `GenericDebugDisplay` 已实现），D3 复议通过 | 改写为「框选 = 复用 EditorBoxSelect（①级）」；记为 C3 反面判例**第三例** |
-| `Plan.md` 文末 | `check_no_atom.ps1` 已精化为"禁 Atom 渲染模块 + 白名单 AtomToolsFramework.Core" | 脚本未改（仍 `-cmatch 'Atom'` 裸词，95 行内零命中 AtomToolsFramework/RPI/RHI） | ✅ **改表述已执行**（Plan 文末）；精化脚本归材质实施轮（`material_migration_final.md` §3.6 spec 已有，触发点 = Code/Source 真实出现 AtomToolsFramework include） |
+| `Plan.md` 文末 | `check_no_atom.ps1` 已精化为"禁 Atom 渲染模块 + 白名单 AtomToolsFramework.Core" | 脚本未改（仍 `-cmatch 'Atom'` 裸词，95 行内零命中 AtomToolsFramework/RPI/RHI） | ✅ **改表述已执行**（Plan 文末）；精化脚本归材质实施轮（`material_migration.md` §3.6 spec 已有，触发点 = Code/Source 真实出现 AtomToolsFramework include） |
 | `rbfx_migration.md` §4 | 「ActionManager 全量接入暂不做」 | 当时论证只把 ActionManager 当"快捷键方案"，漏掉它同时是三个 context menu 的唯一数据源 | 推翻：P0/P1 全量接入 |
 | `rbfx_migration.md` §3.3 | 「palette 头部可见但惰性」 | 真正缺的是 `ComponentPaletteWidget` 未接 | P2 |
 | `rbfx_migration.md` §3.6 | v2 待办「Refresh 展开态恢复」 | `QTreeViewStateSaver` 现成 | 降级为 P2 |
