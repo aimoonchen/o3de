@@ -160,9 +160,9 @@ TickSystem() → Tick() → 60fps 节流门 { TickRender(相机+overlay, rbfx pr
 
 ## B5. 停靠 / Workspaces / 命令面板（UX 增强）✅
 
-- **停靠双路径**（`EditorMainWindow.cpp` 构造函数）：`CEE_HAVE_ADS` 定义时用 vendored **Qt-Advanced-Docking-System**（`ads::CDockManager` 注册为 central widget，先于任何面板创建；OpaqueSplitterResize + FocusHighlighting 等配置）；否则 fallback `AzQtComponents::FancyDocking`。两条路径均提供 `saveState/restoreState`，Workspaces 接口一致。
-- **Workspaces**：`SaveWorkspaceLayout/RestoreWorkspaceLayout`（`saveGeometry` + 停靠 `saveState` 双路径 + `QSettings` 分组，菜单 Save/Restore 默认 "Default"）。⏳ 待肉眼验收。
-- **命令面板**：`Ctrl+P`（`Qt::ApplicationShortcut`）模糊搜索并执行。**当前数据源 = 遍历 menuBar 的手写动作（~20 个）**；ActionManager 接入后改枚举全部已注册动作（`editor_polish.md` P1-11）。
+- **停靠 ADS 单路径**（`EditorMainWindow.cpp` 构造函数）：vendored **Qt-Advanced-Docking-System**（`ads::CDockManager` 注册为 central widget，先于任何面板创建；OpaqueSplitterResize + FocusHighlighting 等配置）。原 FancyDocking fallback 已随 dock_style 专项复查删除——dock 是 UI 基础设施非可拔插后端，子模块缺失即 configure 期 FATAL（`External/CMakeLists.txt`）。
+- **Workspaces**：`SaveWorkspaceLayout/RestoreWorkspaceLayout`（`saveGeometry` + ADS `saveState` + `QSettings` 分组，菜单 Save/Restore 默认 "Default"）。⏳ 待肉眼验收。
+- **命令面板**：`Ctrl+P`（`Qt::ApplicationShortcut`）模糊搜索并执行。数据源 = 枚举 ActionManager 生成的菜单栏与三个注册右键菜单中的全部已注册动作（`EditorMainWindow::CollectCommands`）。
 
 ## B5b. 点选与选中 ✅
 

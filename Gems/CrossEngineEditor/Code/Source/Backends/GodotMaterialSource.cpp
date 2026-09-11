@@ -253,7 +253,7 @@ namespace CrossEngineEditor
             m_preview.m_dirty = true;
         }
 
-        // Per material_migration.md SS4.5: return AppliedSchemaChanged when the
+        // Per material_migration.md §4.5: return AppliedSchemaChanged when the
         // property change may alter visibility of other properties (e.g. emission_enabled
         // showing/hiding emission sub-properties). Check for "_enabled" suffix, mode
         // changes, and texture assignments (which toggle *_texture_channel visibility).

@@ -59,6 +59,7 @@
 #include <AzQtComponents/Components/WindowDecorationWrapper.h>
 
 AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
+#include <QIcon>
 #include <QTimer>
 AZ_POP_DISABLE_WARNING
 
@@ -88,6 +89,9 @@ namespace CrossEngineEditor
     {
         setOrganizationName(QStringLiteral("CrossEngineEditor"));
         setApplicationName(QStringLiteral("CrossEngineEditor"));
+        // Stock O3DE application icon (same asset the AzQtComponents DockBar uses); the
+        // native editor's ico variant lives in the Atom-bound EditorLib qrc and is unlinkable.
+        setWindowIcon(QIcon(QStringLiteral(":/stylesheet/img/ly_application_icon.png")));
 
         AZ::SettingsRegistryMergeUtils::MergeSettingsToRegistry_AddBuildSystemTargetSpecialization(
             *AZ::SettingsRegistry::Get(), LY_CMAKE_TARGET);
@@ -230,18 +234,14 @@ namespace CrossEngineEditor
         m_mainWindowWrapper->setGuest(m_mainWindow);
         AzToolsFramework::EditorWindowRequestBus::Handler::BusConnect();
 
-        // Status bar + title scene name (editor_polish.md P1-17 / P2): project path and backend
-        // name come from the command line - no contract growth (the backend has no name/version
-        // query; the --backend choice IS the displayed name, version is deferred with the doc).
+        // Status bar + title scene name (editor_polish.md P1-17 / P2): project path comes from
+        // the command line; the backend name is the one the factory actually resolved (the raw
+        // --backend value may be empty or name an uncompiled backend - the factory is the
+        // single source of truth for what is running).
         {
-            AZStd::string backendName = ReadArgValue(arguments(), "--backend");
-            if (backendName.empty())
-            {
-                backendName = "default";
-            }
             const AZStd::string projectPath = ReadArgValue(arguments(), "--project");
             m_mainWindow->SetStatusInfo(
-                QString::fromUtf8(projectPath.c_str()), QString::fromUtf8(backendName.c_str()));
+                QString::fromUtf8(projectPath.c_str()), QString::fromUtf8(m_backendName.c_str()));
 
             const AZStd::string scenePath = ReadArgValue(arguments(), "--scene");
             if (!scenePath.empty())
@@ -279,10 +279,10 @@ namespace CrossEngineEditor
         m_actionsHandler = AZStd::make_unique<CeeActionsHandler>(m_mainWindow);
         AzToolsFramework::ActionManagerSystemComponent::TriggerRegistrationNotifications();
 
-        // Material document system bootstrap (material_migration.md SS6.3).
+        // Material document system bootstrap (material_migration.md §6.3).
         // Create the document system and register the material document type.
         // This is positioned after backend registration so GetMaterialSource() is available.
-        m_materialDocumentSystem = new AtomToolsFramework::AtomToolsDocumentSystem(k_ceeMaterialToolId);
+        m_materialDocumentSystem = AZStd::make_unique<AtomToolsFramework::AtomToolsDocumentSystem>(k_ceeMaterialToolId);
         {
             auto typeInfo = CeeMaterialDocument::BuildDocumentTypeInfo();
             m_materialDocumentSystem->RegisterDocumentType(typeInfo);
@@ -317,8 +317,7 @@ namespace CrossEngineEditor
         if (m_materialDocumentSystem)
         {
             m_materialDocumentSystem->CloseAllDocuments();
-            delete m_materialDocumentSystem;
-            m_materialDocumentSystem = nullptr;
+            m_materialDocumentSystem.reset();
         }
 
         // Reset the wrapper, not the guest: the wrapper deletes the guest.
@@ -357,18 +356,21 @@ namespace CrossEngineEditor
 #if defined(CEE_HAVE_RBFX)
         if (choice == "rbfx")
         {
+            m_backendName = "rbfx";
             return AZStd::make_unique<RbfxBackend>();
         }
 #endif
 #if defined(CEE_HAVE_GODOT)
         if (choice == "godot")
         {
+            m_backendName = "godot";
             return AZStd::make_unique<GodotBackend>();
         }
 #endif
 #if defined(CEE_HAVE_FILAMENT)
         if (choice == "filament")
         {
+            m_backendName = "filament";
             return AZStd::make_unique<FilamentBackend>();
         }
 #endif
@@ -376,10 +378,12 @@ namespace CrossEngineEditor
         if (choice == "diligent" || choice.empty())
         {
             // Diligent is the default "no-engine" demo backend when nothing is requested.
+            m_backendName = "diligent";
             return AZStd::make_unique<DiligentBackend>();
         }
 #endif
         // "null", an unknown value, or no compiled-in match: run on the do-nothing backend.
+        m_backendName = "null";
         return AZStd::make_unique<NullBackend>();
     }
 
@@ -610,7 +614,7 @@ namespace CrossEngineEditor
                     m_engineSynced = true;
                 }
 
-                // Material preview readback (material_migration.md SS6.4.4).
+                // Material preview readback (material_migration.md §6.4.4).
                 // Called after backend->Tick() so the preview frame is ready.
                 // Throttled to 10-15 Hz by the dock preview panel's dirty flag + timestamp.
                 auto* previewDock = m_mainWindow ? m_mainWindow->FindMaterialPreviewPanel() : nullptr;

@@ -11,11 +11,13 @@
 #include <AzCore/Console/IConsole.h>
 #include <AzCore/StringFunc/StringFunc.h>
 #include <AzCore/Utils/Utils.h>
+#include <AzCore/std/chrono/chrono.h>
 #include <AzCore/std/containers/unordered_map.h>
 
 #include <AzToolsFramework/AzToolsFrameworkAPI.h>
 #include <AzToolsFramework/AssetBrowser/AssetBrowserModel.h>
 #include <AzToolsFramework/AssetBrowser/AssetBrowserFilterModel.h>
+#include <AzToolsFramework/AssetBrowser/Search/SearchWidget.h>
 #include <AzToolsFramework/AssetBrowser/Views/AssetBrowserTreeView.h>
 #include <AzToolsFramework/UI/UICore/QTreeViewStateSaver.hxx>
 
@@ -169,6 +171,15 @@ namespace CrossEngineEditor
         m_filterModel = aznew AzToolsFramework::AssetBrowser::AssetBrowserFilterModel(this, false);
         m_filterModel->setSourceModel(m_model);
 
+        // Stock search composition (same as the native Asset Browser, AzAssetBrowserWindow.cpp):
+        // the SearchWidget owns the composite filter, the filter model just consumes it.
+        // Text filter only - CEE entries have no asset-database types to filter by. The
+        // StringFilter matches on display name (Filter.cpp), which is all CEE entries carry.
+        m_searchWidget = new AzToolsFramework::AssetBrowser::SearchWidget(this);
+        m_searchWidget->Setup(true, false);
+        m_searchWidget->SetFilterInputInterval(AZStd::chrono::milliseconds(250)); // native value
+        m_filterModel->SetFilter(m_searchWidget->GetFilter());
+
         m_treeView = new AzToolsFramework::AssetBrowser::AssetBrowserTreeView(this);
         m_treeView->setModel(m_filterModel); // asserts it's a FilterModel, sorts by name
 
@@ -181,8 +192,8 @@ namespace CrossEngineEditor
         connect(refreshButton, &QToolButton::clicked, this, [this]() { Refresh(); });
 
         auto* toolbar = new QHBoxLayout();
+        toolbar->addWidget(m_searchWidget, 1);
         toolbar->addWidget(refreshButton);
-        toolbar->addStretch(1);
 
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
@@ -332,7 +343,7 @@ namespace CrossEngineEditor
 
         // Anything else has no open action in v1; say so on the Console trace panel.
         AZ_Warning("CrossEngineEditor", false,
-            "AssetBrowser double-click: no open action for .%s yet (v1 spawns .mdl/.xml, opens .mat/.ani).",
+            "AssetBrowser double-click: no open action for .%s yet (v1 spawns .mdl/.xml, opens .mat/.material).",
             extension.c_str());
     }
 } // namespace CrossEngineEditor

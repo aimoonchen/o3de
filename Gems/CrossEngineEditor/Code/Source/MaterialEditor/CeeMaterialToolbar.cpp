@@ -11,7 +11,6 @@
 
 #include <QComboBox>
 #include <QHBoxLayout>
-#include <QLabel>
 #include <QPushButton>
 
 namespace CrossEngineEditor
@@ -22,10 +21,6 @@ namespace CrossEngineEditor
         auto* layout = new QHBoxLayout(this);
         layout->setContentsMargins(4, 2, 4, 2);
         layout->setSpacing(4);
-
-        m_modifiedLabel = new QLabel(QStringLiteral("*"), this);
-        m_modifiedLabel->setStyleSheet(QStringLiteral("color: orange; font-weight: bold;"));
-        layout->addWidget(m_modifiedLabel);
 
         m_combo = new QComboBox(this);
         m_combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -183,6 +178,19 @@ namespace CrossEngineEditor
         if (m_redoButton)
         {
             m_redoButton->setEnabled(canRedo);
+        }
+    }
+
+    void CeeMaterialToolbar::SetDocumentModified(const AZ::Uuid& documentId, bool modified)
+    {
+        for (int i = 0; i < static_cast<int>(m_documents.size()); ++i)
+        {
+            if (m_documents[i].m_documentId == documentId)
+            {
+                const QString name = QString::fromUtf8(m_documents[i].m_displayName.c_str());
+                m_combo->setItemText(i, modified ? QStringLiteral("* ") + name : name);
+                return;
+            }
         }
     }
 } // namespace CrossEngineEditor

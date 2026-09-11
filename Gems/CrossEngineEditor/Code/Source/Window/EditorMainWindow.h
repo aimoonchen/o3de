@@ -155,10 +155,14 @@ namespace CrossEngineEditor
         // AtomToolsDocumentNotificationBus::Handler — SetDocumentId on document open.
         void OnDocumentOpened(const AZ::Uuid& documentId) override;
         void OnDocumentModified(const AZ::Uuid& documentId) override;
+        void OnDocumentSaved(const AZ::Uuid& documentId) override;
         void OnDocumentCleared(const AZ::Uuid& documentId) override;
 
         //! Refresh the material toolbar combo from the document system's open documents.
         void RefreshMaterialToolbar();
+
+        //! Re-read IsModified and refresh the combo's "* " marker for the document.
+        void UpdateMaterialDocModifiedMarker(const AZ::Uuid& documentId);
 
         //! Show a toast notification in the bottom-right corner of this window.
         void ShowToast(AzQtComponents::ToastType type, const QString& title, const QString& description);
@@ -298,7 +302,7 @@ namespace CrossEngineEditor
         //! Active material document currently bound to the inspector/preview.
         AZ::Uuid m_activeDocumentId;
 
-        //! Material toolbar combo for open documents (task 2).
+        //! Material toolbar combo for open documents (material_migration.md §6.5).
         CeeMaterialToolbar* m_materialToolbar = nullptr;
 
         //! Outliner expansion snapshot for RefreshFromEngineKeepingState.

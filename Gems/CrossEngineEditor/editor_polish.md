@@ -383,3 +383,29 @@ ProgressShield（0.3）· 主题化对话框（`FileDialog`/`MessageBox`/`InputD
 3. **样式侧零调整**：全仓零自写 setStyleSheet、新增 UI 全挂 stock 控件——复查确认为"直接复用原版"的正确姿势，维持。
 
 
+
+### 12.8 Qt 框架收官终审吸收（2026-09-11，`review_editor_final_glm.md` + `review_editor_final_kimi.md`）
+
+> 两份独立终审（glm 0🔴/4🟠/10🟡、kimi 0🔴/1🟠）一致结论：框架层达标、样式管线与原生同一、无过度设计。差距集中在图标面与材质工具条。两稿重叠项已收敛，分歧项裁决如下；合计代码 ≈60 行。
+
+**收敛项（两稿互证，已全部落地）**：
+- **材质工具条死 `m_modifiedLabel`（glm 🟡-3 = kimi 🟠-1）**：删 label + 全仓唯一一处第一方 `setStyleSheet`（"零自写 QSS" 姿态回归）；按上游惯用法（`AtomToolsDocumentMainWindow::UpdateDocumentTab`）改在 combo 文档名前加 `"* "`——新增 `CeeMaterialToolbar::SetDocumentModified`，`OnDocumentModified` 与新增 `OnDocumentSaved`（保存不发 Modified 通知，`AtomToolsDocument.cpp:329` 只发 Saved）共同驱动。
+- **主工具栏 `QStyle::SP_*` 像素图（glm 🟠-1 = kimi 🟡-I1）**：换 stock UI20 SVG。**裁决采纳 kimi 方案**：`:/stylesheet/img/UI20/{add-16,toolbar/Load,toolbar/Save,toolbar/undo,toolbar/Redo}.svg`（AzQtComponents resources.qrc 已链接、主题感知、原版编辑器变换工具条同族），弃 glm 的 legacy PNG（`Assets/Editor/UI/Icons/toolbar/standardUndo.png` 是 EditorLib 时代位图）——旧注释"原版图标集在 EditorLib"前提不实，已订正。
+- **窗口图标（glm 🟠-2 = kimi 🟡-I3）**：**采纳 kimi 1 行方案** `setWindowIcon(":/stylesheet/img/ly_application_icon.png")`（DockBar 同款原版资产，零拷贝零新 qrc）；glm 的拷 `o3de_editor.ico` 入 Gem 方案更重且同为原版资产，无保真度增量，弃。
+
+**glm 独有项（已落地）**：
+- **🟠-3 AssetBrowser 搜索组合**：加 stock `AzToolsFramework::AssetBrowser::SearchWidget`（`Setup(true,false)` 纯文本过滤 + `SetFilter` + 250ms 去抖，`AzAssetBrowserWindow.cpp` 同款组合；`StringFilter` 亲核按 displayName 匹配，CEE entry 具备）。
+- **🟠-4 材质 Ctrl+Z 死区**：最小方案——材质面板 host 上两个 `QShortcut`（WidgetWithChildrenShortcut）signal-to-signal 接 Undo/RedoRequested；场景级占位动作恒 disabled ⇒ Qt 候选集不入禁用项（qshortcutmap.cpp 亲核），零歧义；`Undo()/Redo()` 自带 CanUndo 守卫。v1.5 场景 undo 上线时需重估（代码注释已留）。
+- 🟡-1 NewLevel 双路径合并：菜单版转发 `app->CreateNewLevel()`（容器 Init + FocusOnOwningPrefab 补齐，单一实现）。🟡-5 过时注释、🟡-6 死变量 `CEE_HAVE_ADS`、🟡-7 `GodotApi.h` 补列、🟡-9 .ani 文案、🟡-10 static_cast 注释固化（**亲核修正**：bus 接口无 AZ_RTTI，azrtti_cast 不可编译——deepseek v4 同类坑，故用注释非断言）。
+
+**kimi 独有项（已落地）**：
+- 🟡-I2 header bar 7 个 stock 图标（Select/Move/Rotate/Scale/World/Local/Grid.svg，Combined 无 stock 保持纯文字）+ TextBesideIcon。
+- C1 `m_materialDocumentSystem` 改 `AZStd::unique_ptr`；C3 状态栏后端名改由工厂记录真实解析名（`m_backendName`，无参启动显示 diligent/null 而非 "default"）；C4 `CreateEngineEntity` 无后端不再置脏；C5 "Task 1/task 2" 注释改指 material_migration.md §6.5；PreviewPanel QImage 所有权注释措辞。
+- glm 🟡-8 "SS"→"§" 乱码：全量清扫 **27 处 / 11 文件**（glm 只列 5 处，余在 IMaterialSource.h、CeeMaterialDocument.* 等）。
+
+**文档漂移对齐**：Plan.md §B5 两段改写（ADS 单路径现状、命令面板数据源=ActionManager 枚举现状）。
+
+**缓办落账（维持原判，带触发条件）**：
+- **kimi I4 主工具栏不走 ToolBarManager**：手写拉取 ~20 行无功能缺口，迁移无收益增量（kimi 自判"为对齐而对齐"）；触发条件=出现第二个工具栏/需框架自动刷新。
+- **kimi I5 `Editor.qss` 不接**：201 行规则对 CEE 逐条审计全死（唯一潜伏活规则=嵌套 prefab override 高亮）；触发条件=ComponentPalette 落地（P2）或嵌套 override 出现，届时两行 API（addSearchPaths + setStyleSheet）。
+- **glm N6 ViewportSettings 缩水**：preferences 仍只有 helpers 一项（manipulator 缩放等未接）——原裁决可缓（P2 尾巴），补账在此，不另开工。

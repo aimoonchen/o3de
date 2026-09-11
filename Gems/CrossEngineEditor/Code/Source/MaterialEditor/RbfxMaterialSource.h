@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Real rbfx material backend (material_migration.md SS3).
+//! Real rbfx material backend (material_migration.md §3).
 //!
 //! Implements IMaterialSource for the rbfx (Urho3D fork) engine. Uses rbfx's
 //! ResourceCache for shared instances and SceneRendererToTexture for preview.

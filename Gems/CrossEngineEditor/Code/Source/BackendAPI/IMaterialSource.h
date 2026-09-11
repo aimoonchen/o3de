@@ -7,7 +7,7 @@
 #pragma once
 
 //! Material data source feeding the reused AtomToolsFramework document + inspector stack
-//! (material_migration.md SS2, SS4). Fourth sub-contract on IEngineBackend.
+//! (material_migration.md §2, §4). Fourth sub-contract on IEngineBackend.
 //!
 //! Two-layer model: the backend owns the LIVE material instance (the only source of truth
 //! for values) and hands the editor a schema plus a value map. The editor turns that into
@@ -16,7 +16,7 @@
 //! so the preview updates, and serializes that same instance on save. Round-trip fidelity is
 //! therefore structural: engine-specific fields the schema never exposes are never touched.
 //!
-//! Contract rules (Plan SSA6 C4): every value type below is POD or AZStd, no Qt types, no
+//! Contract rules (Plan §A6 C4): every value type below is POD or AZStd, no Qt types, no
 //! engine types. Engine-native values (Urho3D::Variant, godot::Variant,
 //! filament::MaterialInstance) stay inside the backend. Pure virtual count is asserted at 8
 //! by check_no_atom.ps1 (sentinels are not counted) - new capabilities go through a sentinel
@@ -91,7 +91,7 @@ namespace CrossEngineEditor
 
     //! One editable property. Pure metadata plus a default - the CURRENT value travels
     //! separately in MaterialPropertyValueMap, so this struct is also exactly what a curated
-    //! schema JSON file deserializes into (rbfx / Filament, SS7).
+    //! schema JSON file deserializes into (rbfx / Filament, §7).
     struct MaterialPropertyDesc final
     {
         AZ_RTTI(MaterialPropertyDesc, "{B4A2C8E1-3D5F-4A7B-9C0E-1F2D3E4A5B6C}");
@@ -112,7 +112,7 @@ namespace CrossEngineEditor
 
         //! Unit shown after the number ("m", "deg", "nits"). Free at the widget level - every
         //! stock numeric control already consumes AZ::Edit::Attributes::Suffix. Engine-native
-        //! unit, never normalized across engines (Plan SSA6 C4 normalization scope).
+        //! unit, never normalized across engines (Plan §A6 C4 normalization scope).
         AZStd::string m_suffix;
 
         AZStd::vector<AZStd::string> m_enumValues;     //!< Enum: display names, index = value
@@ -136,7 +136,7 @@ namespace CrossEngineEditor
 
         //! Optional: id of a Bool property inside this group that gates the whole feature.
         //! When set, the editor hoists that checkbox into the group header and hides its
-        //! ordinary row (SS5.4 / S7). Empty means an ordinary group. Godot fills this for
+        //! ordinary row (§5.4 / S7). Empty means an ordinary group. Godot fills this for
         //! free from PROPERTY_HINT_GROUP_ENABLE - BaseMaterial3D uses it 15 times
         //! (material.cpp:3603-3734); rbfx and Filament leave it empty.
         AZStd::string m_toggleProperty;
@@ -213,13 +213,13 @@ namespace CrossEngineEditor
         //! (mesh + light + environment) lazily on the first call. 0 clears it.
         virtual void SetPreviewMaterial(MaterialHandle handle) = 0;
 
-        //! Sentinel default - "not supported" only (Plan SSA6 C4). Default: fixed sphere.
+        //! Sentinel default - "not supported" only (Plan §A6 C4). Default: fixed sphere.
         virtual bool SetPreviewModel(PreviewModel model) { (void)model; return false; }
 
         //! Sentinel default - "not supported" only. Copy the preview image as tightly
         //! packed RGBA8 (length = width*height*4, no row padding) into outPixels.
         //!
-        //! Contract (see SS6.4.4): AcquirePreviewImage is only called while the panel is
+        //! Contract (see §6.4.4): AcquirePreviewImage is only called while the panel is
         //! dirty, i.e. after SetPropertyValue / SetPreviewMaterial / SetPreviewModel. The
         //! backend marks its preview render target dirty on those three calls and renders
         //! it on demand (rbfx: SURFACE_MANUALUPDATE + QueueUpdate, RenderSurface.cpp:79-82;

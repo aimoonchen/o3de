@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AzCore/std/smart_ptr/unique_ptr.h>
+#include <AzCore/std/string/string.h>
 
 #include <AzQtComponents/Application/AzQtApplication.h>
 #include <AzToolsFramework/API/EditorWindowRequestBus.h>
@@ -37,10 +38,10 @@ namespace CrossEngineEditor
     class EntityMirrorBridge;
     class IEngineBackend;
 
-    //! Material document system tool id (material_migration.md SS6.3).
+    //! Material document system tool id (material_migration.md §6.3).
     inline constexpr AZ::Crc32 k_ceeMaterialToolId = AZ_CRC_CE("CEE_MaterialEditor");
 
-    //! Cross-engine editor application (Plan SSB1-SSB4).
+    //! Cross-engine editor application (Plan §B1-§B4).
     //!
     //! Combines the Qt application (AzQtApplication) with the AZ tools application
     //! (ToolsApplication) so that the editor gets the EditorEntityContext, Prefab
@@ -94,16 +95,18 @@ namespace CrossEngineEditor
         void OpenPinnedInspector(const AzToolsFramework::EntityIdSet& entities) override;
         void ClosePinnedInspector(AzToolsFramework::EntityPropertyEditor* editor) override;
 
+        //! Create an empty in-memory level prefab and focus it so the Outliner has a
+        //! root container and entity creation works (Plan §A2 modern EC/Prefab workflow).
+        //! Single implementation behind both startup and the File > New Level action.
+        void CreateNewLevel();
+
     private:
         void OnIdle();
 
         //! Build the engine backend selected by --backend on the command line (Plan §B1),
         //! falling back to the best compiled-in option when the choice is unavailable.
+        //! Records the resolved backend name in m_backendName for the status bar.
         AZStd::unique_ptr<IEngineBackend> CreateBackendFromCommandLine();
-
-        //! Create an empty in-memory level prefab and focus it so the Outliner has a
-        //! root container and entity creation works (Plan §A2 modern EC/Prefab workflow).
-        void CreateNewLevel();
 
         AZStd::unique_ptr<AzQtComponents::StyleManager> m_styleManager;
 
@@ -121,9 +124,13 @@ namespace CrossEngineEditor
         //! runs. Owned here so it dies with (and before) the main window it points at.
         AZStd::unique_ptr<CeeActionsHandler> m_actionsHandler;
 
-        //! Material document system (material_migration.md SS6.3).
+        //! Material document system (material_migration.md §6.3).
         //! Created after backend registration so GetMaterialSource() is available.
-        AtomToolsFramework::AtomToolsDocumentSystem* m_materialDocumentSystem = nullptr;
+        AZStd::unique_ptr<AtomToolsFramework::AtomToolsDocumentSystem> m_materialDocumentSystem;
+
+        //! Canonical name of the backend that actually got created (status bar display;
+        //! the --backend arg may be empty or uncompiled, so the factory records it).
+        AZStd::string m_backendName;
 
         //! Last time the engine backend was stepped. The idle loop spins fast (~1 ms) to keep O3DE's
         //! system tick / Qt events responsive, but the backend (which renders a whole engine frame

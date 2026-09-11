@@ -37,6 +37,7 @@ namespace AzToolsFramework
         class AssetBrowserModel;
         class AssetBrowserFilterModel;
         class AssetBrowserTreeView;
+        class SearchWidget;
     } // namespace AssetBrowser
 } // namespace AzToolsFramework
 
@@ -114,7 +115,7 @@ namespace CrossEngineEditor
         //! v1 rebuilds instead of incrementally updating (KISS, rbfx_migration.md §2.6).
         void Refresh();
 
-        //! Target of resource-type double-clicks (.material/.mat/.ani): AtomToolsDocumentSystemRequestBus.
+        //! Target of resource-type double-clicks (.material/.mat): AtomToolsDocumentSystemRequestBus.
         void OpenOrAssignEntry(const QModelIndex& index);
 
     private:
@@ -130,6 +131,9 @@ namespace CrossEngineEditor
         AzToolsFramework::AssetBrowser::AssetBrowserModel* m_model = nullptr; // aznew, parented to this
         AzToolsFramework::AssetBrowser::AssetBrowserFilterModel* m_filterModel = nullptr; // parented to this
         AzToolsFramework::AssetBrowser::AssetBrowserTreeView* m_treeView = nullptr; // parented to this
+        //! Stock search box (same widget the native Asset Browser composes); its composite
+        //! filter is handed to the filter model once, then drives it via updatedSignal.
+        AzToolsFramework::AssetBrowser::SearchWidget* m_searchWidget = nullptr; // parented to this
         //! Shares ownership of the entry tree with the model; releasing it after a
         //! refresh cascade-deletes the old tree (rbfx_migration.md §2.7).
         AZStd::shared_ptr<AzToolsFramework::AssetBrowser::RootAssetBrowserEntry> m_root;

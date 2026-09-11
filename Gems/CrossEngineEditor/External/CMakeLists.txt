@@ -107,7 +107,6 @@ if(EXISTS ${CEE_ADS_ROOT}/CMakeLists.txt)
         target_compile_options(${CEE_ADS_TARGET} PRIVATE -Wno-error)
     endif()
 
-    set(CEE_HAVE_ADS TRUE PARENT_SCOPE)
     # No include-dir export needed: the pinned ADS target PUBLIC-exports its src/ dir, so
     # linking ads::qtadvanceddocking propagates <DockManager.h> to consumers by itself.
 else()

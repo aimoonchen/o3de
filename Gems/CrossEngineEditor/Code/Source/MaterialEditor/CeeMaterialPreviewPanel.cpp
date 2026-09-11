@@ -29,7 +29,8 @@ namespace CrossEngineEditor
         m_height = h;
         m_pixels = pixels;
 
-        // QImage wraps the pixel buffer without deep copy (implicit sharing).
+        // QImage does NOT take ownership of the pixel buffer; m_pixels (swapped in above)
+        // keeps it alive for the image's lifetime.
         m_image = QImage(m_pixels.data(), m_width, m_height, m_width * 4, QImage::Format_RGBA8888);
         m_dirty = false;
         update();

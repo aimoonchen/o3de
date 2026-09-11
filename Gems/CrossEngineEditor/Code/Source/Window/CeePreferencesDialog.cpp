@@ -209,7 +209,7 @@ namespace CrossEngineEditor
                 // Clearing: upstream SetActionHotKey has no clear concept (its validation
                 // rejects an empty sequence), so clear the QAction directly - exactly what
                 // EditorAction::SetHotKey does under the hood. Persistence stores the empty
-                // marker and startup replay skips empties (review round 1, R5).
+                // marker and startup replay applies it as the cleared state.
                 if (auto* actionManagerInternal = AZ::Interface<AzToolsFramework::ActionManagerInternalInterface>::Get();
                     QAction* action = actionManagerInternal
                         ? actionManagerInternal->GetAction(AZStd::string(actionId.toUtf8().constData()))

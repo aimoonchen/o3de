@@ -6,7 +6,7 @@
 
 #pragma once
 
-//! Material document for the cross-engine editor (material_migration.md SS5).
+//! Material document for the cross-engine editor (material_migration.md §5).
 //!
 //! Extends AtomToolsDocument to provide the material editing workflow:
 //! open / save / undo / redo / modified indicator. The backend contract

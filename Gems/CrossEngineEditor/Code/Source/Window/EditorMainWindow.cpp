@@ -13,6 +13,7 @@
 #include <Window/ViewPaneRegistry.h>
 #include <Viewport/GizmoManager.h>
 #include <Viewport/EditorViewportWidget.h>
+#include <Application/CrossEngineEditorApplication.h>
 #include <Application/EntityMirrorBridge.h>
 #include <BackendAPI/IEngineBackend.h>
 #include <BackendAPI/IEntityMirror.h>
@@ -76,6 +77,7 @@ AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
@@ -84,9 +86,9 @@ AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option")
 #include <QResizeEvent>
 #include <QSet>
 #include <QSettings>
+#include <QShortcut>
 #include <QShowEvent>
 #include <QStatusBar>
-#include <QStyle>
 #include <QTimer>
 #include <QToolBar>
 #include <QTreeView>
@@ -116,7 +118,7 @@ namespace
 
 namespace CrossEngineEditor
 {
-    // Material document type id for the document system (material_migration.md SS6.3).
+    // Material document type id for the document system (material_migration.md §6.3).
     // NOTE: The canonical definition lives in CrossEngineEditorApplication.h as k_ceeMaterialToolId.
 
     EditorMainWindow::EditorMainWindow(EntityMirrorBridge* mirrorBridge, QWidget* parent)
@@ -256,7 +258,7 @@ namespace CrossEngineEditor
                                       QStringLiteral("Core"), Qt::BottomDockWidgetArea, 500,
                                       consoleFactory });
 
-        // Material Inspector dock (material_migration.md SS6.5).
+        // Material Inspector dock (material_migration.md §6.5).
         auto materialInspectorFactory = [this] -> QWidget*
         {
             auto* host = new QWidget();
@@ -264,18 +266,18 @@ namespace CrossEngineEditor
             layout->setContentsMargins(0, 0, 0, 0);
             layout->setSpacing(0);
 
-            // Task 1: toolbar with Save/Close/DocumentSelected signals.
+            // Toolbar with Save/Close/DocumentSelected signals (material_migration.md §6.5).
             auto* toolbar = new CeeMaterialToolbar(host);
             layout->addWidget(toolbar);
 
-            // Instantiate the real property inspector (material_migration.md SS6.5).
+            // Instantiate the real property inspector (material_migration.md §6.5).
             // Use CRC of the tool id string to match the document system's registration.
             auto* inspector = new CeeMaterialDocumentInspector(
                 CrossEngineEditor::k_ceeMaterialToolId, host);
             m_materialInspector = inspector;
             layout->addWidget(inspector);
 
-            // Task 1: Connect toolbar Save/Close/DocumentSelected to the document system.
+            // Connect toolbar Save/Close/DocumentSelected to the document system.
             connect(toolbar, &CeeMaterialToolbar::SaveRequested, this, [this]()
             {
                 if (m_materialInspector)
@@ -326,6 +328,21 @@ namespace CrossEngineEditor
                 }
             });
 
+            // Ctrl+Z / Ctrl+Shift+Z reach the material document while the material panel owns
+            // the focus (editor_polish.md §12.8): the scene-level placeholder actions holding
+            // those keys are disabled, and a disabled shortcut never enters Qt's candidate set
+            // (qshortcutmap.cpp), so this stays unambiguous. When scene undo ships (rbfx v1.5),
+            // revisit this split. Undo()/Redo() self-guard on CanUndo/CanRedo, so firing while
+            // the buttons are disabled is a no-op.
+            auto addDocShortcut = [host, toolbar](const QString& key, void (CeeMaterialToolbar::*signal)())
+            {
+                auto* shortcut = new QShortcut(QKeySequence(key), host);
+                shortcut->setContext(Qt::WidgetWithChildrenShortcut);
+                connect(shortcut, &QShortcut::activated, toolbar, signal);
+            };
+            addDocShortcut(QStringLiteral("Ctrl+Z"), &CeeMaterialToolbar::UndoRequested);
+            addDocShortcut(QStringLiteral("Ctrl+Shift+Z"), &CeeMaterialToolbar::RedoRequested);
+
             // Store toolbar pointer so OnDocumentOpened/OnDocumentCleared can refresh it.
             m_materialToolbar = toolbar;
 
@@ -339,7 +356,7 @@ namespace CrossEngineEditor
             return host;
         };
 
-        // Material Preview dock (material_migration.md SS6.4).
+        // Material Preview dock (material_migration.md §6.4).
         auto materialPreviewFactory = [this] -> QWidget*
         {
             auto* panel = new CeeMaterialPreviewPanel(this);
@@ -396,13 +413,20 @@ namespace CrossEngineEditor
         bar->setObjectName(QStringLiteral("ViewportHeaderBar"));
         bar->setMovable(false);
         bar->setFloatable(false);
+        // Icon + label: the icons come from the stock UI20 SVG set shipped in AzQtComponents'
+        // resources.qrc (already linked) - the same files the native transform toolbar uses.
+        bar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
 
         auto addModeAction = [this, bar](
-                                  const QString& text, const QString& primaryKey, const QString& altKey,
-                                  void (EditorMainWindow::*slot)())
+                                  const QString& text, const char* iconPath, const QString& primaryKey,
+                                  const QString& altKey, void (EditorMainWindow::*slot)())
         {
             QAction* action = bar->addAction(text);
             action->setCheckable(true);
+            if (iconPath != nullptr)
+            {
+                action->setIcon(QIcon(QString::fromUtf8(iconPath)));
+            }
             // Primary industry-standard key plus the legacy numeric key as an alternate.
             action->setShortcuts(QList<QKeySequence>{ QKeySequence(primaryKey), QKeySequence(altKey) });
             // Same context as the Edit actions (O3DE ActionManager alignment), and the action
@@ -417,15 +441,21 @@ namespace CrossEngineEditor
         auto* group = new QActionGroup(this);
         group->setExclusive(true);
         QAction* select = addModeAction(
-            QStringLiteral("Select"), QStringLiteral("Q"), QString(), &EditorMainWindow::OnTransformModeSelect);
+            QStringLiteral("Select"), ":/stylesheet/img/UI20/toolbar/Select.svg", QStringLiteral("Q"), QString(),
+            &EditorMainWindow::OnTransformModeSelect);
         QAction* move = addModeAction(
-            QStringLiteral("Move"), QStringLiteral("W"), QStringLiteral("1"), &EditorMainWindow::OnTransformModeMove);
+            QStringLiteral("Move"), ":/stylesheet/img/UI20/toolbar/Move.svg", QStringLiteral("W"), QStringLiteral("1"),
+            &EditorMainWindow::OnTransformModeMove);
         QAction* rotate = addModeAction(
-            QStringLiteral("Rotate"), QStringLiteral("E"), QStringLiteral("2"), &EditorMainWindow::OnTransformModeRotate);
+            QStringLiteral("Rotate"), ":/stylesheet/img/UI20/toolbar/Rotate.svg", QStringLiteral("E"), QStringLiteral("2"),
+            &EditorMainWindow::OnTransformModeRotate);
         QAction* scale = addModeAction(
-            QStringLiteral("Scale"), QStringLiteral("R"), QStringLiteral("3"), &EditorMainWindow::OnTransformModeScale);
+            QStringLiteral("Scale"), ":/stylesheet/img/UI20/toolbar/Scale.svg", QStringLiteral("R"), QStringLiteral("3"),
+            &EditorMainWindow::OnTransformModeScale);
+        // Combined is a CEE-only mode with no stock icon - text alone.
         QAction* combined = addModeAction(
-            QStringLiteral("Combined"), QStringLiteral("T"), QStringLiteral("4"), &EditorMainWindow::OnTransformModeCombined);
+            QStringLiteral("Combined"), nullptr, QStringLiteral("T"), QStringLiteral("4"),
+            &EditorMainWindow::OnTransformModeCombined);
         group->addAction(select);
         group->addAction(move);
         group->addAction(rotate);
@@ -459,10 +489,11 @@ namespace CrossEngineEditor
         // Local aligns them to the entity's orientation.
         auto* spaceGroup = new QActionGroup(this);
         spaceGroup->setExclusive(true);
-        auto addSpaceAction = [this, bar, spaceGroup](const QString& text, GizmoSpace space)
+        auto addSpaceAction = [this, bar, spaceGroup](const QString& text, const char* iconPath, GizmoSpace space)
         {
             QAction* action = bar->addAction(text);
             action->setCheckable(true);
+            action->setIcon(QIcon(QString::fromUtf8(iconPath)));
             connect(action, &QAction::triggered, this, [space]()
             {
                 GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetGizmoSpace, space);
@@ -470,8 +501,8 @@ namespace CrossEngineEditor
             spaceGroup->addAction(action);
             return action;
         };
-        QAction* worldSpace = addSpaceAction(QStringLiteral("World"), GizmoSpace::World);
-        addSpaceAction(QStringLiteral("Local"), GizmoSpace::Local);
+        QAction* worldSpace = addSpaceAction(QStringLiteral("World"), ":/stylesheet/img/UI20/toolbar/World.svg", GizmoSpace::World);
+        addSpaceAction(QStringLiteral("Local"), ":/stylesheet/img/UI20/toolbar/Local.svg", GizmoSpace::Local);
         worldSpace->setChecked(true); // default space is World.
 
         bar->addSeparator();
@@ -480,6 +511,7 @@ namespace CrossEngineEditor
         // the current style's step increments; per-increment tuning lives in Preferences.
         QAction* snap = bar->addAction(QStringLiteral("Snap"));
         snap->setCheckable(true);
+        snap->setIcon(QIcon(QStringLiteral(":/stylesheet/img/UI20/toolbar/Grid.svg")));
         connect(snap, &QAction::toggled, this, [](bool enabled)
         {
             GizmoControlRequestBus::Broadcast(&GizmoControlRequests::SetSnapEnabled, enabled);
@@ -556,8 +588,9 @@ namespace CrossEngineEditor
             {
                 RefreshFromEngineKeepingState();
             }
+            // Only an actual engine-side creation dirties the scene.
+            MarkSceneDirty();
         }
-        MarkSceneDirty();
         return createdId;
     }
 
@@ -779,10 +812,13 @@ namespace CrossEngineEditor
 
     void EditorMainWindow::NewLevel()
     {
-        // Recreate the level as a fresh in-memory root prefab (Plan §B4).
-        if (auto* ownership = AZ::Interface<AzToolsFramework::PrefabEditorEntityOwnershipInterface>::Get())
+        // Single source of truth for level creation is the application's CreateNewLevel
+        // (container Init + prefab focus; the menu path previously skipped both). The object
+        // behind QCoreApplication::instance() is the one CrossEngineEditorApplication by
+        // construction, so the cast cannot fail.
+        if (auto* app = static_cast<CrossEngineEditorApplication*>(QCoreApplication::instance()))
         {
-            ownership->CreateNewLevelPrefab("NewLevel.prefab", "");
+            app->CreateNewLevel();
         }
         SetSceneDisplayName(QStringLiteral("NewLevel.prefab"));
         ClearSceneDirty();
@@ -977,6 +1013,8 @@ namespace CrossEngineEditor
         {
             m_materialToolbar->AddDocument(documentId, absPath);
         }
+        // A freshly created document can already be modified - sync the "* " marker now.
+        UpdateMaterialDocModifiedMarker(documentId);
 
         // Update undo/redo button state for the newly opened document.
         bool canUndo = false;
@@ -991,8 +1029,10 @@ namespace CrossEngineEditor
         }
 
         // Bind the live material handle to the preview panel.
-        // We know the document system created a CeeMaterialDocument for this uuid.
-        // Query its absolute path through the request bus, then cast down to get the handle.
+        // Only one document type (CeeMaterialDocument) is registered with the document system,
+        // so every handler on this bus is one and the static_cast is exact; registering a
+        // second type would have to replace it with a real type check (the bus interface has
+        // no RTTI, so azrtti_cast is not an option).
         AtomToolsFramework::AtomToolsDocumentRequests* docRequests = AtomToolsFramework::AtomToolsDocumentRequestBus::FindFirstHandler(documentId);
         if (auto* ceeDoc = static_cast<CeeMaterialDocument*>(docRequests))
         {
@@ -1051,12 +1091,33 @@ namespace CrossEngineEditor
             m_materialToolbar->UpdateUndoRedoState(canUndo, canRedo);
         }
 
+        UpdateMaterialDocModifiedMarker(documentId);
+
         // Refresh the material preview only for the active material document so edits
         // elsewhere do not thrash the preview widget.
         if (m_activeDocumentId == documentId && m_materialPreviewPanel)
         {
             m_materialPreviewPanel->MarkDirty();
         }
+    }
+
+    void EditorMainWindow::OnDocumentSaved(const AZ::Uuid& documentId)
+    {
+        // Saving flips IsModified back to false without an OnDocumentModified notification
+        // (AtomToolsDocument::Save emits OnDocumentSaved only).
+        UpdateMaterialDocModifiedMarker(documentId);
+    }
+
+    void EditorMainWindow::UpdateMaterialDocModifiedMarker(const AZ::Uuid& documentId)
+    {
+        if (!m_materialToolbar)
+        {
+            return;
+        }
+        bool isModified = false;
+        AtomToolsFramework::AtomToolsDocumentRequestBus::EventResult(
+            isModified, documentId, &AtomToolsFramework::AtomToolsDocumentRequests::IsModified);
+        m_materialToolbar->SetDocumentModified(documentId, isModified);
     }
 
     void EditorMainWindow::RefreshMaterialToolbar()
@@ -1126,28 +1187,32 @@ namespace CrossEngineEditor
         }
 
         // --- Main toolbar (P1-16): level workflow + undo/redo, AzQtComponents main-toolbar
-        // style. Icons are the style's standard pixmaps (the native editor's icon set lives in
-        // the Atom-bound EditorLib - stock pixmaps keep this dependency-free).
+        // style. Icons are the stock UI20 SVG set from AzQtComponents' resources.qrc (already
+        // linked) - the same icon family the native editor's own toolbar actions use
+        // (EditorTransformComponentSelection.cpp). A null iconPath leaves the action text-only,
+        // which is what the native File/Edit actions are.
         m_mainToolBar = addToolBar(QStringLiteral("Main"));
         m_mainToolBar->setObjectName(QStringLiteral("MainToolBar"));
         m_mainToolBar->setMovable(false);
         AzQtComponents::ToolBar::addMainToolBarStyle(m_mainToolBar);
 
-        QStyle* currentStyle = style();
-        auto addToolAction = [this, actionManagerInternal, currentStyle](AZStd::string_view actionId, QStyle::StandardPixmap icon)
+        auto addToolAction = [this, actionManagerInternal](AZStd::string_view actionId, const char* iconPath)
         {
             if (QAction* action = actionManagerInternal->GetAction(AZStd::string(actionId)))
             {
-                action->setIcon(currentStyle->standardIcon(icon));
+                if (iconPath != nullptr)
+                {
+                    action->setIcon(QIcon(QString::fromUtf8(iconPath)));
+                }
                 m_mainToolBar->addAction(action);
             }
         };
-        addToolAction(CeeActions::FileNew, QStyle::SP_FileDialogNewFolder);
-        addToolAction(CeeActions::FileOpen, QStyle::SP_DirOpenIcon);
-        addToolAction(CeeActions::FileSave, QStyle::SP_DialogSaveButton);
+        addToolAction(CeeActions::FileNew, ":/stylesheet/img/UI20/add-16.svg");
+        addToolAction(CeeActions::FileOpen, ":/stylesheet/img/UI20/toolbar/Load.svg");
+        addToolAction(CeeActions::FileSave, ":/stylesheet/img/UI20/toolbar/Save.svg");
         m_mainToolBar->addSeparator();
-        addToolAction(CeeActions::EditUndo, QStyle::SP_ArrowBack);
-        addToolAction(CeeActions::EditRedo, QStyle::SP_ArrowForward);
+        addToolAction(CeeActions::EditUndo, ":/stylesheet/img/UI20/toolbar/undo.svg");
+        addToolAction(CeeActions::EditRedo, ":/stylesheet/img/UI20/toolbar/Redo.svg");
 
         // --- Dynamic menu content (S3 exceptions; OnActionManagerReady runs once - A7).
         auto hookMenu = [menuManagerInternal, this](AZStd::string_view menuId, auto&& slot)
@@ -1522,7 +1587,7 @@ namespace CrossEngineEditor
 
     void EditorMainWindow::closeEvent(QCloseEvent* event)
     {
-        // Material documents first (material_migration.md SS6.3).
+        // Material documents first (material_migration.md §6.3).
         // If the active material document has unsaved changes, prompt before closing.
         if (m_materialInspector)
         {

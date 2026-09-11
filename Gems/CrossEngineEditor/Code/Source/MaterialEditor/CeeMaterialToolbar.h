@@ -18,7 +18,6 @@
 
 class QComboBox;
 class QPushButton;
-class QLabel;
 
 namespace CrossEngineEditor
 {
@@ -40,6 +39,10 @@ namespace CrossEngineEditor
 
         //! Update undo/redo button enable state from CanUndo/CanRedo.
         void UpdateUndoRedoState(bool canUndo, bool canRedo);
+
+        //! Prefix the document's combo entry with "* " while it is modified (the upstream
+        //! convention, AtomToolsDocumentMainWindow::UpdateDocumentTab).
+        void SetDocumentModified(const AZ::Uuid& documentId, bool modified);
 
         //! Get the currently selected document ID.
         [[nodiscard]] AZ::Uuid CurrentDocumentId() const;
@@ -67,13 +70,12 @@ namespace CrossEngineEditor
         QPushButton* m_closeButton = nullptr;
         QPushButton* m_undoButton = nullptr;
         QPushButton* m_redoButton = nullptr;
-        QLabel* m_modifiedLabel = nullptr;
 
         struct DocumentEntry
         {
             AZStd::string m_path;
-            AZStd::string m_displayName;
-            AZ::Uuid m_documentId;  //!< document id for live tracking (task 2)
+            AZStd::string m_displayName;  //!< base file name; the "* " modified marker is combo-text only
+            AZ::Uuid m_documentId;
         };
         AZStd::vector<DocumentEntry> m_documents;
     };

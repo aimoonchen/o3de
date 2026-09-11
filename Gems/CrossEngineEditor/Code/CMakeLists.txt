@@ -160,6 +160,7 @@ if(CEE_HAVE_GODOT)
     # Keep out of unity builds: the Godot GDExtension headers define many macros/enums that
     # clash across translation units when merged (same rationale as rbfx/Diligent).
     target_sources(CrossEngineEditor PRIVATE
+        Source/Backends/GodotApi.h
         Source/Backends/GodotBackend.h
         Source/Backends/GodotBackend.cpp
         Source/Backends/GodotMaterialSource.h

@@ -6,7 +6,7 @@
  *
  */
 
-// Vendored from AtomToolsFramework (material_migration.md SS3.1).
+// Vendored from AtomToolsFramework (material_migration.md §3.1).
 // Original: Gems/Atom/Tools/AtomToolsFramework/Code/Source/Inspector/PropertyWidgets/PropertyStringBrowseEditCtrl.cpp
 // Upstream commit: d31e63e49d
 // Only the StringFilePath and StringBrowseEdit property handlers are needed;
